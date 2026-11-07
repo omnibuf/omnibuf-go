@@ -2506,4 +2506,41 @@ func TestConformanceRunnerAdapterHarness(t *testing.T) {
 		t.Fatalf("self-contained conformance-runner CLI failed: %v\n%s", err, out)
 	}
 	t.Logf("\n%s", strings.TrimSpace(string(out)))
+
+	// 3. Verify --tier filtering restricts execution to the requested tiers
+	if _, err := conformance.ParseTierFilter("invalid_tier"); err == nil {
+		t.Fatalf("expected ParseTierFilter to reject unknown tier")
+	}
+	blindFilter, err := conformance.ParseTierFilter("blind")
+	if err != nil {
+		t.Fatalf("ParseTierFilter(blind) failed: %v", err)
+	}
+	blindSum, err := conformance.RunSuiteWithOptions(conformance.RunOptions{
+		AdapterBinary: adapterBin,
+		EnabledTiers:  blindFilter,
+	})
+	if err != nil {
+		t.Fatalf("RunSuiteWithOptions(blind) failed: %v", err)
+	}
+	if blindSum.ByTier[conformance.TestTierBlind] == 0 || blindSum.TotalCases != blindSum.ByTier[conformance.TestTierBlind] {
+		t.Fatalf("expected only TIER_BLIND cases to run, got ByTier=%v Total=%d", blindSum.ByTier, blindSum.TotalCases)
+	}
+
+	// #nosec G204 -- runnerBin and adapterBin are built in t.TempDir() above
+	cmdTier := exec.Command(runnerBin, "--tier=blind,struct", "--json", adapterBin)
+	cmdTier.Dir = tmpDir
+	tierOut, err := cmdTier.CombinedOutput()
+	if err != nil {
+		t.Fatalf("conformance-runner --tier=blind,struct failed: %v\n%s", err, tierOut)
+	}
+	var parsedTierSum conformance.Summary
+	if err := json.Unmarshal(tierOut, &parsedTierSum); err != nil {
+		t.Fatalf("unmarshal --json output failed: %v\n%s", err, tierOut)
+	}
+	if parsedTierSum.ByTier[conformance.TestTierPlugin] != 0 || parsedTierSum.ByTier[conformance.TestTierProtobufTypes] != 0 {
+		t.Fatalf("expected plugin and proto tiers to be 0 when --tier=blind,struct, got %v", parsedTierSum.ByTier)
+	}
+	if parsedTierSum.ByTier[conformance.TestTierBlind] == 0 || parsedTierSum.ByTier[conformance.TestTierAnnotatedStruct] == 0 {
+		t.Fatalf("expected blind and struct tiers > 0 when --tier=blind,struct, got %v", parsedTierSum.ByTier)
+	}
 }

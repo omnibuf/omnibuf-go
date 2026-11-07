@@ -248,6 +248,40 @@ type RunOptions struct {
 	AdapterArgs []string
 	// CorpusPath optionally overrides the built-in embedded conformance corpus with an external JSON file.
 	CorpusPath string
+	// EnabledTiers optionally restricts execution to the specified TestTier set. When nil or empty, all tiers run.
+	EnabledTiers map[TestTier]bool
+}
+
+// ParseTierFilter parses a comma-separated list of tier names (e.g. "blind,struct,proto,plugin")
+// into a TestTier filter map. Returns nil when spec is empty (meaning all tiers are enabled).
+func ParseTierFilter(spec string) (map[TestTier]bool, error) {
+	trimmed := strings.TrimSpace(spec)
+	if trimmed == "" {
+		return nil, nil
+	}
+	enabled := make(map[TestTier]bool)
+	for _, part := range strings.Split(trimmed, ",") {
+		token := strings.ToLower(strings.TrimSpace(part))
+		if token == "" {
+			continue
+		}
+		switch token {
+		case "1", "plugin", "tier_plugin":
+			enabled[TestTierPlugin] = true
+		case "2", "proto", "protobuf", "protobuf_types", "tier_protobuf_types":
+			enabled[TestTierProtobufTypes] = true
+		case "3", "struct", "annotated", "annotated_struct", "tier_annotated_struct":
+			enabled[TestTierAnnotatedStruct] = true
+		case "4", "blind", "tier_blind":
+			enabled[TestTierBlind] = true
+		default:
+			return nil, fmt.Errorf("unknown conformance tier %q (valid tiers: blind, struct, proto, plugin)", part)
+		}
+	}
+	if len(enabled) == 0 {
+		return nil, nil
+	}
+	return enabled, nil
 }
 
 // LoadCorpus loads the conformance corpus from corpusPath when non-empty, or from the
@@ -360,6 +394,10 @@ func RunSuiteWithOptions(opts RunOptions) (*Summary, error) {
 		sum.ByTier[tier]++
 	}
 
+	tierEnabled := func(tier TestTier) bool {
+		return len(opts.EnabledTiers) == 0 || opts.EnabledTiers[tier]
+	}
+
 	// 1. Execute all Valid Vectors across supported tiers
 	for _, vec := range corpus.ValidVectors {
 		rawWire, err := hex.DecodeString(vec.WireHex)
@@ -370,7 +408,7 @@ func RunSuiteWithOptions(opts RunOptions) (*Summary, error) {
 		}
 
 		// 1A. Schema-less Blind Inspection Tier (all valid vectors)
-		{
+		if tierEnabled(TestTierBlind) {
 			req := &ConformanceRequest{
 				TestName:              vec.Name + "/Blind",
 				MessageType:           vec.Schema,
@@ -403,6 +441,9 @@ func RunSuiteWithOptions(opts RunOptions) (*Summary, error) {
 		// Determine which schema tiers apply to this vector's Schema
 		tiers := tiersForSchema(vec.Schema)
 		for _, tier := range tiers {
+			if !tierEnabled(tier) {
+				continue
+			}
 			req := &ConformanceRequest{
 				TestName:              vec.Name + "/" + tier.String(),
 				MessageType:           canonicalMessageType(vec.Schema),
@@ -557,7 +598,7 @@ func RunSuiteWithOptions(opts RunOptions) (*Summary, error) {
 		}
 
 		// 2A. Blind tier MUST reject every malformed wire case with ParseError != ""
-		{
+		if tierEnabled(TestTierBlind) {
 			req := &ConformanceRequest{
 				TestName:              "Invalid/" + ic.Name + "/Blind",
 				MessageType:           "omnibuf.conformance.TestAllTypes",
@@ -580,6 +621,9 @@ func RunSuiteWithOptions(opts RunOptions) (*Summary, error) {
 
 		// 2B. Schema-aware tiers (AnnotatedStruct, ProtobufTypes, Plugin) MUST never crash/panic on malformed bytes
 		for _, tier := range []TestTier{TestTierAnnotatedStruct, TestTierProtobufTypes, TestTierPlugin} {
+			if !tierEnabled(tier) {
+				continue
+			}
 			req := &ConformanceRequest{
 				TestName:              "Invalid/" + ic.Name + "/" + tier.String(),
 				MessageType:           "omnibuf.bench.PeerUpdate",

@@ -1,0 +1,245 @@
+{
+  "language": "go",
+  "runtime": "Go 1.27.1",
+  "platform": "darwin",
+  "arch": "arm64",
+  "cpu": "Apple M1 Pro",
+  "workload": "PeerUpdate",
+  "categories": [
+    {
+      "id": "encode",
+      "title": "Full Message Encode Speed (PeerUpdate)",
+      "unit": "ns",
+      "results": [
+        {
+          "name": "OmniBuf (Generated)",
+          "nsPerOp": 126,
+          "opsPerSec": 7911392,
+          "wireBytes": 366,
+          "highlight": true,
+          "baseline": true
+        },
+        {
+          "name": "OmniBuf (Go Struct Tags)",
+          "nsPerOp": 354,
+          "opsPerSec": 2827255,
+          "wireBytes": 366,
+          "highlight": true
+        },
+        {
+          "name": "Avro (Raw Binary)",
+          "nsPerOp": 543,
+          "opsPerSec": 1842978,
+          "bytesPerOp": 320,
+          "allocsPerOp": 1,
+          "wireBytes": 313
+        },
+        {
+          "name": "FlatBuffers",
+          "nsPerOp": 725,
+          "opsPerSec": 1380072,
+          "wireBytes": 600
+        },
+        {
+          "name": "Protobuf",
+          "nsPerOp": 798,
+          "opsPerSec": 1253604,
+          "wireBytes": 341
+        },
+        {
+          "name": "Cap'n Proto",
+          "nsPerOp": 1390,
+          "opsPerSec": 719424,
+          "bytesPerOp": 720,
+          "allocsPerOp": 3,
+          "wireBytes": 560
+        },
+        {
+          "name": "JSON (encoding/json)",
+          "nsPerOp": 2229,
+          "opsPerSec": 448632,
+          "bytesPerOp": 896,
+          "allocsPerOp": 1,
+          "wireBytes": 803
+        },
+        {
+          "name": "MessagePack",
+          "nsPerOp": 2241,
+          "opsPerSec": 446229,
+          "bytesPerOp": 2056,
+          "allocsPerOp": 7,
+          "wireBytes": 656
+        },
+        {
+          "name": "JSON (encoding/json/v2)",
+          "nsPerOp": 2261,
+          "opsPerSec": 442282,
+          "bytesPerOp": 896,
+          "allocsPerOp": 1,
+          "wireBytes": 803
+        }
+      ]
+    },
+    {
+      "id": "decode",
+      "title": "Full Message Decode Speed (PeerUpdate)",
+      "unit": "ns",
+      "results": [
+        {
+          "name": "OmniBuf (Generated)",
+          "nsPerOp": 251,
+          "opsPerSec": 3992016,
+          "highlight": true,
+          "baseline": true
+        },
+        {
+          "name": "FlatBuffers",
+          "nsPerOp": 253,
+          "opsPerSec": 3947888
+        },
+        {
+          "name": "OmniBuf (Go Struct Tags)",
+          "nsPerOp": 453,
+          "opsPerSec": 2205558,
+          "highlight": true
+        },
+        {
+          "name": "Avro (Raw Binary)",
+          "nsPerOp": 540,
+          "opsPerSec": 1851166,
+          "bytesPerOp": 211
+        },
+        {
+          "name": "Cap'n Proto",
+          "nsPerOp": 993,
+          "opsPerSec": 1006847,
+          "bytesPerOp": 240,
+          "allocsPerOp": 4
+        },
+        {
+          "name": "Protobuf",
+          "nsPerOp": 1368,
+          "opsPerSec": 730994,
+          "bytesPerOp": 1072,
+          "allocsPerOp": 25
+        },
+        {
+          "name": "MessagePack",
+          "nsPerOp": 2838,
+          "opsPerSec": 352361,
+          "bytesPerOp": 352,
+          "allocsPerOp": 15
+        },
+        {
+          "name": "JSON (encoding/json/v2)",
+          "nsPerOp": 3589,
+          "opsPerSec": 278629
+        },
+        {
+          "name": "JSON (encoding/json)",
+          "nsPerOp": 4543,
+          "opsPerSec": 220119
+        }
+      ]
+    },
+    {
+      "id": "lookup_city",
+      "title": "Read a Single Nested Field (peer.location.city)",
+      "unit": "ns",
+      "results": [
+        {
+          "name": "Cap'n Proto",
+          "nsPerOp": 6,
+          "opsPerSec": 161733786
+        },
+        {
+          "name": "FlatBuffers",
+          "nsPerOp": 35,
+          "opsPerSec": 28694405
+        },
+        {
+          "name": "OmniBuf",
+          "nsPerOp": 123,
+          "opsPerSec": 8156607,
+          "highlight": true,
+          "baseline": true
+        },
+        {
+          "name": "Avro (Raw Binary)",
+          "nsPerOp": 644,
+          "opsPerSec": 1553277,
+          "bytesPerOp": 1504,
+          "allocsPerOp": 4
+        },
+        {
+          "name": "MessagePack",
+          "nsPerOp": 777,
+          "opsPerSec": 1286836,
+          "bytesPerOp": 160,
+          "allocsPerOp": 14
+        },
+        {
+          "name": "Protobuf",
+          "nsPerOp": 1314,
+          "opsPerSec": 761035,
+          "bytesPerOp": 1072,
+          "allocsPerOp": 25
+        }
+      ]
+    },
+    {
+      "id": "mutate_sequence",
+      "title": "Selective Single-Field Mutation (peer.sequence)",
+      "unit": "ns",
+      "results": [
+        {
+          "name": "OmniBuf (Opaque Splice)",
+          "nsPerOp": 287,
+          "opsPerSec": 3481894,
+          "highlight": true,
+          "baseline": true
+        },
+        {
+          "name": "FlatBuffers",
+          "nsPerOp": 984,
+          "opsPerSec": 1016570
+        },
+        {
+          "name": "Avro (Raw Binary)",
+          "nsPerOp": 1111,
+          "opsPerSec": 900090,
+          "bytesPerOp": 532,
+          "allocsPerOp": 1
+        },
+        {
+          "name": "Protobuf",
+          "nsPerOp": 2056,
+          "opsPerSec": 486381,
+          "bytesPerOp": 1072,
+          "allocsPerOp": 25
+        },
+        {
+          "name": "Cap'n Proto",
+          "nsPerOp": 2482,
+          "opsPerSec": 402901,
+          "bytesPerOp": 960,
+          "allocsPerOp": 7
+        },
+        {
+          "name": "MessagePack",
+          "nsPerOp": 5106,
+          "opsPerSec": 195848,
+          "bytesPerOp": 2410,
+          "allocsPerOp": 22
+        },
+        {
+          "name": "JSON (encoding/json)",
+          "nsPerOp": 7038,
+          "opsPerSec": 142086,
+          "bytesPerOp": 898,
+          "allocsPerOp": 1
+        }
+      ]
+    }
+  ]
+}

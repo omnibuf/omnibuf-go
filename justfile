@@ -51,9 +51,14 @@ go-fmt:
 go-fmt-check:
     golangci-lint fmt --diff
 
-# Run all Go benchmarks with memory allocation stats and persist raw output to testdata/benchmarks.txt
+# Run all Go benchmarks with memory allocation stats and persist output to testdata/benchmarks.txt and testdata/benchmarks.json
 bench:
     GOEXPERIMENT=jsonv2 go test -bench=. -benchmem . | tee testdata/benchmarks.txt
+    go run ./internal/cmd/exportbench
+
+# Parse testdata/benchmarks.txt into structured testdata/benchmarks.json
+export-bench:
+    go run ./internal/cmd/exportbench
 
 # Regenerate internal/pb/peer_omnibuf.pb.go, internal/pb/conformance_omnibuf.pb.go, and internal/pb/peer_vtproto.pb.go
 generate:

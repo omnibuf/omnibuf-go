@@ -1,4 +1,4 @@
-name: Release protoc-gen-omnibuf Binaries
+name: Release Binaries
 
 on:
   push:
@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   release:
-    name: Build & Publish protoc-gen-omnibuf Release Assets
+    name: Build & Publish protoc-gen-omnibuf & conformance-runner Release Assets
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -28,7 +28,7 @@ jobs:
       - name: Run CI checks
         run: just ci
 
-      - name: Build cross-platform protoc-gen-omnibuf archives
+      - name: Build cross-platform release archives
         run: |
           VERSION="${GITHUB_REF_NAME:-dev}"
           mkdir -p dist
@@ -39,24 +39,30 @@ jobs:
             "linux:amd64:tar.gz"
             "windows:amd64:zip"
           )
-          for target in "${targets[@]}"; do
-            IFS=":" read -r goos goarch ext <<< "$target"
-            bin="protoc-gen-omnibuf"
-            if [[ "$goos" == "windows" ]]; then
-              bin="protoc-gen-omnibuf.exe"
-            fi
-            stage="dist/protoc-gen-omnibuf-${VERSION}-${goos}-${goarch}"
-            mkdir -p "$stage"
-            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "$stage/$bin" ./cmd/protoc-gen-omnibuf
-            cp LICENSE README.md "$stage/"
-            if [[ "$ext" == "zip" ]]; then
-              (cd dist && zip -qr "protoc-gen-omnibuf-${goos}-${goarch}.zip" "$(basename "$stage")")
-            else
-              tar -C dist -czf "dist/protoc-gen-omnibuf-${goos}-${goarch}.tar.gz" "$(basename "$stage")"
-            fi
-            rm -rf "$stage"
+          binaries=(
+            "protoc-gen-omnibuf"
+            "conformance-runner"
+          )
+          for name in "${binaries[@]}"; do
+            for target in "${targets[@]}"; do
+              IFS=":" read -r goos goarch ext <<< "$target"
+              bin="$name"
+              if [[ "$goos" == "windows" ]]; then
+                bin="${name}.exe"
+              fi
+              stage="dist/${name}-${VERSION}-${goos}-${goarch}"
+              mkdir -p "$stage"
+              CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "$stage/$bin" "./cmd/$name"
+              cp LICENSE README.md "$stage/"
+              if [[ "$ext" == "zip" ]]; then
+                (cd dist && zip -qr "${name}-${goos}-${goarch}.zip" "$(basename "$stage")")
+              else
+                tar -C dist -czf "dist/${name}-${goos}-${goarch}.tar.gz" "$(basename "$stage")"
+              fi
+              rm -rf "$stage"
+            done
           done
-          (cd dist && sha256sum protoc-gen-omnibuf-* > checksums.txt)
+          (cd dist && sha256sum protoc-gen-omnibuf-* conformance-runner-* > checksums.txt)
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')

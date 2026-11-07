@@ -21,6 +21,7 @@ import (
 
 func main() {
 	corpusPath := flag.String("corpus", "", "Optional path to override the built-in embedded conformance_corpus.json")
+	tierFilter := flag.String("tier", "", "Optional comma-separated tier filter (blind,struct,proto,plugin)")
 	jsonOutput := flag.Bool("json", false, "Emit conformance summary as JSON")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags] <client-binary> [client-args...]\n", os.Args[0])
@@ -33,10 +34,17 @@ func main() {
 		os.Exit(2)
 	}
 
+	enabledTiers, err := conformance.ParseTierFilter(*tierFilter)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "conformance-runner error: %v\n", err)
+		os.Exit(2)
+	}
+
 	sum, err := conformance.RunSuiteWithOptions(conformance.RunOptions{
 		AdapterBinary: flag.Arg(0),
 		AdapterArgs:   flag.Args()[1:],
 		CorpusPath:    *corpusPath,
+		EnabledTiers:  enabledTiers,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "conformance-runner error: %v\n", err)
