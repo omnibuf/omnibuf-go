@@ -244,3 +244,60 @@ func TestBlindSchemaOverlayNestedMerges(t *testing.T) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
+
+func TestUnknownFieldDepthAndReservedTagsAndSpliceValidation(t *testing.T) {
+	// 1. Unknown nested WireArray exceeding MaxNestingDepth must be rejected across all schema-aware tiers.
+	deepUnknown := []byte{0x21, 0x05} // field #1 uint = 2 inside deepest array
+	for range ob.MaxNestingDepth + 2 {
+		body := wire.AppendVarint([]byte{wire.WireSubMsg}, 1)
+		body = wire.AppendVarint(body, uint64(len(deepUnknown)))
+		body = append(body, deepUnknown...)
+		pkt := wire.AppendVarint(nil, 999<<4|uint64(wire.WireArray))
+		pkt = wire.AppendVarint(pkt, uint64(len(body)))
+		deepUnknown = append(pkt, body...)
+	}
+	var genMsg pb.TestAllTypes
+	if err := genMsg.UnmarshalOmniBuf(deepUnknown, false); err == nil {
+		t.Fatal("generated decoder accepted deep unknown field > MaxNestingDepth")
+	}
+	if err := ob.Unmarshal(deepUnknown, &genMsg); err == nil {
+		t.Fatal("protoreflect decoder accepted deep unknown field > MaxNestingDepth")
+	}
+	type taggedMsg struct {
+		ID uint32 `omnibuf:"1"`
+	}
+	var tm taggedMsg
+	if err := ob.Unmarshal(deepUnknown, &tm); err == nil {
+		t.Fatal("table decoder accepted deep unknown field > MaxNestingDepth")
+	}
+
+	// 2. Protobuf reserved field numbers 19000..19999 must be rejected in struct tags.
+	type reservedTagMsg struct {
+		Bad uint32 `omnibuf:"19000"`
+	}
+	if _, err := ob.Marshal(&reservedTagMsg{Bad: 1}); err == nil {
+		t.Fatal("Marshal accepted reserved field number 19000")
+	}
+
+	// 3. SpliceFields must not append corrupt tail bytes on malformed input.
+	validField1 := []byte{0x21, 0x09} // field #1 uint = 4
+	corruptField2 := []byte{0x55}     // field #2 string, truncated length
+	raw := append(append([]byte(nil), validField1...), corruptField2...)
+	spliced := wire.SpliceFields(nil, raw, 1<<3, 3, func(dst []byte, fnum uint16) []byte {
+		dst = wire.AppendVarint(dst, uint64(fnum)<<4|uint64(wire.WireUint))
+		return wire.AppendVarint(dst, 77)
+	})
+	if _, ok := wire.ReadUint(spliced, 1); !ok {
+		t.Fatal("expected valid field #1 in spliced prefix")
+	}
+	if bytes.Contains(spliced, corruptField2) {
+		t.Fatal("SpliceFields copied corrupt tail bytes into output")
+	}
+
+	// 4. AppendUint32Arr must preserve caller's orig slice when packet is malformed.
+	orig := []uint32{11, 22}
+	gotSlice := wire.AppendUint32Arr(orig, corruptField2, 1)
+	if len(gotSlice) != 2 || gotSlice[0] != 11 || gotSlice[1] != 22 {
+		t.Fatalf("AppendUint32Arr failed to preserve orig slice: got %v", gotSlice)
+	}
+}

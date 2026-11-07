@@ -171,16 +171,22 @@ func getStructCodec(t reflect.Type) (*structCodec, error) {
 
 func (sc *structCodec) getField0Wire() []byte {
 	sc.metaOnce.Do(func() {
-		sc.schemaMeta = buildStructSchemaMeta(sc, 0)
+		sc.schemaMeta = buildStructSchemaMeta(sc, 0, nil)
 		sc.field0Wire = appendField0SchemaMetaDeterministic(nil, sc.schemaMeta, true)
 	})
 	return sc.field0Wire
 }
 
-func buildStructSchemaMeta(sc *structCodec, depth int) *SchemaMeta {
-	if sc == nil || depth > 8 {
+func buildStructSchemaMeta(sc *structCodec, depth int, active map[reflect.Type]bool) *SchemaMeta {
+	if sc == nil || depth > MaxNestingDepth || active[sc.typ] {
 		return nil
 	}
+	if active == nil {
+		active = make(map[reflect.Type]bool)
+	}
+	active[sc.typ] = true
+	defer delete(active, sc.typ)
+
 	meta := &SchemaMeta{
 		TypeName: sc.typ.Name(),
 		Fields:   make(map[uint32]string, len(sc.fields)),
@@ -190,7 +196,11 @@ func buildStructSchemaMeta(sc *structCodec, depth int) *SchemaMeta {
 		fnum := uint32(fc.fieldNum)
 		meta.Fields[fnum] = fc.name
 		if fc.subCodec != nil {
-			if child := buildStructSchemaMeta(fc.subCodec, depth+1); child != nil {
+			childDepth := depth + 1
+			if fc.wireType == wireArray || fc.wireType == wireMap {
+				childDepth = depth + 2
+			}
+			if child := buildStructSchemaMeta(fc.subCodec, childDepth, active); child != nil {
 				if meta.Children == nil {
 					meta.Children = make(map[uint32]*SchemaMeta)
 				}
@@ -279,7 +289,7 @@ func parseOmniBufField(sf reflect.StructField, obTag string, building map[reflec
 	parts := strings.Split(obTag, ",")
 	fnumStr := strings.TrimSpace(parts[0])
 	fnum64, err := strconv.ParseUint(fnumStr, 10, 16)
-	if err != nil || fnum64 == 0 {
+	if err != nil || fnum64 == 0 || (fnum64 >= 19000 && fnum64 <= 19999) {
 		return fieldCodec{}, fmt.Errorf("omnibuf: invalid field number in tag %q on %s", obTag, sf.Name)
 	}
 	fnum := uint16(fnum64)
@@ -330,7 +340,7 @@ func parseProtobufField(sf reflect.StructField, pbTag string, building map[refle
 	}
 	encType := parts[0]
 	fnum64, err := strconv.ParseUint(parts[1], 10, 16)
-	if err != nil || fnum64 == 0 {
+	if err != nil || fnum64 == 0 || (fnum64 >= 19000 && fnum64 <= 19999) {
 		return fieldCodec{}, fmt.Errorf("omnibuf: invalid field number in tag %q on %s", pbTag, sf.Name)
 	}
 	fnum := uint16(fnum64)
@@ -1626,7 +1636,7 @@ func (sc *structCodec) decodeStruct(data []byte, base unsafe.Pointer, zeroCopy b
 			continue
 		}
 		if fieldNum32 > math.MaxUint16 {
-			nextPos, err := skipValue(data, pos, wt)
+			nextPos, err := skipValueWithDepth(data, pos, wt, depth)
 			if err != nil {
 				return err
 			}
@@ -1645,7 +1655,7 @@ func (sc *structCodec) decodeStruct(data []byte, base unsafe.Pointer, zeroCopy b
 		// an unknown field (as in Protobuf): its payload is validated and
 		// skipped. All decoder tiers share this rule.
 		if fc == nil || (!isBoolField(fc) && fc.wireType != wt) || (isBoolField(fc) && wt != wireBoolFalse && wt != wireBoolTrue) {
-			nextPos, err := skipValue(data, pos, wt)
+			nextPos, err := skipValueWithDepth(data, pos, wt, depth)
 			if err != nil {
 				return err
 			}
@@ -2409,7 +2419,7 @@ func decodeGenericMapBody(fc *fieldCodec, fPtr unsafe.Pointer, body []byte, alre
 	}
 	mapVal := reflect.NewAt(fc.sliceType, fPtr).Elem()
 	if !alreadySeen || mapVal.IsNil() {
-		mapVal.Set(reflect.MakeMapWithSize(fc.sliceType, count))
+		mapVal.Set(reflect.MakeMapWithSize(fc.sliceType, min(count, 4096)))
 	}
 	keyType := fc.sliceType.Key()
 	valType := fc.sliceType.Elem()

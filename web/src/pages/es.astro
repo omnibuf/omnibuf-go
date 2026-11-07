@@ -105,14 +105,14 @@ const esFaqItems = [
     id: 'es-faq-bufbuild',
     question: 'Does this work with @bufbuild/protobuf?',
     paragraphs: [
-      'Yes. <code>create</code>, <code>toBinary</code>, and <code>fromBinary</code> accept standard <code>protoc-gen-es</code> descriptors directly, and messages are plain objects with normal <code>camelCase</code> properties.',
+      'Yes. Pass any <code>protoc-gen-es</code> descriptor straight to <code>create</code>, <code>toBinary</code>, and <code>fromBinary</code>. Messages stay plain JS objects with normal <code>camelCase</code> properties.',
     ],
   },
   {
     id: 'es-faq-opaque',
     question: 'Do I have to parse the whole message to read one field?',
     paragraphs: [
-      'No. While <code>fromBinary</code> decodes a full packet into an object, generated <code>Opaque</code> views (and <code>locateField</code> in <code>@omnibuf/core</code>) hop over preceding field headers by byte length and read or update a single field directly on the <code>Uint8Array</code> without parsing the rest of the message. For streaming multiple packets over a socket or fetch body, <code>@omnibuf/web</code> and <code>@omnibuf/node</code> decode length-delimited frames as they arrive.',
+      '<code>fromBinary</code> unpacks the full message, whereas the generated <code>Opaque</code> class (and <code>locateField</code> in <code>@omnibuf/core</code>) steps over earlier field headers by byte length to read or patch a single field in the <code>Uint8Array</code>. For length-framed streams over sockets or <code>fetch</code>, <code>@omnibuf/web</code> and <code>@omnibuf/node</code> decode packets as chunks arrive.',
     ],
     codeBlock: opaqueSpliceEsCode,
     codeLabel: 'Example',
@@ -121,7 +121,7 @@ const esFaqItems = [
     id: 'es-faq-blind',
     question: 'How do I decode without a schema?',
     paragraphs: [
-      'Call <code>decodeBlind(pkt)</code> to get back a plain object keyed by field number. Pass <code>{ selfDescribing: true }</code> to <code>toBinary</code> if you want Field #0 field names included too.',
+      '<code>decodeBlind(pkt)</code> returns a plain JS object keyed by field number, or keyed by field name when the sender encoded the packet with <code>{ selfDescribing: true }</code> (Field #0).',
     ],
     codeBlock: field0BlindEsCode,
     codeLabel: 'Example',
@@ -130,7 +130,7 @@ const esFaqItems = [
     id: 'es-faq-packages',
     question: 'What are @omnibuf/web and @omnibuf/node?',
     paragraphs: [
-      "<code>@omnibuf/core</code> has zero dependencies and runs in any JS runtime. <code>@omnibuf/web</code> adds Web Streams and packet inspection helpers, and <code>@omnibuf/node</code> uses Node's native <code>Buffer</code> for faster UTF-8 strings.",
+      "<code>@omnibuf/core</code> has zero dependencies and runs in browsers, Node, Bun, Deno, and edge workers. <code>@omnibuf/web</code> adds <code>TransformStream</code> framing and packet inspection helpers, and <code>@omnibuf/node</code> uses Node's <code>Buffer</code> APIs for faster UTF-8 string decoding.",
     ],
     codeBlock: runtimeAdaptersCode,
     codeLabel: 'Example',
@@ -155,7 +155,7 @@ const esFaqJsonLd = {
 
 <Layout
   title="OmniBuf for TypeScript & JS | protobuf-es, defineMessage & protoc-gen-omnibuf-es"
-  description="Use OmniBuf in TypeScript and JavaScript: define schemas in TypeScript, drop in on existing @bufbuild/protobuf descriptors, or generate single-pass codecs and Opaque views."
+  description="Use OmniBuf in TypeScript and JavaScript: define schemas in TypeScript, pass in existing @bufbuild/protobuf descriptors, or generate single-pass codecs and Opaque views."
 >
   <Navbar currentPage="es" />
 
@@ -173,23 +173,23 @@ const esFaqJsonLd = {
       <div class="mt-6 grid lg:grid-cols-12 gap-6 lg:gap-8 items-end">
         <div class="lg:col-span-7 space-y-4">
           <p class="text-lg sm:text-2xl text-ink/85 font-medium leading-snug">
-            You can use OmniBuf in TypeScript and JavaScript by{' '}
+            TypeScript and JS projects can{' '}
             <a href="#define-message" class="doc-link">
-              defining schemas in TypeScript
-            </a>
-            , passing in your existing{' '}
-            <a href="#protobuf-es" class="doc-link">
-              @bufbuild/protobuf descriptors
-            </a>
-            , or generating code with{' '}
-            <a href="#plugin-codegen" class="doc-link">
-              protoc-gen-omnibuf-es
-            </a>
-            . Check the{' '}
-            <a href="#benchmarks" class="doc-link">
-              TypeScript &amp; JS benchmarks
+              define schemas in code
             </a>{' '}
-            below to see how it performs in V8.
+            with <code>defineMessage</code>, pass existing{' '}
+            <a href="#protobuf-es" class="doc-link">
+              <code>@bufbuild/protobuf</code> descriptors
+            </a>{' '}
+            to <code>toBinary</code> and <code>fromBinary</code>, or generate codecs with{' '}
+            <a href="#plugin-codegen" class="doc-link">
+              <code>protoc-gen-omnibuf-es</code>
+            </a>
+            . V8 benchmark numbers are{' '}
+            <a href="#benchmarks" class="doc-link">
+              further down the page
+            </a>
+            .
           </p>
           <div class="flex flex-wrap gap-3 font-mono text-sm sm:text-base pt-1 no-print">
             <a
@@ -267,9 +267,7 @@ const esFaqJsonLd = {
           </span>
         </h2>
         <p class="mt-3 text-lg sm:text-xl text-ink/80 font-medium">
-          You don't need <code>.proto</code> files to use OmniBuf in TypeScript, though it also
-          works with your existing <code>@bufbuild/protobuf</code> descriptors or our compiler
-          plugin.
+          All three produce identical wire bytes.
         </p>
       </div>
 
@@ -284,27 +282,14 @@ const esFaqJsonLd = {
               Declarative TypeScript schemas
             </h3>
             <p class="text-base sm:text-lg text-ink/85 leading-relaxed">
-              If you want to skip <code>.proto</code> files altogether, you can define a schema in
-              TypeScript with <code>defineMessage</code> (or class decorators) and pass it to{' '}
-              <code>toBinary</code> and <code>fromBinary</code>:
+              <code>defineMessage</code> (or class decorators) defines a message schema directly in
+              TypeScript for <code>toBinary</code> and <code>fromBinary</code>. No{' '}
+              <code>.proto</code> file needed. Each field specifies its field number (
+              <code>1..65535</code>) and wire type (<code>uint32</code>, <code>sint64</code>,{' '}
+              <code>string</code>, <code>message</code>, <code>map</code>). Optional{' '}
+              <code>name</code> and <code>omitEmpty</code> flags control Field #0 names and zero
+              values.
             </p>
-            <ul class="space-y-2 text-sm sm:text-base text-ink/85 leading-relaxed list-disc pl-5">
-              <li>
-                <code>fieldNum</code> sets the wire field number (<code>1..65535</code>).
-              </li>
-              <li>
-                <code>name</code> sets the field name written to Field #0 (if omitted, it uses{' '}
-                <code>snake_case</code> of the TypeScript property name).
-              </li>
-              <li>
-                <code>type</code> picks the wire encoding (such as <code>uint32</code>,{' '}
-                <code>sint64</code>, <code>string</code>, <code>message</code>, or <code>map</code>
-                ).
-              </li>
-              <li>
-                <code>omitEmpty</code> skips writing the field when it holds its default value.
-              </li>
-            </ul>
           </div>
 
           <div class="lg:col-span-7 min-w-0">
@@ -334,14 +319,10 @@ const esFaqJsonLd = {
               Existing @bufbuild/protobuf schemas
             </h3>
             <p class="text-base sm:text-lg text-ink/85 leading-relaxed">
-              Already generating TypeScript descriptors with <code>protoc-gen-es</code>? You don't
-              have to add a new plugin to your build. Pass your existing <code>DescMessage</code>{' '}
-              schemas straight to <code>toBinary</code> and <code>fromBinary</code>.
-            </p>
-            <p class="text-base sm:text-lg text-ink/85 leading-relaxed">
-              On first use, OmniBuf builds a cached dispatch table for the descriptor. Both{' '}
-              <code>proto3</code> and Editions 2023/2024 descriptors work as expected, and unknown
-              fields are kept in <code>$unknown</code>.
+              Standard <code>DescMessage</code> descriptors from <code>protoc-gen-es</code> work
+              directly with <code>toBinary</code> and <code>fromBinary</code>. The first call
+              compiles a cached dispatch table for that descriptor. Both <code>proto3</code> and
+              Editions 2023/2024 are supported, and unrecognized tags stay in <code>$unknown</code>.
             </p>
           </div>
 
@@ -374,15 +355,11 @@ const esFaqJsonLd = {
               Generated code with protoc-gen-omnibuf-es
             </h3>
             <p class="text-base sm:text-lg text-ink/85 leading-relaxed">
-              For the fastest path, install <code>@omnibuf/protoc-gen-omnibuf-es</code> and add it
-              to your <code>buf.gen.yaml</code>. The plugin generates TypeScript interfaces,
-              single-pass encoders, and lazy <code>Opaque</code> wrapper classes.
-            </p>
-            <p class="text-base sm:text-lg text-ink/85 leading-relaxed">
-              The <code>Opaque</code> wrapper is handy when you don't want to unpack a whole
-              message. It reads individual fields straight out of the <code>Uint8Array</code> and
-              can append updated fields onto the existing buffer without touching the rest of the
-              packet.
+              Adding <code>@omnibuf/protoc-gen-omnibuf-es</code> to <code>buf.gen.yaml</code>{' '}
+              generates TypeScript interfaces, single-pass encoders, and <code>Opaque</code> wrapper
+              classes. The <code>Opaque</code> class reads individual fields from a{' '}
+              <code>Uint8Array</code> by stepping over earlier field headers and splices updated
+              values directly into the buffer.
             </p>
           </div>
 
@@ -449,14 +426,14 @@ const esFaqJsonLd = {
           <span class="font-serif italic font-normal normal-case text-[#FF4F18]">benchmarks.</span>
         </h2>
         <p class="mt-2.5 text-base sm:text-lg text-ink/80 font-medium">
-          Here is how <code>@omnibuf/core</code> compares against <code>protobufjs</code>,{' '}
-          <code>@bufbuild/protobuf</code>, <code>google-protobuf</code>,{' '}
-          <code>@msgpack/msgpack</code>, and <code>JSON</code> on our 11-field test message.{' '}
+          11-field <code>PeerUpdate</code> numbers on Node.js v24 (Apple M1 Pro) across{' '}
+          <code>@omnibuf/core</code>, <code>protobufjs</code>, <code>@bufbuild/protobuf</code>,{' '}
+          <code>google-protobuf</code>, <code>@msgpack/msgpack</code>, and <code>JSON</code>.{' '}
           <strong>Shorter bars = Faster.</strong>
         </p>
       </div>
 
-      <div class="grid lg:grid-cols-2 gap-5 items-start">
+      <div class="grid lg:grid-cols-2 gap-5 items-start select-none">
         {esBenchmarkCategories.map((cat) => (
           <div class="os-window overflow-hidden">
             <div class="os-titlebar bg-[#E5E0D5]">
@@ -535,7 +512,7 @@ const esFaqJsonLd = {
             messages).
           </p>
           <p class="text-sm sm:text-base text-ink/80">
-            If you want to run them locally, check out{' '}
+            Benchmark source is in{' '}
             <a
               href="https://github.com/sudorandom/omnibuf-es/blob/main/benchmarks/bench.ts"
               target="_blank"
@@ -544,8 +521,8 @@ const esFaqJsonLd = {
             >
               benchmarks/bench.ts
             </a>{' '}
-            in the <code>omnibuf-es</code> repository and run <code>pnpm run bench</code>. The
-            recorded results are in{' '}
+            in the <code>omnibuf-es</code> repository (<code>pnpm run bench</code>), with recorded
+            output in{' '}
             <a
               href="https://github.com/sudorandom/omnibuf-es/blob/main/testdata/benchmarks.json"
               target="_blank"

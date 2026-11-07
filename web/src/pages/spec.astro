@@ -32,22 +32,22 @@ message Node {
 }`;
 
 const wireTypes = [
-  [0, 'WireUint', 'Unsigned Prefix-Varint'],
-  [1, 'WireSint', 'ZigZag Prefix-Varint'],
-  [2, 'WireBoolFalse', 'No payload (false in the tag)'],
-  [3, 'WireBoolTrue', 'No payload (true in the tag)'],
-  [4, 'WireFixed32', '4 little-endian unsigned integer bytes'],
-  [5, 'WireFixed64', '8 little-endian unsigned integer bytes'],
-  [6, 'WireSfixed32', "4 little-endian two's-complement bytes"],
-  [7, 'WireSfixed64', "8 little-endian two's-complement bytes"],
-  [8, 'WireFloat32', '4 little-endian IEEE-754 bytes'],
-  [9, 'WireFloat64', '8 little-endian IEEE-754 bytes'],
-  [10, 'WireString', 'ByteLen + UTF-8 bytes'],
-  [11, 'WireBytes', 'ByteLen + arbitrary bytes'],
-  [12, 'WireSubMsg', 'ByteLen + message fields'],
-  [13, 'WireArray', 'ByteLen + ElementType + Count + values'],
-  [14, 'WireMap', 'ByteLen + KeyType + ValueType + Count + key/value pairs'],
-  [15, 'WireExtended', 'ByteLen + ExtType + extension payload'],
+  [0, 'WireUint', '[Value: Prefix-Varint] (uint)'],
+  [1, 'WireSint', '[ZigZag Value: Prefix-Varint] (sint)'],
+  [2, 'WireBoolFalse', '0B in tag (0x00 in collections)'],
+  [3, 'WireBoolTrue', '0B in tag (invalid in collections)'],
+  [4, 'WireFixed32', '4B LE uint32'],
+  [5, 'WireFixed64', '8B LE uint64'],
+  [6, 'WireSfixed32', '4B LE int32'],
+  [7, 'WireSfixed64', '8B LE int64'],
+  [8, 'WireFloat32', '4B LE IEEE-754 binary32'],
+  [9, 'WireFloat64', '8B LE IEEE-754 binary64'],
+  [10, 'WireString', '[ByteLen][UTF-8 bytes]'],
+  [11, 'WireBytes', '[ByteLen][Raw bytes]'],
+  [12, 'WireSubMsg', '[ByteLen][FieldStream]'],
+  [13, 'WireArray', '[ByteLen][ElementType: 1B][Count][Elements]'],
+  [14, 'WireMap', '[ByteLen][KeyType: 1B][ValueType: 1B][Count][Entries]'],
+  [15, 'WireExtended', '[ByteLen][ExtType: 1B][Payload]'],
 ];
 
 const arrayExamples = `// Field #7: array<string> ["a", "bc"]
@@ -151,29 +151,15 @@ const subsectionTitles: Record<number, string[]> = {
   4: ['ZigZag Mapping', 'Examples'],
   5: ['Tag Width'],
   6: [
-    'WireUint (0)',
-    'WireSint (1)',
-    'WireBoolFalse (2)',
-    'WireBoolTrue (3)',
-    'WireFixed32 (4)',
-    'WireFixed64 (5)',
-    'WireSfixed32 (6)',
-    'WireSfixed64 (7)',
-    'WireFloat32 (8)',
-    'WireFloat64 (9)',
-    'WireString (10)',
-    'WireBytes (11)',
-    'WireSubMsg (12)',
+    'Variable-Width Integers (0..1)',
+    'Booleans (2..3)',
+    'Fixed-Width Numbers (4..9)',
+    'Strings, Bytes & Submessages (10..12)',
     'WireArray (13)',
     'WireMap (14)',
     'WireExtended (15)',
   ],
-  8: [
-    'SchemaMeta Definition',
-    'Placement & Interpretation',
-    'Names for Collection Contents',
-    'Metadata Merge',
-  ],
+  8: ['SchemaMeta Definition', 'Placement, Inheritance & Merge'],
   11: ['Schema Mapping', 'Conformance Runner & Client Protocol', 'Conformance Test Coverage'],
 };
 const tocSections = sectionTitles.map((title, index) => ({
@@ -209,12 +195,13 @@ const tocSections = sectionTitles.map((title, index) => ({
         </span>
       </h1>
       <p class="mt-6 max-w-3xl text-lg sm:text-2xl text-ink/85 font-medium leading-snug">
-        Version 0.1 wire-format draft: precise value types and composable arrays and maps.
+        The byte-level encoding rules for Prefix-Varints, field tags, scalars, containers, Field #0
+        metadata, and cross-language conformance.
       </p>
     </div>
 
     <!-- Sticky Mobile Section Jump Bar (< lg viewports) -->
-    <div class="lg:hidden sticky top-14 z-30 mb-6 flex items-start gap-2 font-mono text-sm no-print">
+    <div class="lg:hidden sticky top-14 z-30 mb-6 flex items-start gap-2 font-mono text-sm no-print select-none">
       <details id="mobile-spec-toc" class="flex-1 os-window bg-[#FAF8F2]">
         <summary class="px-4 py-2.5 font-bold uppercase cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink">
           <span id="mobile-spec-toc-label">Jump to Spec Section</span>
@@ -261,7 +248,7 @@ const tocSections = sectionTitles.map((title, index) => ({
 
     <div class="grid lg:grid-cols-12 gap-8 items-start">
       <!-- Left Sticky Table of Contents -->
-      <aside class="hidden lg:block lg:col-span-3 lg:sticky lg:top-16 no-print">
+      <aside class="hidden lg:block lg:col-span-3 lg:sticky lg:top-16 no-print select-none">
         <div class="os-window bg-[#FAF8F2] p-4 lg:max-h-[calc(100vh-5.5rem)] lg:overflow-y-auto">
           <div class="font-mono text-sm font-bold uppercase pb-2.5 mb-2.5 border-b-2 border-ink flex items-center justify-between gap-2">
             <span>Contents</span>
@@ -313,71 +300,69 @@ const tocSections = sectionTitles.map((title, index) => ({
       <article class="lg:col-span-9 min-w-0 os-window-lg bg-[#FAF8F2] p-6 sm:p-10 lg:p-12 spec-prose">
         <h2 id="sec-1">1. Design Goals &amp; Overview</h2>
         <h3 id="sec-1-1">1.1 Design Goals</h3>
-        <p>
-          OmniBuf is a binary encoding for numbered fields. This document describes the current,
-          unreleased design and replaces the earlier draft. There are no legacy array encodings or
-          compatibility modes in this specification. MUST, SHOULD, and MAY describe requirements for
-          implementations of this draft, not a claim that every implementation already meets them.
-        </p>
+        <p>OmniBuf v0.1 is a binary wire format for numbered fields:</p>
         <ul>
-          <li>Keep explicit field numbers and support existing protobuf schema concepts.</li>
           <li>
-            Make values interpretable without an external schema by distinguishing strings from
-            bytes, signed from unsigned integers, and floating-point from fixed-width integer
-            values.
+            Keep Protobuf field numbers so existing <code>.proto</code> schemas map directly onto
+            the wire.
           </li>
           <li>
-            Compose collections from the same value types using one array type plus an element type,
-            and one map type plus key and value types.
+            Give UTF-8 strings, raw bytes, signed/unsigned ints, fixed-width ints, and IEEE-754
+            floats distinct wire codes so raw packets decode cleanly with no external schema.
           </li>
           <li>
-            Use a flat field stream with length-prefixed containers, forward encoding, and defined
-            concatenation semantics.
+            Encode all lists with <code>WireArray</code> (1-byte <code>ElementType</code> +{' '}
+            <code>Count</code>) and all maps with <code>WireMap</code> (1-byte <code>KeyType</code>{' '}
+            + <code>ValueType</code> + <code>Count</code>), including nested collections.
+          </li>
+          <li>
+            Prefix every container with its byte length so encoders can write messages in a single
+            forward pass and readers can merge packets by byte concatenation.
           </li>
         </ul>
         <h3 id="sec-1-2">1.2 Core Wire Primitives</h3>
         <p>
-          Each field is <code>[Tag][Value]</code>. Tags, unsigned variable-width integers, byte
-          lengths, and collection counts use Prefix-Varints. A tag combines a field number with a
-          four-bit wire type. Every variable-length value begins with its byte length. All
-          multi-byte fixed-width values are little-endian.
+          Fields are written back-to-back as <code>[Tag][Value]</code> pairs. Field tags,
+          variable-width integers, byte lengths, and collection counts all use Prefix-Varints;
+          fixed-width words are little-endian. Each tag packs{' '}
+          <code>(FieldNumber &lt;&lt; 4) | WireType</code>.
         </p>
         <p>
-          Wire types identify the encoded value, not every detail of a source schema. For example, a
-          signed enum number and an ordinary signed integer share an encoding. Field names, enum
-          labels, declared integer ranges, defaults, and oneof membership cannot all be inferred
-          from the value bytes. Optional Field #0 supplies message and field names.
+          A wire type code describes the physical bytes on the wire (for example, signed enums and
+          signed integers both use <code>WireSint = 1</code>), whereas schema-level details like
+          field names, enum labels, 32-bit vs. 64-bit bounds, defaults, and <code>oneof</code>{' '}
+          groups live in the caller's schema or in optional Field #0 metadata.
         </p>
 
         <h2 id="sec-2">2. Message Layout &amp; Concatenation</h2>
         <pre><code>[Tag][Value] [Tag][Value] ... [Tag][Value]</code></pre>
         <p>
-          A root message has no mandatory header, footer, alignment padding, or length prefix. Its
-          containing file or transport MUST provide its byte boundary. An empty message is zero
-          bytes. Concatenation merges messages rather than framing separate messages.
-        </p>
-        <p>
-          Encoders SHOULD emit fields in ascending field-number order. Decoders MUST accept any
-          order and repeated occurrences of a field. For compatible schemas, concatenating two
-          packets has these semantics:
+          Root messages have no framing header, footer, padding, or outer length prefix (an empty
+          message is 0 bytes, so the outer transport or file format supplies the packet boundary).
+          Encoders SHOULD emit fields in ascending field-number order, while decoders MUST accept
+          fields in any order and merge repeated occurrences under concatenation:
         </p>
         <ul>
-          <li>For singular scalars, the last occurrence wins.</li>
           <li>
-            For arrays, elements concatenate in occurrence order. Empty arrays add no elements and
-            do not clear an earlier array.
+            <strong>Scalars:</strong> last occurrence wins.
           </li>
-          <li>For messages, fields merge recursively, including nested arrays and maps.</li>
           <li>
-            For maps, entries merge in order and the last entry for a key replaces its entire value,
-            including when that value is a message, array, or map.
+            <strong>Arrays:</strong> elements append in wire order (an empty array adds 0 items and
+            does not clear prior elements).
+          </li>
+          <li>
+            <strong>Submessages:</strong> inner fields merge recursively, including nested arrays
+            and maps.
+          </li>
+          <li>
+            <strong>Maps:</strong> entries merge in wire order; a duplicate key replaces the prior
+            value for that key outright, even for submessage, array, or map values.
           </li>
         </ul>
         <p>
-          A schema-aware decoder also applies presence and oneof rules from its schema. A blind
-          decoder cannot infer oneof membership. Concatenation does not provide a delete operation.
-          Changing a field's value type or an array's element type is not a compatible schema
-          change.
+          Schema-aware decoders apply <code>oneof</code> and explicit-presence rules from their
+          schema (a blind reader cannot infer <code>oneof</code> groups), and changing a field's
+          wire type or an array's <code>ElementType</code> is a breaking wire change.
         </p>
 
         <h2 id="sec-3">3. Prefix-Varint Encoding</h2>
@@ -511,28 +496,28 @@ const tocSections = sectionTitles.map((title, index) => ({
           </table>
         </div>
         <p>
-          The missing three-, five-, six-, seven-, and eight-byte forms simplify dispatch but can
-          increase payload size. Values at or above 2<sup>29</sup> use nine bytes. Payload-size and
-          speed comparisons therefore depend on the workload and implementation.
+          Only 1-, 2-, 4-, and 9-byte widths exist so every value loads as a standard 1-, 2-, 4-, or
+          8-byte CPU word. Numbers that would fit in 3, 5, 6, 7, or 8 bytes under LEB128 round up to
+          the next width, and values at or above 2<sup>29</sup> always take 9 bytes.
         </p>
         <h3 id="sec-3-3">3.3 Non-Minimal Encodings &amp; Backpatching</h3>
         <p>
-          Decoders MUST accept a value in any of these four widths that can represent it, even when
-          a shorter encoding exists. Encoders SHOULD use the shortest width except when reserving a
-          wider slot for backpatching. For example, 42 can be <code>55</code> or
-          <code>aa 00</code>.
+          Decoders MUST accept a value encoded in any of the four widths that can hold it, even when
+          a narrower width would fit. Encoders SHOULD pick the shortest width except when reserving
+          a wider header slot for single-pass backpatching. For example, <code>42</code> is valid as
+          1-byte <code>55</code> or 2-byte <code>aa 00</code>.
         </p>
         <p>
-          A forward encoder can reserve two bytes for a container length, write its contents, and
-          patch <code>LE16((byteLen &lt;&lt; 2) | 2)</code>. This slot holds up to 16,383 bytes.
-          Larger bodies require expanding the slot to four or nine bytes, moving the already written
-          body unless the encoder chose another buffering strategy. Nested large containers may move
-          the same bytes more than once. Counts may also use reserved slots.
+          During single-pass forward encoding, an encoder can reserve a 2-byte Prefix-Varint slot
+          for a container's byte length, serialize the body right after it, and then patch{' '}
+          <code>LE16((byteLen &lt;&lt; 2) | 2)</code> into the reserved slot. A 2-byte slot covers
+          up to 16,383 bytes; if the body grows past that, the encoder widens the length header to 4
+          or 9 bytes and shifts the written body forward by 2 or 7 bytes.
         </p>
         <p>
-          This flexibility means the wire format is not canonical. Sorted fields alone do not
-          produce a unique encoding because map order, duplicate fields, and integer widths also
-          matter.
+          Encoders may pick different Prefix-Varint widths for backpatched lengths, emit fields in
+          different orders, or iterate maps in arbitrary order. Consequently, OmniBuf wire output is
+          not byte-for-byte canonical.
         </p>
 
         <h2 id="sec-4">4. Signed Integers</h2>
@@ -635,9 +620,9 @@ const tocSections = sectionTitles.map((title, index) => ({
           </table>
         </div>
         <p>
-          The same type codes identify array elements and map keys and values. Collection values
-          omit field tags. Variable-length collection values still include their own byte-length
-          prefix. Boolean values are the only contextual exception, described below.
+          Array elements and map keys/values reuse the same 4-bit codes without per-item field tags
+          (variable-length items keep their <code>ByteLen</code> prefix; booleans use code{' '}
+          <code>2</code> + 1 byte inside collections).
         </p>
 
         <h2 id="sec-6">6. Wire Type Specifications</h2>
@@ -663,253 +648,171 @@ const tocSections = sectionTitles.map((title, index) => ({
             </tbody>
           </table>
         </div>
-        <h3 id="sec-6-1">6.1 WireUint (0)</h3>
-        <pre><code>[Value: Prefix-Varint]</code></pre>
+        <h3 id="sec-6-1">6.1 Variable-Width Integers (0..1)</h3>
+        <pre><code>WireUint (0): [Value: Prefix-Varint]
+WireSint (1): [ZigZag Value: Prefix-Varint]</code></pre>
         <p>
-          <code>WireUint = 0</code> contains one unsigned Prefix-Varint up to 64 bits wide. It uses
-          this same encoding as a field payload, an array element, and a map key or value.
+          <code>WireUint = 0</code> encodes an unsigned integer up to 64 bits wide (
+          <code>uint32</code> and <code>uint64</code>). <code>WireSint = 1</code> encodes a
+          ZigZag-mapped signed integer (<code>int32</code>, <code>int64</code>, <code>sint32</code>,{' '}
+          <code>sint64</code>, and enums).
         </p>
 
-        <h3 id="sec-6-2">6.2 WireSint (1)</h3>
-        <pre><code>[ZigZag Value: Prefix-Varint]</code></pre>
+        <h3 id="sec-6-2">6.2 Booleans (2..3)</h3>
         <p>
-          <code>WireSint = 1</code> contains one ZigZag-encoded signed integer stored as a
-          Prefix-Varint. It uses this same encoding as a field payload, an array element, and a map
-          key or value.
+          In a field tag, <code>WireBoolFalse = 2</code> and <code>WireBoolTrue = 3</code> put the
+          boolean value directly in the low four bits of the tag and write zero payload bytes.
+        </p>
+        <p>
+          Inside an array or map header, code <code>2</code> is the boolean type code, and each
+          element or key/value entry is one raw byte (<code>00</code> = false, <code>01</code> =
+          true; any other byte MUST be rejected). Code <code>3</code> is valid only on field tags
+          and MUST be rejected as an array <code>ElementType</code> or map <code>KeyType</code> /{' '}
+          <code>ValueType</code>.
         </p>
 
-        <h3 id="sec-6-3">6.3 WireBoolFalse (2)</h3>
+        <h3 id="sec-6-3">6.3 Fixed-Width Numbers (4..9)</h3>
+        <pre><code>WireFixed32  (4): [4B uint32, little-endian]
+WireFixed64  (5): [8B uint64, little-endian]
+WireSfixed32 (6): [4B int32, two's-complement little-endian]
+WireSfixed64 (7): [8B int64, two's-complement little-endian]
+WireFloat32  (8): [4B IEEE-754 binary32, little-endian]
+WireFloat64  (9): [8B IEEE-754 binary64, little-endian]</code></pre>
         <p>
-          A field tag with <code>WireBoolFalse = 2</code> encodes the boolean value{' '}
-          <code>false</code> in the tag itself and carries zero payload bytes.
-        </p>
-        <p>
-          Inside an array or map header, type code <code>2</code> represents the boolean element or
-          entry type. Each boolean inside a collection is encoded as a single raw byte:
-          <code>00</code> for false or <code>01</code> for true. Collection boolean bytes are raw
-          bytes rather than Prefix-Varints, and any value other than <code>00</code> or{' '}
-          <code>01</code> is invalid.
-        </p>
-
-        <h3 id="sec-6-4">6.4 WireBoolTrue (3)</h3>
-        <p>
-          A field tag with <code>WireBoolTrue = 3</code> encodes the boolean value <code>true</code>{' '}
-          in the tag itself and carries zero payload bytes.
-        </p>
-        <p>
-          Type code <code>3</code> is only valid as a field tag wire type. It MUST NOT appear as an{' '}
-          <code>ElementType</code> in an array or as a <code>KeyType</code> or{' '}
-          <code>ValueType</code> in a map. Collections always declare boolean elements or entries
-          using code <code>2</code>.
-        </p>
-
-        <h3 id="sec-6-5">6.5 WireFixed32 (4)</h3>
-        <pre><code>[4 bytes: uint32, little-endian]</code></pre>
-        <p>
-          <code>WireFixed32 = 4</code> contains a four-byte unsigned integer in little-endian byte
-          order. Because it is distinct from <code>WireSfixed32 = 6</code> and{' '}
-          <code>WireFloat32 = 8</code>, decoders never confuse 32-bit unsigned integers with signed
-          values or floating-point numbers.
-        </p>
-
-        <h3 id="sec-6-6">6.6 WireFixed64 (5)</h3>
-        <pre><code>[8 bytes: uint64, little-endian]</code></pre>
-        <p>
-          <code>WireFixed64 = 5</code> contains an eight-byte unsigned integer in little-endian byte
-          order. It remains distinct from <code>WireSfixed64 = 7</code> and{' '}
-          <code>WireFloat64 = 9</code> in fields, arrays, and maps.
-        </p>
-
-        <h3 id="sec-6-7">6.7 WireSfixed32 (6)</h3>
-        <pre><code>[4 bytes: int32, two's-complement little-endian]</code></pre>
-        <p>
-          <code>WireSfixed32 = 6</code> contains a four-byte signed two's-complement integer in
-          little-endian byte order. It uses code <code>6</code> as a field value, an array element,
-          and a map key or value.
+          Unsigned fixed integers (<code>4</code>, <code>5</code>), signed two's-complement fixed
+          integers (<code>6</code>, <code>7</code>), and IEEE-754 floats (<code>8</code>,{' '}
+          <code>9</code>) each have distinct wire codes so 4-byte and 8-byte values are never
+          ambiguous on the wire. Signed zero, infinities, and NaN bit patterns are valid in{' '}
+          <code>WireFloat32</code> and <code>WireFloat64</code>.
         </p>
         <Code code={fixedExamples} lang="text" />
 
-        <h3 id="sec-6-8">6.8 WireSfixed64 (7)</h3>
-        <pre><code>[8 bytes: int64, two's-complement little-endian]</code></pre>
+        <h3 id="sec-6-4">6.4 Strings, Bytes &amp; Submessages (10..12)</h3>
+        <pre><code>WireString (10): [ByteLen: Prefix-Varint][UTF-8 bytes]
+WireBytes  (11): [ByteLen: Prefix-Varint][Raw bytes]
+WireSubMsg (12): [ByteLen: Prefix-Varint][Message field stream]</code></pre>
         <p>
-          <code>WireSfixed64 = 7</code> contains an eight-byte signed two's-complement integer in
-          little-endian byte order. It uses code <code>7</code> as a field value, an array element,
-          and a map key or value.
+          <code>WireString = 10</code> carries UTF-8 text with no null terminator (invalid UTF-8
+          MUST be rejected). <code>WireBytes = 11</code> carries arbitrary raw bytes.{' '}
+          <code>WireSubMsg = 12</code> carries a nested field stream whose inner fields follow the
+          same layout as root fields; a zero-length payload represents a present, empty submessage.
         </p>
 
-        <h3 id="sec-6-9">6.9 WireFloat32 (8)</h3>
-        <pre><code>[4 bytes: IEEE-754 binary32, little-endian]</code></pre>
-        <p>
-          <code>WireFloat32 = 8</code> contains four little-endian IEEE-754 binary32 bytes. Signed
-          zero, infinities, and NaN bit patterns are valid on the wire. In arrays and maps, each{' '}
-          <code>WireFloat32</code> value occupies four consecutive bytes.
-        </p>
-
-        <h3 id="sec-6-10">6.10 WireFloat64 (9)</h3>
-        <pre><code>[8 bytes: IEEE-754 binary64, little-endian]</code></pre>
-        <p>
-          <code>WireFloat64 = 9</code> contains eight little-endian IEEE-754 binary64 bytes. Signed
-          zero, infinities, and NaN bit patterns are valid on the wire. In arrays and maps, each{' '}
-          <code>WireFloat64</code> value occupies eight consecutive bytes.
-        </p>
-
-        <h3 id="sec-6-11">6.11 WireString (10)</h3>
-        <pre><code>[ByteLen: Prefix-Varint][UTF-8 bytes]</code></pre>
-        <p>
-          <code>WireString = 10</code> contains a byte-length prefix followed by valid UTF-8 text
-          without a null terminator. It uses this same length-prefixed encoding as a field value, an
-          array element, and a map key or value.
-        </p>
-
-        <h3 id="sec-6-12">6.12 WireBytes (11)</h3>
-        <pre><code>[ByteLen: Prefix-Varint][Raw bytes]</code></pre>
-        <p>
-          <code>WireBytes = 11</code> contains a byte-length prefix followed by arbitrary raw bytes.
-          Because it has a dedicated type code distinct from <code>WireString = 10</code> in fields,
-          arrays, and maps, binary payloads never have to masquerade as UTF-8 text.
-        </p>
-
-        <h3 id="sec-6-13">6.13 WireSubMsg (12)</h3>
-        <pre><code>[ByteLen: Prefix-Varint][Message field stream]</code></pre>
-        <p>
-          <code>WireSubMsg = 12</code> contains a byte-length prefix followed by a nested message
-          field stream. Its fields obey the same rules as root fields. A zero-length payload
-          represents a present, empty message. Array elements and map values of message type use
-          this same length-prefixed encoding.
-        </p>
-
-        <h3 id="sec-6-14">6.14 WireArray (13)</h3>
+        <h3 id="sec-6-5">6.5 WireArray (13)</h3>
         <pre><code>[Tag: WireArray]
 [ByteLen: Prefix-Varint][ElementType: 1 byte][Count: Prefix-Varint][Element_0]…[Element_N-1]
                        |&lt;------------------- ByteLen bytes -----------------------------&gt;|</code></pre>
         <p>
-          Every array uses <code>WireArray = 13</code>. Its element type appears once before the
-          element count. All elements use that type's value encoding without per-element field tags.
-          ByteLen covers <code>ElementType</code>, <code>Count</code>, and all encoded elements,
-          while excluding its own prefix and the outer field tag.
+          Every array uses <code>WireArray = 13</code>. One <code>ElementType</code> byte precedes{' '}
+          <code>Count</code>, and all elements follow back-to-back with no per-element field tags.{' '}
+          <code>ByteLen</code> covers <code>ElementType</code>, <code>Count</code>, and the encoded
+          elements.
         </p>
         <ul>
           <li>
-            ElementType is a single byte containing a wire type code from the table. Its high four
-            bits MUST be zero. Code 3 is invalid here, so boolean arrays use code 2.
+            <code>ElementType</code> is a 1-byte wire type code whose upper four bits MUST be zero.
+            Code <code>3</code> is invalid here; boolean arrays always use code <code>2</code>.
           </li>
           <li>
-            Count is required for every element type, including messages and fixed-width values.
-            Count zero is valid and still requires an element type byte.
+            <code>Count</code> is mandatory for every element type, including submessages and
+            fixed-width numbers. <code>Count = 0</code> is valid and still requires the{' '}
+            <code>ElementType</code> byte.
           </li>
-          <li>Strings, bytes, and messages retain an individual byte-length prefix per element.</li>
-          <li>Fixed-width values are packed consecutively without alignment padding.</li>
-          <li>Decoders MUST consume exactly Count elements and exactly ByteLen bytes.</li>
+          <li>
+            Variable-width elements (<code>WireString</code>, <code>WireBytes</code>,{' '}
+            <code>WireSubMsg</code>) each start with their own <code>ByteLen</code> prefix, while
+            fixed-width scalars pack contiguously with no padding. Decoders MUST read all{' '}
+            <code>Count</code> elements and finish on the exact <code>ByteLen</code> boundary.
+          </li>
         </ul>
         <Code code={arrayExamples} lang="text" />
         <p>
-          Arrays and maps can also nest inside an array. An array of arrays uses{' '}
-          <code>ElementType = 13</code>, where each inner array carries its own ByteLen,
-          ElementType, Count, and elements. An array of maps uses <code>ElementType = 14</code>,
-          where each inner map carries its own ByteLen, KeyType, ValueType, Count, and entries.
+          Arrays of arrays set <code>ElementType = 13</code> and arrays of maps set{' '}
+          <code>ElementType = 14</code>; each inner element is a complete length-prefixed container.
         </p>
         <Code code={nestedArrayExample} lang="text" />
 
-        <h3 id="sec-6-15">6.15 WireMap (14)</h3>
+        <h3 id="sec-6-6">6.6 WireMap (14)</h3>
         <pre><code>[Tag: WireMap]
 [ByteLen: Prefix-Varint][KeyType: 1 byte][ValueType: 1 byte][Count: Prefix-Varint][Key_0][Value_0]…
                        |&lt;----------------------- ByteLen bytes ------------------------&gt;|</code></pre>
         <p>
-          Every map uses <code>WireMap = 14</code>. Two type bytes (<code>KeyType</code> followed by{' '}
-          <code>ValueType</code>) declare its key and value types once using the same 1-byte codes
-          as fields and array elements (with the high four bits of each byte set to zero). Entries
-          omit field tags and synthetic entry-message wrappers. Each entry contains one key
-          immediately followed by one value. ByteLen covers <code>KeyType</code>,{' '}
-          <code>ValueType</code>, <code>Count</code>, and all encoded entries.
+          Every map uses <code>WireMap = 14</code>. The header writes <code>KeyType</code> (1 byte),{' '}
+          <code>ValueType</code> (1 byte), and <code>Count</code> once. High four bits of both type
+          bytes MUST be zero. Entries follow directly as alternating <code>[Key][Value]</code> pairs
+          with no field tags or synthetic entry wrappers. <code>ByteLen</code> covers both type
+          bytes, <code>Count</code>, and all entries.
         </p>
         <ul>
           <li>
-            KeyType MUST be unsigned integer (0), signed integer (1), boolean (2), unsigned fixed32
-            (4), unsigned fixed64 (5), signed fixed32 (6), signed fixed64 (7), or string (10).
+            Valid <code>KeyType</code> codes are <code>0</code>, <code>1</code>, <code>2</code>,{' '}
+            <code>4</code>, <code>5</code>, <code>6</code>, <code>7</code>, and <code>10</code>{' '}
+            (integers, booleans, and UTF-8 strings). Float, bytes, submessage, array, and map keys
+            are invalid.
           </li>
           <li>
-            ValueType may be any value type except code 3. Nested arrays (13) and maps (14) are
-            encoded recursively using their own length-prefixed headers.
+            <code>ValueType</code> accepts any wire type code except <code>3</code>. Nested arrays (
+            <code>13</code>) and maps (<code>14</code>) carry their own length-prefixed headers.
           </li>
           <li>
-            Count is the number of encoded entries, including duplicate keys. Zero entries are
-            valid.
+            <code>Count</code> records the total number of encoded key/value pairs (<code>0</code>{' '}
+            is valid). Map entries may appear in any order, though deterministic encoders SHOULD
+            sort keys by value.
           </li>
           <li>
-            Duplicate keys use last-entry-wins semantics. Repeated map fields merge entries.
-            Duplicate message-valued entries replace the earlier message rather than merging it.
-          </li>
-          <li>
-            Map entries may appear in any order. Deterministic encoders SHOULD sort keys by value.
+            Duplicate keys obey last-entry-wins rules, and a repeated map key with a submessage
+            value replaces the previous submessage for that key.
           </li>
         </ul>
         <Code code={mapExample} lang="text" />
 
-        <h3 id="sec-6-16">6.16 WireExtended (15)</h3>
+        <h3 id="sec-6-7">6.7 WireExtended (15)</h3>
         <pre><code>[ByteLen: Prefix-Varint][ExtType: 1 byte][Extension payload]</code></pre>
         <p>
-          <code>WireExtended = 15</code> is reserved for future value types. ByteLen MUST be at
-          least one and includes <code>ExtType</code>. This draft assigns no extension subtypes.
-          Unknown extensions remain skippable by their outer byte length. A reader asked to
-          interpret an unknown extension MUST return an unsupported-type error rather than guess its
-          meaning. Each extension value in an array or map includes its own length and subtype.
+          <code>WireExtended = 15</code> reserves a length-prefixed envelope (
+          <code>ByteLen &gt;= 1</code>, covering <code>ExtType</code> and payload) for future types;
+          v0.1 assigns no <code>ExtType</code> codes. Scanners can skip unknown extensions by{' '}
+          <code>ByteLen</code>, whereas a reader asked to decode an unknown <code>ExtType</code>{' '}
+          MUST return an unsupported-type error.
         </p>
 
         <h2 id="sec-7">7. Field Lookup &amp; Validation</h2>
         <p>
-          A field scanner reads a tag, determines its scalar width or container byte length, and
-          advances to the next field. Skipping a container does not require visiting its elements.
-          Locating a field is linear in the number of field headers examined, with constant-time
-          skipping per field rather than constant-time random access.
-        </p>
-        <p>
-          Lookup APIs MUST state whether they return the last occurrence, all occurrences, or a
-          merged value. Returning only the last message or array occurrence does not implement
-          recursive message merge or array concatenation.
-        </p>
-        <p>
-          Bounds-checked skipping and full validation are distinct operations. A scanner MAY skip a
-          bounded container without validating its contents. A full validating decoder MUST validate
-          all core-type contents, even in unknown fields. APIs that skip unknown contents MUST
-          document that they do not perform full packet validation.
+          Each tag either fixes the scalar width or precedes a <code>ByteLen</code> Prefix-Varint,
+          so a field scanner steps from tag to tag in <code>O(fields)</code> time (<code>O(1)</code>{' '}
+          per skipped field) and never visits inner container items. Lookup APIs MUST document
+          whether they return the last occurrence, all occurrences, or a recursively merged value,
+          and whether skipping unknown fields bypasses full inner validation. A schema-less blind
+          decoder MUST validate all core-type contents across every field, while schema-aware
+          decoders validate container headers and nesting depth on unknown fields and skip
+          unreferenced scalar and string payload bytes by length.
         </p>
 
         <h2 id="sec-8">8. Optional Naming Metadata (Field #0)</h2>
         <h3 id="sec-8-1">8.1 SchemaMeta Definition</h3>
         <p>
-          Field #0 MUST be a WireSubMsg containing this message, encoded using OmniBuf rather than
-          protobuf wire bytes. Names are optional because scalar and collection types are already
-          carried by their value encodings. No logical-type correction table is needed.
+          Field #0 (<code>Tag = 0x19</code>, <code>FieldNumber = 0</code>,{' '}
+          <code>WireSubMsg = 12</code>) optionally embeds message and field names encoded as an
+          OmniBuf <code>SchemaMeta</code> submessage:
         </p>
         <Code code={sec8MetaProtoCode} lang="proto" />
-        <h3 id="sec-8-2">8.2 Placement &amp; Interpretation</h3>
+        <h3 id="sec-8-2">8.2 Placement, Inheritance &amp; Merge</h3>
         <p>
-          Encoders SHOULD put Field #0 first. Decoders MUST accept it anywhere, including multiple
-          occurrences after concatenation. Metadata applies by numeric field ID, not by the position
-          of a field in a packet. A blind reader SHOULD resolve the merged metadata before assigning
-          output names, so late metadata does not create duplicate output keys for one field.
+          Encoders SHOULD write Field #0 first, and decoders MUST accept it at any position
+          (including multiple Field #0 blocks in concatenated packets) and validate its wire
+          structure even when an external schema is present. Blind readers resolve merged Field #0
+          metadata before emitting field keys (falling back to <code>field_&lt;N&gt;</code> when
+          unnamed) and MUST NOT let presentation names alter numeric field merging or silently
+          overwrite colliding keys.
         </p>
         <p>
-          Without names, a blind reader can use keys such as <code>field_1</code>. Metadata does not
-          reconstruct omitted values, enum labels, oneof membership, or application-specific
-          meaning. Names are presentation metadata and MUST NOT change which numeric fields merge. A
-          reader MUST avoid silently overwriting distinct fields when their supplied names collide.
-        </p>
-        <h3 id="sec-8-3">8.3 Names for Collection Contents</h3>
-        <p>
-          The <code>children</code> map stores the naming metadata for a field's message values
-          once. For arrays and map values, that metadata is inherited through nested collections
-          until a message value is reached. It is not repeated for every element. An element's own
-          Field #0 may refine its inherited names. If collection contents have different message
-          schemas, they can carry their own naming metadata.
-        </p>
-        <h3 id="sec-8-4">8.4 Metadata Merge</h3>
-        <p>
-          Later nonempty type names and later field-name entries override earlier ones. Child
-          metadata for the same numeric field merges recursively. This recursive merge of
-          <code>children</code> is a SchemaMeta-specific rule, while ordinary map entries still
-          replace their entire values. Field #0 MUST be structurally valid, even when a decoder
-          already has an external schema.
+          In <code>SchemaMeta</code>, <code>children[N]</code> stores the child naming table for
+          field <code>N</code> once and propagates automatically through arrays and map values of
+          submessages unless overridden by an inner message's own Field #0. Across multiple Field #0
+          blocks, later non-empty <code>type_name</code> values win, later <code>fields</code>{' '}
+          entries override per field number (an empty string <code>""</code> clears an inherited
+          field name back to <code>field_&lt;N&gt;</code>), and <code>children</code> maps merge
+          recursively by field number.
         </p>
 
         <h2 id="sec-9">9. Complete Message Example</h2>
@@ -918,7 +821,7 @@ const tocSections = sectionTitles.map((title, index) => ({
         <p>
           The seven-byte Location body has a two-byte reserved length prefix. The root message
           occupies 15 bytes. A reader can skip Location directly from its length, or decode its
-          fields without knowing the schema, and Field #0 can add field names to that inspection.
+          fields with no external schema, and Field #0 can add field names to that inspection.
         </p>
 
         <h2 id="sec-10">10. Validity &amp; Rejection Rules</h2>
@@ -948,9 +851,8 @@ const tocSections = sectionTitles.map((title, index) => ({
           <li>
             A map body MUST contain KeyType, ValueType, and Count. Validate both type bytes even
             when empty. Before allocating entries, require{' '}
-            <code>count &lt;= remainingBytes / 2</code>. Use division rather than multiplying an
-            attacker-controlled count, which can overflow. Parse exactly Count entries and require
-            an exact end boundary.
+            <code>count &lt;= remainingBytes / 2</code>. Check by division (multiplying an untrusted
+            count can overflow). Parse all Count entries and require an exact end boundary.
           </li>
           <li>Strings MUST contain valid UTF-8. Arbitrary binary data MUST use WireBytes.</li>
           <li>
@@ -959,20 +861,16 @@ const tocSections = sectionTitles.map((title, index) => ({
             <code>KeyType = 0x00, ValueType = 0x0C</code>.
           </li>
           <li>
-            Decoders MUST enforce a nesting limit. The default is 32 nested containers below the
-            root, counting messages, arrays, and maps, including nested collections. Metadata
-            parsing MUST also have a bounded recursion limit.
-          </li>
-          <li>
-            Implementations SHOULD provide message-size and allocation limits. A valid uint64 length
-            is not authorization to allocate that much memory.
+            <strong>Nesting &amp; allocation caps:</strong> enforce a default max container depth of
+            32 below the root (including nested collections and <code>SchemaMeta</code> recursion)
+            and configurable message-size / allocation caps so large <code>uint64</code> length
+            prefixes cannot trigger unbounded allocations.
           </li>
         </ul>
         <p>
-          Unknown field numbers do not make a packet invalid. Unknown core fields can be inspected
-          or skipped using their wire types. Unknown extensions can be skipped by length, but cannot
-          be interpreted without their extension definition. Implementations MUST document whether
-          unknown fields survive decode and re-encode.
+          Unknown core field numbers remain skippable and inspectable by wire type; unknown{' '}
+          <code>WireExtended</code> fields can be skipped by <code>ByteLen</code>. Implementations
+          MUST document whether unknown fields are preserved across decode/re-encode cycles.
         </p>
 
         <h2 id="sec-11">11. Schema Mapping &amp; Conformance</h2>
@@ -989,66 +887,30 @@ const tocSections = sectionTitles.map((title, index) => ({
             <tbody>
               <tr>
                 <td>
-                  <code>uint32</code>
+                  <code>uint32</code>, <code>uint64</code>
                 </td>
                 <td>
                   <code>WireUint (0)</code>
                 </td>
-                <td>Unsigned Prefix-Varint (must fit in 32 bits)</td>
+                <td>[Value: Prefix-Varint] (low 32 bits retained on uint32)</td>
               </tr>
               <tr>
                 <td>
-                  <code>uint64</code>
-                </td>
-                <td>
-                  <code>WireUint (0)</code>
-                </td>
-                <td>Unsigned Prefix-Varint (up to 64 bits)</td>
-              </tr>
-              <tr>
-                <td>
-                  <code>int32</code>
+                  <code>int32</code>, <code>sint32</code>, <code>enum</code>
                 </td>
                 <td>
                   <code>WireSint (1)</code>
                 </td>
-                <td>ZigZag Prefix-Varint (must fit in signed 32 bits)</td>
+                <td>[ZigZag Value: Prefix-Varint] (low 32 bits retained as signed int32)</td>
               </tr>
               <tr>
                 <td>
-                  <code>int64</code>
+                  <code>int64</code>, <code>sint64</code>
                 </td>
                 <td>
                   <code>WireSint (1)</code>
                 </td>
-                <td>ZigZag Prefix-Varint (up to signed 64 bits)</td>
-              </tr>
-              <tr>
-                <td>
-                  <code>sint32</code>
-                </td>
-                <td>
-                  <code>WireSint (1)</code>
-                </td>
-                <td>ZigZag Prefix-Varint (must fit in signed 32 bits)</td>
-              </tr>
-              <tr>
-                <td>
-                  <code>sint64</code>
-                </td>
-                <td>
-                  <code>WireSint (1)</code>
-                </td>
-                <td>ZigZag Prefix-Varint (up to signed 64 bits)</td>
-              </tr>
-              <tr>
-                <td>
-                  <code>enum</code>
-                </td>
-                <td>
-                  <code>WireSint (1)</code>
-                </td>
-                <td>ZigZag Prefix-Varint (signed 32-bit enum number)</td>
+                <td>[ZigZag Value: Prefix-Varint] (signed 64-bit range)</td>
               </tr>
               <tr>
                 <td>
@@ -1058,63 +920,36 @@ const tocSections = sectionTitles.map((title, index) => ({
                   <code>WireBoolFalse (2)</code> / <code>WireBoolTrue (3)</code>
                 </td>
                 <td>
-                  Zero payload bytes in field tags, or type code <code>2</code> with 1 raw byte (
-                  <code>00</code> or <code>01</code>) in arrays and maps
+                  0B in tag; code <code>2</code> + 1B (<code>00</code>/<code>01</code>) in
+                  collections
                 </td>
               </tr>
               <tr>
                 <td>
-                  <code>fixed32</code>
+                  <code>fixed32</code>, <code>fixed64</code>
                 </td>
                 <td>
-                  <code>WireFixed32 (4)</code>
+                  <code>WireFixed32 (4)</code> / <code>WireFixed64 (5)</code>
                 </td>
-                <td>4-byte little-endian unsigned integer</td>
+                <td>4B LE uint32 / 8B LE uint64</td>
               </tr>
               <tr>
                 <td>
-                  <code>fixed64</code>
+                  <code>sfixed32</code>, <code>sfixed64</code>
                 </td>
                 <td>
-                  <code>WireFixed64 (5)</code>
+                  <code>WireSfixed32 (6)</code> / <code>WireSfixed64 (7)</code>
                 </td>
-                <td>8-byte little-endian unsigned integer</td>
+                <td>4B LE int32 / 8B LE int64</td>
               </tr>
               <tr>
                 <td>
-                  <code>sfixed32</code>
+                  <code>float</code>, <code>double</code>
                 </td>
                 <td>
-                  <code>WireSfixed32 (6)</code>
+                  <code>WireFloat32 (8)</code> / <code>WireFloat64 (9)</code>
                 </td>
-                <td>4-byte little-endian two's-complement signed integer</td>
-              </tr>
-              <tr>
-                <td>
-                  <code>sfixed64</code>
-                </td>
-                <td>
-                  <code>WireSfixed64 (7)</code>
-                </td>
-                <td>8-byte little-endian two's-complement signed integer</td>
-              </tr>
-              <tr>
-                <td>
-                  <code>float</code>
-                </td>
-                <td>
-                  <code>WireFloat32 (8)</code>
-                </td>
-                <td>4-byte little-endian IEEE-754 binary32 float</td>
-              </tr>
-              <tr>
-                <td>
-                  <code>double</code>
-                </td>
-                <td>
-                  <code>WireFloat64 (9)</code>
-                </td>
-                <td>8-byte little-endian IEEE-754 binary64 float</td>
+                <td>4B LE binary32 / 8B LE binary64 (IEEE-754)</td>
               </tr>
               <tr>
                 <td>
@@ -1123,7 +958,7 @@ const tocSections = sectionTitles.map((title, index) => ({
                 <td>
                   <code>WireString (10)</code>
                 </td>
-                <td>ByteLen Prefix-Varint followed by valid UTF-8 bytes</td>
+                <td>[ByteLen][UTF-8 bytes]</td>
               </tr>
               <tr>
                 <td>
@@ -1132,7 +967,7 @@ const tocSections = sectionTitles.map((title, index) => ({
                 <td>
                   <code>WireBytes (11)</code>
                 </td>
-                <td>ByteLen Prefix-Varint followed by raw bytes</td>
+                <td>[ByteLen][Raw bytes]</td>
               </tr>
               <tr>
                 <td>
@@ -1141,7 +976,7 @@ const tocSections = sectionTitles.map((title, index) => ({
                 <td>
                   <code>WireSubMsg (12)</code>
                 </td>
-                <td>ByteLen Prefix-Varint followed by nested field stream</td>
+                <td>[ByteLen][Nested field stream]</td>
               </tr>
               <tr>
                 <td>
@@ -1151,8 +986,7 @@ const tocSections = sectionTitles.map((title, index) => ({
                   <code>WireArray (13)</code>
                 </td>
                 <td>
-                  ByteLen + <code>ElementType</code> (T's wire type code, using <code>2</code> for
-                  bool) + <code>Count</code> + elements
+                  [ByteLen][<code>ElementType</code>: 1B][<code>Count</code>][Elements]
                 </td>
               </tr>
               <tr>
@@ -1163,90 +997,59 @@ const tocSections = sectionTitles.map((title, index) => ({
                   <code>WireMap (14)</code>
                 </td>
                 <td>
-                  ByteLen + <code>KeyType</code> (1 byte) + <code>ValueType</code> (1 byte) +{' '}
-                  <code>Count</code> + key/value pairs
+                  [ByteLen][<code>KeyType</code>: 1B][<code>ValueType</code>: 1B][<code>Count</code>
+                  ][Pairs]
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
         <p>
-          Implementations MUST preserve explicit presence and active oneof members, including
-          present zero values. Unsupported schema features MUST produce a clear error rather than
-          silently dropping data. Using protobuf schemas does not make OmniBuf bytes protobuf-wire
-          compatible. Language libraries and generators MUST document their supported schema subset.
+          Implementations MUST preserve explicit presence and active <code>oneof</code> members,
+          including present zero values. Unsupported schema features MUST return an explicit error
+          and never silently drop data. Sharing a <code>.proto</code> schema does not make OmniBuf
+          bytes wire-compatible with Protobuf, and libraries MUST document their supported schema
+          subset.
         </p>
         <h3 id="sec-11-2">11.2 Conformance Runner &amp; Client Protocol</h3>
         <p>
-          Cross-language conformance is verified using a self-contained test runner (
-          <code>omnibuf conformance</code> or <code>conformance-runner</code>) paired with a
-          language-specific client executable (such as <code>conformance-go</code> or{' '}
-          <code>conformance-es</code>), modeled after Protobuf's{' '}
-          <code>conformance-test-runner</code>, <code>protovalidate-conformance</code>, and
-          Connect's conformance runner.
+          Cross-language conformance uses a standalone test runner (<code>omnibuf conformance</code>{' '}
+          / <code>conformance-runner</code>) paired with a per-language client binary (
+          <code>conformance-go</code>, <code>conformance-es</code>). This split follows Protobuf's{' '}
+          <code>conformance-test-runner</code> and <code>protovalidate-conformance</code>.
         </p>
         <p>
-          The runner embeds the canonical test corpus and spawns the target client as a child
-          process. Both processes communicate over standard input (<code>stdin</code>) and standard
-          output (<code>stdout</code>) using length-delimited frames. Each frame begins with a
-          four-byte little-endian <code>uint32</code> byte length (capped at 16 MiB) followed by an
-          OmniBuf-encoded <code>ConformanceRequest</code> (written by the runner to the client's{' '}
-          <code>stdin</code>) or <code>ConformanceResponse</code> (written by the client to{' '}
-          <code>stdout</code>). The client reads requests in a loop until <code>stdin</code> reaches{' '}
-          <code>EOF</code>, and writes any diagnostic logs to <code>stderr</code>.
+          The runner embeds the test corpus and launches the target client as a subprocess. Requests
+          arrive on <code>stdin</code> and responses return on <code>stdout</code> as
+          length-delimited frames. Every frame starts with a 4-byte little-endian{' '}
+          <code>uint32</code> byte length (max 16 MiB) followed by an OmniBuf{' '}
+          <code>ConformanceRequest</code> or <code>ConformanceResponse</code>. The client loops on{' '}
+          <code>stdin</code> until <code>EOF</code> and logs diagnostics to <code>stderr</code>.
         </p>
         <Code code={sec11ConformanceProtoCode} lang="proto" />
         <p>
-          For each test vector, the runner dispatches requests across four implementation tiers:
+          The runner tests four <code>TestTier</code> modes on each vector.{' '}
+          <code>TEST_TIER_PLUGIN (1)</code> exercises code from <code>protoc-gen-omnibuf-*</code>:
+          decoding into dirty structs (verifying omitted fields clear), re-encoding, lazy{' '}
+          <code>Opaque</code> getters, and in-place wire splicing (<code>test_opaque_splice</code>{' '}
+          and <code>test_opaque_splice_shrink</code>). <code>TEST_TIER_PROTOBUF_TYPES (2)</code>{' '}
+          exercises standard Protobuf descriptors or generated Protobuf structs with no OmniBuf
+          plugin. <code>TEST_TIER_ANNOTATED_STRUCT (3)</code> exercises plain language structs,
+          classes, or runtime schemas (Go <code>omnibuf</code> struct tags; TypeScript{' '}
+          <code>defineMessage</code> or decorators). <code>TEST_TIER_BLIND (4)</code> exercises{' '}
+          <code>DecodeBlind</code> / <code>decodeBlind</code>, returning{' '}
+          <code>WIRE_FORMAT_JSON</code> keyed by Field #0 <code>SchemaMeta</code> names when present
+          or <code>field_&lt;N&gt;</code> fallback keys.
         </p>
-        <ul>
-          <li>
-            <strong>
-              <code>TEST_TIER_PLUGIN (1)</code>
-            </strong>
-            : Exercises code generated by the language's compiler plugin (
-            <code>protoc-gen-omnibuf-*</code>), including decoding into pre-populated message
-            instances to verify that omitted fields are cleared, re-encoding, and lazy{' '}
-            <code>Opaque</code> view getters and wire splicing (<code>test_opaque_splice</code> to
-            grow fields across Prefix-Varint length boundaries and{' '}
-            <code>test_opaque_splice_shrink</code> to shrink them).
-          </li>
-          <li>
-            <strong>
-              <code>TEST_TIER_PROTOBUF_TYPES (2)</code>
-            </strong>
-            : Exercises standard Protobuf descriptors or generated Protobuf message types without
-            the OmniBuf code generator plugin.
-          </li>
-          <li>
-            <strong>
-              <code>TEST_TIER_ANNOTATED_STRUCT (3)</code>
-            </strong>
-            : Exercises native language structs, classes, or declarative schemas (such as{' '}
-            <code>omnibuf</code> struct tags in Go or <code>defineMessage</code> and decorators in
-            TypeScript).
-          </li>
-          <li>
-            <strong>
-              <code>TEST_TIER_BLIND (4)</code>
-            </strong>
-            : Exercises schema-less inspection (<code>DecodeBlind</code> / <code>decodeBlind</code>
-            ), returning a JSON object (<code>WIRE_FORMAT_JSON</code>) keyed by Field #0{' '}
-            <code>SchemaMeta</code> names when present or <code>field_&lt;N&gt;</code> fallback keys
-            when absent.
-          </li>
-        </ul>
         <p>
-          Because the wire format is not canonical (map entry ordering and overlong length prefixes
-          may differ across encoders), the runner decodes the client's returned{' '}
-          <code>omnibuf_payload</code> and checks semantic equivalence against the input rather than
-          requiring identical bytes. When <code>self_describing</code> is set on the request, the
-          runner also verifies that the returned payload includes a valid Field #0{' '}
-          <code>SchemaMeta</code> block. For malformed or malicious input vectors,{' '}
-          <code>TEST_TIER_BLIND</code> MUST return a non-empty <code>parse_error</code>, and all
-          tiers MUST reject or handle the input without crashing, panicking, or returning a{' '}
-          <code>runtime_error</code>. A client that does not implement an optional tier or message
-          type MAY return a non-empty <code>skipped</code> reason.
+          Map ordering and backpatched Prefix-Varint widths can vary across encoders, so the runner
+          decodes the client's returned <code>omnibuf_payload</code> and compares decoded values for
+          semantic equality. Requests with <code>self_describing = true</code> must return a valid
+          Field #0 <code>SchemaMeta</code> block. On malformed or hostile input vectors,{' '}
+          <code>TEST_TIER_BLIND</code> MUST return a non-empty <code>parse_error</code>, and every
+          tier MUST reject the payload cleanly with no crash, panic, or <code>runtime_error</code>.
+          Unimplemented optional tiers or message types MAY return a non-empty <code>skipped</code>{' '}
+          string.
         </p>
         <h3 id="sec-11-3">11.3 Conformance Test Coverage</h3>
         <p>
@@ -1271,11 +1074,6 @@ const tocSections = sectionTitles.map((title, index) => ({
             invalid UTF-8, nesting limits, corrupt Field #0 headers, and unsupported extensions.
           </li>
         </ul>
-        <p>
-          This draft changes the wire layout. Earlier fixtures and benchmark results must be
-          regenerated before they are used as evidence for this design. Performance comparisons
-          should identify the codec, allocation and ownership policy, workload, and validation work.
-        </p>
       </article>
     </div>
 

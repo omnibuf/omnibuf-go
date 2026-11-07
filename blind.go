@@ -107,7 +107,7 @@ func appendSchemaMetaChildEntry(dst []byte, k uint32, child *SchemaMeta, determi
 	return backpatchContainerLen(dst, cLenPos)
 }
 
-// ReadField0SchemaMeta decodes and merges all Field #0 (Tag = 0x0B, wireSubMsg = 5)
+// ReadField0SchemaMeta decodes and merges all Field #0 (Tag = 0x19, wireSubMsg = 12)
 // SchemaMeta blocks in packet.
 func ReadField0SchemaMeta(packet []byte) (*SchemaMeta, bool) {
 	var merged *SchemaMeta
@@ -137,8 +137,8 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 	n := len(data)
 	for pos < n {
 		tag, tn := decodeVarint(data[pos:])
-		if tn == 0 {
-			return nil, fmt.Errorf("omnibuf: truncated tag in Field #0 SchemaMeta at %d", pos)
+		if tn == 0 || tag>>4 > maxProtobufFieldNumber {
+			return nil, fmt.Errorf("omnibuf: truncated or invalid tag in Field #0 SchemaMeta at %d", pos)
 		}
 		pos += tn
 		fnum := tag >> 4
@@ -158,6 +158,9 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 			if wt != wireMap {
 				return nil, fmt.Errorf("omnibuf: SchemaMeta field #2 (fields) must be wireMap, got %d", wt)
 			}
+			if depth+1 > MaxNestingDepth {
+				return nil, fmt.Errorf("omnibuf: SchemaMeta fields map nesting depth %d exceeds MaxNestingDepth (%d)", depth+1, MaxNestingDepth)
+			}
 			body, nextPos, err := readLenSlice(data, pos, 3)
 			if err != nil {
 				return nil, err
@@ -168,12 +171,12 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 				return nil, fmt.Errorf("omnibuf: invalid SchemaMeta fields map header")
 			}
 			if meta.Fields == nil {
-				meta.Fields = make(map[uint32]string, count)
+				meta.Fields = make(map[uint32]string, min(count, 4096))
 			}
 
 			for range count {
 				k64, kn := decodeVarint(body[p:])
-				if kn == 0 || k64 == 0 || k64 > math.MaxUint32 {
+				if kn == 0 || k64 == 0 || k64 > maxProtobufFieldNumber {
 					return nil, fmt.Errorf("omnibuf: invalid SchemaMeta field number %d at %d", k64, p)
 				}
 				p += kn
@@ -191,6 +194,9 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 			if wt != wireMap {
 				return nil, fmt.Errorf("omnibuf: SchemaMeta field #3 (children) must be wireMap, got %d", wt)
 			}
+			if depth+1 > MaxNestingDepth {
+				return nil, fmt.Errorf("omnibuf: SchemaMeta children map nesting depth %d exceeds MaxNestingDepth (%d)", depth+1, MaxNestingDepth)
+			}
 			body, nextPos, err := readLenSlice(data, pos, 3)
 			if err != nil {
 				return nil, err
@@ -201,11 +207,11 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 				return nil, fmt.Errorf("omnibuf: invalid SchemaMeta children map header")
 			}
 			if meta.Children == nil {
-				meta.Children = make(map[uint32]*SchemaMeta, count)
+				meta.Children = make(map[uint32]*SchemaMeta, min(count, 4096))
 			}
 			for range count {
 				k64, kn := decodeVarint(body[p:])
-				if kn == 0 || k64 == 0 || k64 > math.MaxUint32 {
+				if kn == 0 || k64 == 0 || k64 > maxProtobufFieldNumber {
 					return nil, fmt.Errorf("omnibuf: invalid SchemaMeta child field number %d at %d", k64, p)
 				}
 				p += kn
@@ -227,7 +233,7 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 			if fnum == 0 {
 				return nil, fmt.Errorf("omnibuf: invalid field #0 inside SchemaMeta")
 			}
-			nextPos, err := skipValue(data, pos, wt)
+			nextPos, err := skipValueWithDepth(data, pos, wt, depth)
 			if err != nil {
 				return nil, err
 			}
@@ -304,7 +310,7 @@ func (s *blindSchema) child(field uint32) *blindSchema {
 }
 
 // DecodeBlind decodes any OmniBuf packet without a compile-time schema.
-// If Field #0 (Tag = 0x0B, wireSubMsg = 5, omnibuf.v1.SchemaMeta) is present, its field names
+// If Field #0 (Tag = 0x19, wireSubMsg = 12, omnibuf.v1.SchemaMeta) is present, its field names
 // (and any nested children schemas) are used to decode human-readable keys.
 // Otherwise, synthetic field names ("field_1", "field_2", ...) are used.
 func DecodeBlind(packet []byte) (map[string]any, error) {
@@ -379,7 +385,7 @@ func decodeBlindWithSchema(data []byte, inherited *blindSchema, depth int) (map[
 
 		if fieldNum == 0 {
 			if wt != wireSubMsg {
-				return nil, fmt.Errorf("omnibuf: Field #0 must have wireSubMsg wire type (5), got %d", wt)
+				return nil, fmt.Errorf("omnibuf: Field #0 must have wireSubMsg wire type (12), got %d", wt)
 			}
 			_, nextPos, err := readLenSlice(data, pos, 0)
 			if err != nil {
@@ -497,7 +503,7 @@ func decodeBlindWithSchema(data []byte, inherited *blindSchema, depth int) (map[
 			} else {
 				m, ok := out[name].(map[string]any)
 				if !ok || m == nil {
-					m = make(map[string]any, count)
+					m = make(map[string]any, min(count, 4096))
 				}
 				for range count {
 					k, nextP, err := decodeMapKeyBlind(body, p, keyWT)
@@ -845,7 +851,7 @@ func decodeMapBodyBlind(body []byte, schema *blindSchema, depth int) (map[string
 	if !ok {
 		return nil, fmt.Errorf("omnibuf: invalid map")
 	}
-	out := make(map[string]any, count)
+	out := make(map[string]any, min(count, 4096))
 	for range count {
 		k, next, err := decodeMapKeyBlind(body, p, keyWT)
 		if err != nil {

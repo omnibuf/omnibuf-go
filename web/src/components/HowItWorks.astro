@@ -31,17 +31,17 @@ const nodeSchemaCode = `message Node {
         </h3>
         <!-- prettier-ignore -->
         <p class="text-base sm:text-lg text-ink/85 leading-relaxed max-w-[65ch]">
-          When Protobuf reads a varint, it has to check bit 7 of every byte in a loop until it finds a byte that starts with <code>0</code>. OmniBuf moves those length bits into the low bits of the first byte. The number of trailing <code>0</code>s before the first <code>1</code> (counted by a single <a href="https://en.wikipedia.org/wiki/Find_first_set" target="_blank" rel="noopener noreferrer" class="doc-link"><code>TZCNT</code></a> instruction) tells the CPU whether the integer is 1, 2, 4, or 9 bytes long, while the remaining upper bits of that first byte hold the start of the number. Signed integers use <a href="https://protobuf.dev/programming-guides/encoding/#signed-ints" target="_blank" rel="noopener noreferrer" class="doc-link">ZigZag encoding</a> just like Protobuf's <code>sint32</code> and <code>sint64</code>.
+          LEB128 varints in Protobuf put a continuation bit on every byte, forcing decoders to check one byte at a time until a <code>0</code> MSB appears. Prefix-Varints put the width bits at the bottom of the first byte. One <a href="https://en.wikipedia.org/wiki/Find_first_set" target="_blank" rel="noopener noreferrer" class="doc-link"><code>TZCNT</code></a> instruction gives the byte width (1, 2, 4, or 9 bytes), followed by a single little-endian word load and right shift. Signed integers use <a href="https://protobuf.dev/programming-guides/encoding/#signed-ints" target="_blank" rel="noopener noreferrer" class="doc-link">ZigZag mapping</a> (<code>WireSint = 1</code>).
         </p>
         <p class="text-base sm:text-lg text-ink/85 leading-relaxed max-w-[65ch]">
-          The tradeoff is byte density for medium-large integers. Because Prefix-Varints only use 1,
-          2, 4, or 9 bytes, any unsigned integer at or above <code>2^29</code> (
-          <code>536,870,912</code>) jumps straight from 4 bytes to 9 bytes, whereas Protobuf's
-          LEB128 uses 5 to 8 bytes in that range. For fields that usually hold Unix timestamps or
-          large 64-bit counters, <code>WireFixed64</code> (8 bytes) is a better fit.
+          Only four widths exist: 1, 2, 4, and 9 bytes. Numbers that would take 3, 5, 6, 7, or 8
+          bytes in LEB128 round up to the next CPU word size (8, 16, 32, or 64-bit load), and
+          unsigned values at or above <code>2^29</code> (<code>536,870,912</code>) take 9 bytes.
+          64-bit timestamps and random IDs fit better in 8-byte <code>fixed64</code> (
+          <code>WireFixed64 = 5</code>).
         </p>
       </div>
-      <div class="lg:col-span-6 min-w-0 space-y-3">
+      <div class="lg:col-span-6 min-w-0 space-y-3 select-none">
         <div class="p-4 sm:p-5 bg-ink text-paper border-2 border-ink rounded-md font-mono text-xs sm:text-sm space-y-4">
           <div class="space-y-1.5">
             <div class="flex items-center justify-between gap-2">
@@ -127,24 +127,22 @@ const nodeSchemaCode = `message Node {
     >
       <div class="lg:col-span-6 space-y-3 min-w-0">
         <h3 class="text-2xl sm:text-3xl font-bold uppercase tracking-tight leading-snug">
-          Reserve 2 bytes &amp; patch after
+          Encode in one pass with 2-byte length slots
         </h3>
         <p class="text-base sm:text-lg text-ink/85 leading-relaxed max-w-[65ch]">
-          In Protobuf, varints must use the fewest bytes possible (1 byte for lengths under 128, 2
-          bytes for lengths up to 16,383). Because of that, an encoder doesn't know how many bytes
-          to leave for a nested message's length header until it walks all of the child fields first
-          to add up their sizes. OmniBuf allows a 2-byte Prefix-Varint (<code>TZCNT=1</code>) for
-          any container up to 16 KB, even if the final length ends up being under 128 bytes. That
-          lets the encoder reserve 2 bytes, write the child fields, and fill in the 2-byte length
-          when it finishes.
+          Protobuf forbids overlong varints: lengths under 128 must use 1 byte, and lengths from 128
+          to 16,383 must use 2 bytes. A Protobuf encoder has to walk the entire sub-message tree
+          first just to compute byte sizes before writing anything. OmniBuf permits non-minimal
+          Prefix-Varint widths. The encoder reserves a 2-byte length slot (<code>00 00</code>),
+          writes the child fields forward into the output buffer, and patches{' '}
+          <code>LE16((byteLen &lt;&lt; 2) | 2)</code> into those two bytes when the sub-message
+          finishes.
         </p>
         <p class="text-base sm:text-lg text-ink/85 leading-relaxed max-w-[65ch]">
-          Reserving 2 bytes adds 1 extra byte to tiny containers under 128 bytes. In exchange, the
-          encoder only walks your struct once for normal messages under 16 KB. If a container grows
-          past 16,383 bytes, the encoder shifts that container's payload right by 2 bytes in the
-          buffer (<code>memmove</code>) and writes a 4-byte length instead. Note that if you have
-          nested containers that each exceed 16 KB, those inner bytes will be shifted more than
-          once.
+          Sub-messages under 128 bytes pay 1 extra header byte for that 2-byte reservation (~7%
+          larger on the <code>PeerUpdate</code> benchmark packet). Sub-messages that grow past
+          16,383 bytes shift their written body right by 2 bytes (<code>memmove</code>) and patch a
+          4-byte length header.
         </p>
       </div>
       <div class="lg:col-span-6 min-w-0 space-y-3">
@@ -206,18 +204,17 @@ const nodeSchemaCode = `message Node {
       <div class="grid lg:grid-cols-12 gap-6 lg:gap-8 items-start">
         <div class="lg:col-span-6 space-y-2.5 min-w-0">
           <h3 class="text-2xl sm:text-3xl font-bold uppercase tracking-tight leading-snug">
-            Skip fields in one step
+            Skip fields by jumping their byte length
           </h3>
           <p class="text-base sm:text-lg text-ink/85 leading-relaxed max-w-[65ch]">
-            Every field header tells the reader how many bytes to advance without decoding the
-            payload. Booleans add <code>0</code> bytes, fixed-width numbers add <code>4</code> or{' '}
-            <code>8</code> bytes, dynamic integers encode their width (<code>1</code>,{' '}
-            <code>2</code>, <code>4</code>, or <code>9</code> bytes) in the first byte, and every
-            string, byte slice, sub-message, array, or map starts with its total{' '}
-            <code>byteLen</code>. A reader can hop over any field in one addition (
-            <code>pos += byteLen</code>) instead of scanning every varint byte. Lookup still walks
-            linearly through preceding field headers in the message, so skipping is constant time
-            per field examined rather than an <code>O(1)</code> offset table lookup.
+            Every field header tells the reader how many bytes follow. Booleans take <code>0</code>{' '}
+            value bytes, fixed numbers take <code>4</code> or <code>8</code>, Prefix-Varints put
+            their width (<code>1</code>, <code>2</code>, <code>4</code>, or <code>9</code> bytes) in
+            the first byte, and containers start with their <code>byteLen</code>. Skipping a field
+            just adds that length to the buffer offset (<code>pos += byteLen</code>). The reader
+            still steps through earlier field headers in the message to find a tag, so it isn't an{' '}
+            <code>O(1)</code> offset table like FlatBuffers, but each hop is one addition, not a
+            byte-by-byte varint loop.
           </p>
         </div>
         <div class="lg:col-span-6 min-w-0">
@@ -262,10 +259,10 @@ const nodeSchemaCode = `message Node {
         </div>
         <div class="lg:col-span-7 space-y-3 min-w-0">
           <p class="text-base sm:text-lg text-ink/90 leading-relaxed">
-            To skip past <code>id</code> (a 2-byte tag + 4-byte integer) and <code>active</code> (a
-            boolean) to reach <code>city</code>, Protobuf has to bounce across{' '}
-            <strong>every single varint byte</strong> to check continuation bits. OmniBuf reads the
-            width from the first byte and leaps over each tag, scalar, or container in one jump.
+            Suppose a reader wants <code>city</code> and needs to skip <code>id</code> and{' '}
+            <code>active</code>. Protobuf has to inspect <strong>every byte</strong> of the tag and
+            integer varints to find where they end. OmniBuf reads the width from the first byte and
+            jumps straight to the next header.
           </p>
           <!-- Simple Color Key -->
           <div class="flex flex-wrap items-center gap-4 text-xs sm:text-sm font-mono pt-1">

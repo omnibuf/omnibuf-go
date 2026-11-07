@@ -98,7 +98,7 @@ func ReadMapStringUint(packet []byte, fieldNum uint16, zeroCopy bool) (map[strin
 			return nil, false
 		}
 		if out == nil {
-			out = make(map[string]uint64, count)
+			out = make(map[string]uint64, min(count, 4096))
 		}
 		for range count {
 			kLen, kn := DecodeVarint(body[p:])

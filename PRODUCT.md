@@ -25,7 +25,7 @@ Its core wire-format mechanisms are:
 - **16 self-describing wire types (4-bit nibble):** Every tag encodes the exact data type (`WireUint`, `WireSint`, `WireBoolFalse`, `WireBoolTrue`, `WireFixed32`, `WireFixed64`, `WireSfixed32`, `WireSfixed64`, `WireFloat32`, `WireFloat64`, `WireString`, `WireBytes`, `WireSubMsg`, `WireArray`, `WireMap`, `WireExtended`), allowing any payload to be inspected or converted to JSON without the `.proto` file.
 - **Contiguous primitive arrays and length-prefixed containers:** Eliminates repeated per-element tags and varint loops on slices, allowing any container to be skipped in one jump (`pos += byteLen`).
 - **Single-pass forward encoding:** Fixed 2-byte length patch slots avoid Protobuf's two-pass `Size()` calculation.
-- **Opaque field lookup and splicing (`LocateField`, `SpliceFields`):** Jump over unrelated fields in `O(1)` per field using self-describing byte lengths to read, drop, or replace individual fields without decoding the message.
+- **Opaque field lookup and splicing (`LocateField`, `SpliceFields`):** Jump over unrelated fields in `O(1)` per field using self-describing byte lengths to read, drop, or replace individual fields directly in the raw buffer.
 
 ## Operating Context
 
@@ -40,8 +40,8 @@ Its core wire-format mechanisms are:
 
 ## Brand Commitments
 
-- **Voice and tone:** Direct, technical, and opinionated engineering prose. Explain what the bytes and CPU instructions actually do.
-- **Copy bans:** Never use marketing fluff, AI-sounding filler phrases, or em-dashes anywhere in copy or documentation.
+- **Voice and tone:** Direct, technical, and matter-of-fact engineering prose. Explain what the bytes and CPU instructions actually do without second-person marketing pitch.
+- **Copy bans:** Never use `"We're still paying for"` (or any `"paying for"` / `"pay the cost"` phrasing), rhetorical question hooks, marketing fluff, AI-sounding filler phrases, or em-dashes anywhere in copy or documentation.
 
 ## Evidence on Hand
 

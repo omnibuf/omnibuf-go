@@ -4,16 +4,16 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/sudorandom/omnibuf.svg)](https://pkg.go.dev/github.com/sudorandom/omnibuf)
 [![Website](https://img.shields.io/badge/website-omnibuf.com-111111?style=flat&labelColor=111111&color=D4FF33)](https://omnibuf.com)
 
-**[Website (omnibuf.com)](https://omnibuf.com)** · **[How It Works](https://omnibuf.com/how-it-works)** · **[Benchmarks](https://omnibuf.com/benchmarks)** · **[Wire Format Specification](https://omnibuf.com/spec)**
+**[Website (omnibuf.com)](https://omnibuf.com)** · **[How It Works](https://omnibuf.com/how-it-works)** · **[Go Implementation](https://omnibuf.com/go)** · **[TypeScript / JS](https://omnibuf.com/es)** · **[Wire Format Specification](https://omnibuf.com/spec)**
 
 **OmniBuf** is a binary wire format for Protocol Buffers (`.proto` schemas) built around four ideas:
 
 1. **Keep `.proto` schemas and Go structs:** Existing `.proto` files, `protoc-gen-go` structs, and `dynamicpb` messages work without changes.
-2. **Fix Protobuf's CPU bottlenecks:** Prefix-Varints (`TZCNT`) decode integers in a single load instead of a byte-by-byte continuation loop, and 2-byte length backpatching encodes messages in a single forward pass instead of walking the struct tree twice (~6x faster encode and ~8x faster zero-copy decode than `google.golang.org/protobuf`).
+2. **Fix Protobuf's CPU bottlenecks:** Prefix-Varints (`TZCNT`) decode integers in a single load with no byte-by-byte continuation loop, and 2-byte length backpatching encodes messages in a single forward pass with no two-pass size walk (~6x faster encode and ~7x faster zero-copy decode than `google.golang.org/protobuf`).
 3. **Inspect packets without a schema (`DecodeBlind`):** Explicit 4-bit wire types (`0..15`) replace Protobuf's overloaded `Wire Type 2`, and optional **Field `#0`** metadata attaches field names on the wire when needed.
 4. **Stay a flat `[Tag][Value]` stream:** No vtables or pointer graphs. Containers carry outer byte lengths for single-step skipping (`LocateField`), and concatenating two packets (`append(msgA, msgB...)`) merges them just like Protobuf.
 
-> **Language Support:** OmniBuf is currently a **Go-only** implementation (`github.com/sudorandom/omnibuf`). Because the wire format is a flat `[Tag][Value]` stream with 4 integer widths and 16 wire types (no vtables or relative pointer graphs), it is straightforward to port. If there is interest, support for more languages will be added!
+> **Language Support:** OmniBuf ships first-party implementations for **Go** (`github.com/sudorandom/omnibuf`) and **TypeScript / JavaScript** ([`sudorandom/omnibuf-es`](https://github.com/sudorandom/omnibuf-es): `@omnibuf/core`, `@omnibuf/node`, `@omnibuf/web`, and `@omnibuf/protoc-gen-omnibuf-es`). The wire format is a flat `[Tag][Value]` stream with 4 integer widths and 16 wire types (no vtables or relative pointer graphs), making it straightforward to port to additional languages.
 
 ---
 

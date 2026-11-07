@@ -24,7 +24,7 @@ const activePageLabel =
   (activeLang ? `Languages: ${activeLang.label}` : 'Menu');
 ---
 
-<header class="sticky top-0 z-50 bg-[#FAF8F2] border-b-2 border-ink no-print">
+<header class="sticky top-0 z-50 bg-[#FAF8F2] border-b-2 border-ink no-print select-none">
   <div class="max-w-7xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-2 text-xs sm:text-base font-mono">
     <div class="flex items-center gap-2 sm:gap-5 min-w-0">
       <a
@@ -255,7 +255,7 @@ const activePageLabel =
 <dialog
   id="search-dialog"
   aria-label="Search documentation and wire specification"
-  class="fixed inset-0 z-[70] m-auto mt-8 sm:mt-16 w-[calc(100%-1.5rem)] max-w-2xl max-h-[82vh] p-0 bg-[#FAF8F2] text-ink border-2 border-ink rounded-md shadow-[6px_6px_0px_#111111] font-mono overflow-hidden open:flex open:flex-col no-print"
+  class="fixed inset-0 z-[70] m-auto mt-8 sm:mt-16 w-[calc(100%-1.5rem)] max-w-2xl max-h-[82vh] p-0 bg-[#FAF8F2] text-ink border-2 border-ink rounded-md shadow-[6px_6px_0px_#111111] font-mono overflow-hidden open:flex open:flex-col no-print select-none"
 >
   <div class="os-titlebar bg-[#E5E0D5] shrink-0">
     <span class="font-bold uppercase text-ink text-xs sm:text-sm">

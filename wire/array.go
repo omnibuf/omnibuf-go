@@ -409,11 +409,12 @@ func CountedArrLen(packet []byte, field uint16, elemType uint8) int {
 	}
 }
 func readArrays[T any](dst []T, packet []byte, field uint16, decode func([]T, []byte) ([]T, bool)) ([]T, bool) {
+	orig := dst
 	found := false
 	for pos := 0; ; {
 		body, next, match, valid := nextContainerField(packet, pos, field, WireArray, 2)
 		if !valid {
-			return nil, false
+			return orig, false
 		}
 		if !match {
 			return dst, found
@@ -422,7 +423,7 @@ func readArrays[T any](dst []T, packet []byte, field uint16, decode func([]T, []
 		var ok bool
 		dst, ok = decode(dst, body)
 		if !ok {
-			return nil, false
+			return orig, false
 		}
 		found = true
 	}

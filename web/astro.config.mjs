@@ -107,10 +107,12 @@ function checkInternalLinksAndAnchors() {
           const url = req.url?.split('?')[0];
           if (url === '/search-index.json') {
             try {
-              const host = req.headers.host || 'localhost:4321';
+              const addr = server.httpServer?.address();
+              const port = typeof addr === 'object' && addr && 'port' in addr ? addr.port : 4321;
+              const origin = `http://127.0.0.1:${port}`;
               const entries = [];
               for (const route of PAGE_ORDER) {
-                const resp = await globalThis.fetch(`http://${host}${route}`);
+                const resp = await globalThis.fetch(`${origin}${route}`, { redirect: 'manual' });
                 if (resp.ok) {
                   const html = await resp.text();
                   entries.push(...extractSearchEntries(route, html));

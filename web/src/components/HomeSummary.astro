@@ -9,13 +9,11 @@
   <div class="flex flex-wrap items-end justify-between gap-3 mb-5">
     <div class="max-w-2xl">
       <h2 class="text-2xl sm:text-4xl font-bold tracking-tight uppercase leading-none">
-        All the benefits of{' '}
-        <span class="font-serif italic font-normal normal-case text-[#FF4F18]">
-          Protobuf and JSON.
-        </span>
+        Format{' '}
+        <span class="font-serif italic font-normal normal-case text-[#FF4F18]">comparison.</span>
       </h2>
       <p class="mt-2 text-sm sm:text-base text-ink/80 font-medium">
-        How OmniBuf compares against common formats on our 11-field test message.
+        Measured with the 11-field <code>PeerUpdate</code> test struct.
       </p>
     </div>
     <div class="flex flex-wrap gap-2">
@@ -46,9 +44,7 @@
       <thead>
         <tr class="border-b-2 border-ink bg-[#E5E0D5]">
           <th class="px-3 py-2 sm:px-3.5 sm:py-2 font-bold uppercase whitespace-nowrap">Format</th>
-          <th class="px-3 py-2 sm:px-3.5 sm:py-2 font-bold uppercase whitespace-nowrap">
-            Schema Source
-          </th>
+          <th class="px-3 py-2 sm:px-3.5 sm:py-2 font-bold uppercase whitespace-nowrap">Schema</th>
           <th class="px-3 py-2 sm:px-3.5 sm:py-2 font-bold uppercase whitespace-nowrap">
             Wire Size
           </th>
@@ -56,7 +52,7 @@
             1-Pass Encode
           </th>
           <th class="px-3 py-2 sm:px-3.5 sm:py-2 font-bold uppercase whitespace-nowrap">
-            Schema-Less Types
+            Decode Without Schema
           </th>
           <th class="px-3 py-2 sm:px-3.5 sm:py-2 font-bold uppercase whitespace-nowrap">
             <code>append(a, b)</code> Merge
@@ -67,71 +63,71 @@
         <tr class="bg-acid/30 font-bold">
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">OmniBuf</td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 text-ink whitespace-nowrap">
-            <code>.proto</code> or Structs
+            <code>.proto</code> or structs
           </td>
-          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Baseline (1x)</td>
+          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">366 B (1x)</td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Yes</td>
-          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Yes (+ optional names)</td>
+          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Yes (Field #0)</td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Yes</td>
         </tr>
         <tr class="bg-white">
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 font-bold whitespace-nowrap">Protobuf</td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">
-            <code>.proto</code> only
+            <code>.proto</code>
           </td>
-          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">7% smaller</td>
-          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 text-ink/70 whitespace-nowrap">No (2 passes)</td>
+          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">341 B (-7%)</td>
+          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 text-ink/70 whitespace-nowrap">No (2-pass)</td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 text-ink/70 whitespace-nowrap">No</td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Yes</td>
         </tr>
         <tr class="bg-[#FAF8F2]">
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 font-bold whitespace-nowrap">FlatBuffers</td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 text-ink/70 whitespace-nowrap">
-            <code>.fbs</code> only
+            <code>.fbs</code>
           </td>
-          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">+64% larger</td>
-          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Yes (Builder API)</td>
+          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">600 B (+64%)</td>
+          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Builder API</td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 text-ink/70 whitespace-nowrap">No</td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 text-ink/70 whitespace-nowrap">No</td>
         </tr>
         <tr class="bg-white">
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 font-bold whitespace-nowrap">Cap'n Proto</td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 text-ink/70 whitespace-nowrap">
-            <code>.capnp</code> only
+            <code>.capnp</code>
           </td>
-          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">+53% larger</td>
-          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Yes (Pointer API)</td>
+          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">560 B (+53%)</td>
+          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Pointer API</td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 text-ink/70 whitespace-nowrap">No</td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 text-ink/70 whitespace-nowrap">No</td>
         </tr>
         <tr class="bg-[#FAF8F2]">
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 font-bold whitespace-nowrap">
-            Avro (Raw / OCF)
+            Avro (raw / OCF)
           </td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 text-ink/70 whitespace-nowrap">
-            <code>.avsc</code> JSON Schema
+            <code>.avsc</code> JSON
           </td>
-          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">14% smaller / 4x larger</td>
+          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">313 B / 1,359 B</td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Yes</td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 text-ink/70 whitespace-nowrap">
-            No (Needs Schema)
+            OCF header only
           </td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 text-ink/70 whitespace-nowrap">No</td>
         </tr>
         <tr class="bg-white">
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 font-bold whitespace-nowrap">MessagePack</td>
-          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Structs / Maps</td>
-          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">+79% larger</td>
-          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Yes (Slow)</td>
-          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Yes (Repeats Keys)</td>
+          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Structs or maps</td>
+          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">656 B (+79%)</td>
+          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Yes</td>
+          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Yes (repeats keys)</td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 text-ink/75 whitespace-nowrap">No</td>
         </tr>
         <tr class="bg-[#FAF8F2]">
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 font-bold whitespace-nowrap">JSON</td>
-          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Structs or ProtoJSON</td>
-          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">+119% larger</td>
-          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Yes (Slow)</td>
-          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Yes (Repeats Keys)</td>
+          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Structs or maps</td>
+          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">803 B (+119%)</td>
+          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Yes</td>
+          <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 whitespace-nowrap">Yes (repeats keys)</td>
           <td class="px-3 py-1.5 sm:px-3.5 sm:py-2 text-ink/75 whitespace-nowrap">No</td>
         </tr>
       </tbody>

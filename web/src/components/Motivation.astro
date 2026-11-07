@@ -1,9 +1,11 @@
 ---
 import { Code } from 'astro:components';
 
-const spliceSnippet = `view := pb.NodeOpaque(pkt)
-city, _ := view.City()      // skips #1 and #2
-pkt = view.SetActive(false) // updates raw bytes`;
+const spliceSnippet = `var view pb.OpaquePeerUpdate
+_ = view.Unmarshal(pkt)
+router := view.GetRouterId() // skips #1
+view.SetActive(false)        // marks #3 dirty
+pkt = view.MarshalAppend(nil)`;
 
 const pbStructSnippet = `pkt, _ := omnibuf.Marshal(&pb.Node{Id: 1, City: "FRA"})`;
 
@@ -14,20 +16,12 @@ const plainStructSnippet = `type Node struct {
 pkt, _ := omnibuf.Marshal(&Node{ID: 1, City: "FRA"})`;
 ---
 
-<section id="motivation" class="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-  <div class="max-w-3xl mb-10">
+<section id="motivation" class="py-12 sm:py-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+  <div class="max-w-3xl mb-8">
     <h2 class="text-3xl sm:text-5xl font-bold tracking-tight uppercase leading-none">
       Faster, inspectable,{' '}
       <span class="font-serif italic font-normal normal-case text-[#FF4F18]">and spliceable.</span>
     </h2>
-    <p class="mt-4 text-lg sm:text-xl text-ink/80 font-medium">
-      I started this project to see how much faster Protobuf's wire format could be on modern CPUs
-      (see{' '}
-      <a href="/how-it-works" class="doc-link">
-        how it works
-      </a>
-      ), and ended up making it work directly on Go structs and TypeScript objects too.
-    </p>
   </div>
 
   <div class="border-t-2 border-ink divide-y-2 divide-ink/20">
@@ -38,43 +32,33 @@ pkt, _ := omnibuf.Marshal(&Node{ID: 1, City: "FRA"})`;
     >
       <div class="lg:col-span-5 space-y-3">
         <h3 class="text-2xl sm:text-3xl font-bold uppercase tracking-tight leading-snug">
-          Decode values without a schema
+          Read packets without a schema.
         </h3>
         <!-- prettier-ignore -->
         <p class="text-base sm:text-lg text-ink/90 leading-relaxed max-w-[60ch]">
-          Protobuf jams strings, byte slices, nested messages, maps, and packed arrays into a single wire type (<code>Wire Type 2</code>), and mixes booleans, unsigned ints, and signed ints together. Without the <code>.proto</code> file, you can't even parse a packet into the right types. OmniBuf uses 16 explicit wire types so a reader can always decode the exact values from raw bytes.
-        </p>
-        <!-- prettier-ignore -->
-        <p class="text-base sm:text-lg text-ink/90 leading-relaxed max-w-[60ch]">
-          If you also want the string field names on the wire, turning on <strong>Field #0</strong> writes a field-name table once at the top of the packet. Better yet, if your message has an array or map of 1,000 nested structs, JSON and MessagePack repeat the key strings inside all 1,000 items. OmniBuf writes the child field names <strong>once</strong> in Field #0 and every item in the array or map inherits them automatically, so self-describing packets are already smaller than MessagePack and JSON with just 4 array items.
+          Protobuf packs strings, byte slices, sub-messages, maps, and arrays into a single wire type, and mixes booleans, unsigned ints, and signed ints together. Looking at a raw packet without the <code>.proto</code> file leaves you guessing what each field is. OmniBuf puts an explicit type on every field (16 wire types in total), so any tool can decode exact values from raw bytes. Turning on optional <strong>Field #0</strong> metadata also writes the field names once at the top of the packet.
         </p>
       </div>
       <div class="lg:col-span-7 min-w-0">
         <div class="os-window overflow-hidden font-mono text-xs sm:text-sm">
           <div class="os-titlebar bg-[#E5E0D5]">
-            <span class="font-bold uppercase text-ink text-xs">
-              Inspecting Raw Bytes (No Schema)
-            </span>
+            <span class="font-bold uppercase text-ink text-xs">raw packet dump</span>
             <div class="os-stripes"></div>
           </div>
           <div class="bg-ink text-paper p-4 space-y-3">
             <div class="bg-[#1F1F1F] p-3 rounded border border-paper/15">
-              <div class="text-[11px] uppercase font-bold text-[#FF4F18] mb-1.5">
-                Protobuf (Ambiguous Wire Types)
-              </div>
-              <pre class="leading-relaxed overflow-x-auto"><code><span class="text-[#FF4F18] font-bold">1:</span> 1          <span class="text-paper/55"># true? 1? -1 (sint)? enum?</span>
-<span class="text-[#FF4F18] font-bold">2:</span> 3          <span class="text-paper/55"># +3 (uint/int)? or -2 (sint)?</span>
-<span class="text-[#FF4F18] font-bold">3:</span> &#123;<span class="text-acid">"FRA"</span>&#125;    <span class="text-paper/55"># string? bytes? sub-msg?</span>
-<span class="text-[#FF4F18] font-bold">4:</span> <span class="text-acid">"\x0a\x14"</span> <span class="text-paper/55"># bytes? string? packed array?</span></code></pre>
+              <div class="text-[11px] uppercase font-bold text-[#FF4F18] mb-1.5">Protobuf</div>
+              <pre class="leading-relaxed overflow-x-auto"><code><span class="text-[#FF4F18] font-bold">1:</span> 1          <span class="text-paper/55"># bool / uint / sint / enum?</span>
+<span class="text-[#FF4F18] font-bold">2:</span> 3          <span class="text-paper/55"># +3 uint or -2 sint?</span>
+<span class="text-[#FF4F18] font-bold">3:</span> &#123;<span class="text-acid">"FRA"</span>&#125;    <span class="text-paper/55"># string / bytes / sub-msg?</span>
+<span class="text-[#FF4F18] font-bold">4:</span> <span class="text-acid">"\x0a\x14"</span> <span class="text-paper/55"># bytes / string / packed array?</span></code></pre>
             </div>
             <div class="bg-[#1F1F1F] p-3 rounded border border-acid/40">
-              <div class="text-[11px] uppercase font-bold text-acid mb-1.5">
-                OmniBuf (Explicit Wire Types)
-              </div>
+              <div class="text-[11px] uppercase font-bold text-acid mb-1.5">OmniBuf</div>
               <pre class="leading-relaxed overflow-x-auto"><code><span class="text-acid font-bold">1:</span> <span class="text-[#FF4F18] font-bold">true</span>       <span class="text-acid/80"># bool (0 value bytes)</span>
-<span class="text-acid font-bold">2:</span> -2         <span class="text-acid/80"># sint (signed int)</span>
-<span class="text-acid font-bold">3:</span> <span class="text-acid">"FRA"</span>      <span class="text-acid/80"># string (UTF-8)</span>
-<span class="text-acid font-bold">4:</span> [10, 20]   <span class="text-acid/80"># array&lt;uint&gt; (count=2)</span></code></pre>
+<span class="text-acid font-bold">2:</span> -2         <span class="text-acid/80"># signed int</span>
+<span class="text-acid font-bold">3:</span> <span class="text-acid">"FRA"</span>      <span class="text-acid/80"># utf8 string</span>
+<span class="text-acid font-bold">4:</span> [10, 20]   <span class="text-acid/80"># 2 uints</span></code></pre>
             </div>
           </div>
         </div>
@@ -88,22 +72,19 @@ pkt, _ := omnibuf.Marshal(&Node{ID: 1, City: "FRA"})`;
     >
       <div class="lg:col-span-5 space-y-3">
         <h3 class="text-2xl sm:text-3xl font-bold uppercase tracking-tight leading-snug">
-          Read, drop, or replace individual fields on raw bytes
+          Read or edit one field in place.
         </h3>
         <p class="text-base sm:text-lg text-ink/90 leading-relaxed max-w-[60ch]">
-          Since every integer and container starts with its byte length, a decoder can skip over
-          fields it doesn't care about by adding the byte length and jumping to the next tag. If you
-          use the generated <code>Opaque</code> wrapper in a proxy or router, you can read one field
-          out of a packet or update a field in place without unpacking the rest of the message or
-          dropping unknown fields.
+          Routers and proxies often need to inspect a single header field or flip a flag inside a
+          payload. Every integer and container in OmniBuf starts with its byte length, so a reader
+          can jump straight over earlier fields. Generated <code>Opaque</code> views read one tag or
+          splice a new value directly into the byte slice.
         </p>
       </div>
       <div class="lg:col-span-7 min-w-0">
         <div class="os-window overflow-hidden font-mono text-xs sm:text-sm">
           <div class="os-titlebar bg-[#E5E0D5]">
-            <span class="font-bold uppercase text-ink text-xs">
-              Skip Unneeded Fields &amp; Splice in Place
-            </span>
+            <span class="font-bold uppercase text-ink text-xs">splice.go</span>
             <div class="os-stripes"></div>
           </div>
           <div class="bg-ink text-paper p-4 [&>pre]:!bg-transparent [&>pre]:!p-0 [&>pre]:!m-0 [&>pre]:!border-0 [&>pre]:leading-relaxed [&>pre]:overflow-x-auto">
@@ -120,40 +101,30 @@ pkt, _ := omnibuf.Marshal(&Node{ID: 1, City: "FRA"})`;
     >
       <div class="lg:col-span-5 space-y-3">
         <h3 class="text-2xl sm:text-3xl font-bold uppercase tracking-tight leading-snug">
-          Works with your existing .proto files, or just plain structs
+          Use .proto files or plain structs.
         </h3>
         <!-- prettier-ignore -->
         <p class="text-base sm:text-lg text-ink/90 leading-relaxed max-w-[60ch]">
-          If you already use Protobuf, keep your <code>.proto</code> files and generated structs. OmniBuf is strictly a message serialization format (not a new RPC protocol), and because almost every <a href="https://grpc.io/" target="_blank" rel="noopener noreferrer" class="doc-link">gRPC</a> and <a href="https://connectrpc.com/" target="_blank" rel="noopener noreferrer" class="doc-link">Connect</a> implementation decouples transport and service stubs from wire encoding, you can register OmniBuf as a custom codec in a few lines of code.
-        </p>
-        <!-- prettier-ignore -->
-        <p class="text-base sm:text-lg text-ink/90 leading-relaxed max-w-[60ch]">
-          If you usually reach for JSON because you don't want to maintain <code>.proto</code> files and a code generator, put <code>omnibuf:"1"</code> tags on a <a href="/go#struct-tags" class="doc-link">Go struct</a> or use <code>defineMessage()</code> in <a href="/es#define-message" class="doc-link">TypeScript</a> just like <code>json:"host"</code> tags. You get packets that are less than half the size of JSON and 7x to 11x faster on plain structs.
+          OmniBuf is a message serialization format, not a new RPC protocol. Most <a href="https://grpc.io/" target="_blank" rel="noopener noreferrer" class="doc-link">gRPC</a> and <a href="https://connectrpc.com/" target="_blank" rel="noopener noreferrer" class="doc-link">Connect</a> libraries let you register a custom wire codec in a few lines of code and keep your existing <code>.proto</code> files. Or skip <code>.proto</code> files altogether: add <a href="/go#struct-tags" class="doc-link">Go struct tags</a> (<code>omnibuf:"1"</code>) or call <a href="/es#define-message" class="doc-link">TypeScript <code>defineMessage</code></a>, and both paths produce the exact same wire bytes.
         </p>
       </div>
       <div class="lg:col-span-7 min-w-0">
         <div class="os-window overflow-hidden font-mono text-xs sm:text-sm">
           <div class="os-titlebar bg-[#E5E0D5]">
-            <span class="font-bold uppercase text-ink text-xs">
-              Two Ways In &rarr; Identical Wire Bytes
-            </span>
+            <span class="font-bold uppercase text-ink text-xs">marshal.go</span>
             <div class="os-stripes"></div>
           </div>
           <div class="bg-ink text-paper p-4 space-y-3">
             <div class="bg-[#1F1F1F] p-3 rounded border border-paper/15 [&>pre]:!bg-transparent [&>pre]:!p-0 [&>pre]:!m-0 [&>pre]:!border-0 [&>pre]:leading-relaxed [&>pre]:overflow-x-auto">
-              <div class="text-[11px] uppercase font-bold text-paper/65 mb-1">
-                1. Existing .pb.go Struct (From .proto)
-              </div>
+              <div class="text-[11px] uppercase font-bold text-paper/65 mb-1">From .proto</div>
               <Code code={pbStructSnippet} lang="go" theme="github-dark" />
             </div>
             <div class="bg-[#1F1F1F] p-3 rounded border border-paper/15 [&>pre]:!bg-transparent [&>pre]:!p-0 [&>pre]:!m-0 [&>pre]:!border-0 [&>pre]:leading-relaxed [&>pre]:overflow-x-auto">
-              <div class="text-[11px] uppercase font-bold text-paper/65 mb-1">
-                2. Plain Go Struct (No .proto)
-              </div>
+              <div class="text-[11px] uppercase font-bold text-paper/65 mb-1">Struct tags</div>
               <Code code={plainStructSnippet} lang="go" theme="github-dark" />
             </div>
             <div class="flex items-center justify-between px-3 py-2 rounded bg-acid text-ink font-bold text-xs border border-ink">
-              <span class="uppercase">Same Wire Output (7B)</span>
+              <span class="uppercase">Wire bytes (7B)</span>
               <span>21 03 55 07 46 52 41</span>
             </div>
           </div>

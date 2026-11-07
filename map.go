@@ -49,7 +49,7 @@ func decodeMapStringUintBody(dst map[string]uint64, body []byte, zeroCopy bool) 
 		return nil, false
 	}
 	if dst == nil {
-		dst = make(map[string]uint64, count)
+		dst = make(map[string]uint64, min(count, 4096))
 	}
 	for range count {
 		kLen, kn := decodeVarint(body[p:])

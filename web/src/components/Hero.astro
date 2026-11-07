@@ -53,14 +53,14 @@ const restRows = butterflyRows.filter((r) => !r.baseline);
   <div class="mt-8 space-y-5">
     <!-- prettier-ignore -->
     <p class="max-w-4xl text-lg sm:text-2xl font-medium leading-snug text-ink/90">
-      I built OmniBuf because I wanted a binary format that fixes the parts of <a href="https://protobuf.dev/programming-guides/encoding/" target="_blank" rel="noopener noreferrer" class="doc-link">Protobuf</a> that have aged poorly since 2001 (like <a href="https://en.wikipedia.org/wiki/LEB128" target="_blank" rel="noopener noreferrer" class="doc-link">LEB128 varints</a> and two-pass encoding), while also working as a fast, compact replacement for <strong>JSON</strong> on normal structs.
+      I built OmniBuf to replace both <a href="https://protobuf.dev/programming-guides/encoding/" target="_blank" rel="noopener noreferrer" class="doc-link">Protobuf</a> and <strong>JSON</strong>. It is a binary serialization format where raw packets remain readable on their own, individual fields can be read or updated in place, and schemas are optional. Plug it into <a href="https://grpc.io/" target="_blank" rel="noopener noreferrer" class="doc-link">gRPC</a> and <a href="https://connectrpc.com/" target="_blank" rel="noopener noreferrer" class="doc-link">Connect</a> with your existing <code>.proto</code> files, or serialize plain Go structs and TypeScript objects directly.
     </p>
 
     <div class="grid lg:grid-cols-12 gap-5 items-stretch">
       <p class="lg:col-span-7 text-base sm:text-xl font-medium text-ink/90 leading-relaxed bg-[#FAF8F2] p-5 sm:p-6 border-2 border-ink shadow-[6px_6px_0px_#111] rounded-md flex items-center">
         <!-- prettier-ignore -->
         <span>
-          OmniBuf is a <strong>serialization format only</strong>, not a new RPC protocol. Most <a href="https://grpc.io/" target="_blank" rel="noopener noreferrer" class="doc-link">gRPC</a> and <a href="https://connectrpc.com/" target="_blank" rel="noopener noreferrer" class="doc-link">Connect</a> implementations let you register a custom wire codec, so you can drop OmniBuf into your existing RPC services and <code>.proto</code> files, or skip <code>.proto</code> files altogether and put <code>omnibuf:"1"</code> tags on Go structs (or <code>defineMessage</code> in TypeScript) just like <code>json</code> tags. It runs <strong>about 6x faster on encode and 7x faster on decode than standard Go Protobuf in our generated-code benchmark</strong> and <strong>faster than JSON in the benchmarks below</strong>, while keeping all 16 wire types explicit on the wire so you can decode exact values <i>without the schema</i>.
+          In our Go benchmarks below, OmniBuf runs <strong>about 6x faster on encode (123 ns) and 7x faster on decode (229 ns)</strong> than standard Go Protobuf on an 11-field message. Against <code>encoding/json</code> on plain Go structs, it is <strong>over 10x faster</strong> and cuts packet size in half. Below is how the wire format works and what it trades off.
         </span>
       </p>
 
@@ -86,7 +86,7 @@ const restRows = butterflyRows.filter((r) => !r.baseline);
           <!-- Row 1: OmniBuf (Tiny Wings + Callout Arrow) -->
           <div
             class="grid grid-cols-2 items-center py-1"
-            title={`${omniRow.name} — Encode: ${omniRow.encVal} ns, Decode: ${omniRow.decVal} ns`}
+            title={`${omniRow.name} - Encode: ${omniRow.encVal} ns, Decode: ${omniRow.decVal} ns`}
           >
             <div class="flex items-center justify-end pr-0.5 min-w-0">
               <svg
@@ -139,7 +139,7 @@ const restRows = butterflyRows.filter((r) => !r.baseline);
             {restRows.map((r) => (
               <div
                 class="grid grid-cols-2 items-center"
-                title={`${r.name} — Encode: ${r.encVal} ns, Decode: ${r.decVal} ns`}
+                title={`${r.name} - Encode: ${r.encVal} ns, Decode: ${r.decVal} ns`}
               >
                 <div class="flex items-center justify-end pr-0.5 min-w-0">
                   <div
@@ -239,7 +239,7 @@ const restRows = butterflyRows.filter((r) => !r.baseline);
   </div>
 
   <!-- SVG VISUALIZATION: ONE .PROTO FILE -> THREE ENCODINGS -->
-  <div class="mt-10 os-window overflow-hidden">
+  <div class="mt-10 os-window overflow-hidden select-none">
     <div class="os-titlebar bg-[#E5E0D5]">
       <span class="font-mono text-sm sm:text-base font-bold uppercase">
         One .proto Schema &rarr; Three Encodings
@@ -766,7 +766,7 @@ const restRows = butterflyRows.filter((r) => !r.baseline);
   </div>
 
   <!-- SVG VISUALIZATION 2: PLAIN STRUCTS (NO .PROTO) -> JSON VS OMNIBUF -->
-  <div class="mt-8 os-window overflow-hidden">
+  <div class="mt-8 os-window overflow-hidden select-none">
     <div class="os-titlebar bg-[#E5E0D5]">
       <span class="font-mono text-sm sm:text-base font-bold uppercase">
         Plain Structs (No .proto) &rarr; JSON vs. OmniBuf

@@ -18,51 +18,50 @@ const wireTypeRows: WireTypeRow[] = [
     ids: '0, 1',
     title: 'Dynamic Ints',
     protoTypes: 'uint32, uint64, int32, int64, sint32, sint64, enum',
-    onTheWire: '1, 2, 4, or 9-byte Prefix-Varint (0 = unsigned, 1 = ZigZag signed).',
+    onTheWire: '[Value: Prefix-Varint] (0 = unsigned, 1 = ZigZag)',
   },
   {
     ids: '2, 3',
     title: 'Booleans',
     protoTypes: 'bool',
-    onTheWire: '0 value bytes. False (2) and true (3) live inside the tag byte itself.',
+    onTheWire: '0 bytes (2 = false, 3 = true in tag)',
   },
   {
     ids: '4..9',
     title: 'Fixed Numbers',
     protoTypes: 'fixed32/64, sfixed32/64, float, double',
-    onTheWire: '4 or 8 bytes little-endian, with distinct types for unsigned, signed, and float.',
+    onTheWire: '4B or 8B little-endian (uint, sint, IEEE-754)',
   },
   {
     ids: '10..12',
     title: 'Length-Prefixed',
     protoTypes: 'string, bytes, message',
-    onTheWire: 'Byte length followed by UTF-8 text (10), raw bytes (11), or a sub-message (12).',
+    onTheWire: '[ByteLen][UTF-8 | Bytes | SubMsg]',
   },
   {
     ids: '13',
     title: 'Arrays',
     protoTypes: 'repeated T',
-    onTheWire:
-      'Byte length, 1-byte element type, element count, and packed elements (bools pack 8 per byte).',
+    onTheWire: '[ByteLen][ElemType: 1B][Count][Elem_0..N]',
   },
   {
     ids: '14',
     title: 'Maps',
     protoTypes: 'map<K, V>',
-    onTheWire: 'Byte length, 1-byte key & value types, entry count, and alternating keys/values.',
+    onTheWire: '[ByteLen][KeyType: 1B][ValType: 1B][Count][K_0, V_0..]',
   },
   {
     ids: '15',
     title: 'Extended',
     protoTypes: 'extensions',
-    onTheWire: 'Byte length, extended type ID, and payload bytes.',
+    onTheWire: '[ByteLen][ExtType: 1B][Payload]',
   },
 ];
 ---
 
 <Layout
   title="How It Works | OmniBuf"
-  description="How the OmniBuf binary wire format is structured: flat [Tag][Value] streams, Prefix-Varints, 4-bit wire types, single-pass length prefixes, and how it compares to other formats."
+  description="How the OmniBuf binary wire format works: flat [Tag][Value] streams, Prefix-Varints, 4-bit wire types, single-pass length prefixes, and format comparisons."
 >
   <Navbar currentPage="how-it-works" />
 
@@ -77,8 +76,8 @@ const wireTypeRows: WireTypeRow[] = [
         </span>
       </h1>
       <p class="mt-6 max-w-3xl text-lg sm:text-2xl text-ink/85 font-medium leading-snug">
-        OmniBuf is a binary encoding format. A serialized message is a flat stream of{' '}
-        <code>[Tag][Value]</code> fields with no file header or offset table.
+        An OmniBuf message is just a flat stream of <code>[Tag][Value]</code> fields. There's no
+        file header, no footer, and no offset table at the front of the packet.
       </p>
     </section>
 
@@ -94,10 +93,9 @@ const wireTypeRows: WireTypeRow[] = [
             <span class="font-serif italic font-normal normal-case text-[#FF4F18]">packet.</span>
           </h2>
           <p class="text-base sm:text-lg text-ink/85 leading-relaxed">
-            Fields are written one after another as <code>[Tag][Value]</code> pairs. An empty
-            message is 0 bytes. Each field starts with a Prefix-Varint tag that holds the field
-            number in the upper bits and a <strong>4-bit wire type (0..15)</strong> in the low 4
-            bits:
+            Fields go on the wire back-to-back as <code>[Tag][Value]</code> pairs, so an empty
+            message is 0 bytes. Each tag is a Prefix-Varint with the field number in the upper bits
+            and a <strong>4-bit wire type (0..15)</strong> in the bottom 4 bits:
           </p>
           <div class="p-3.5 bg-[#FAF8F2] border-2 border-ink rounded-md font-mono space-y-1">
             <div class="text-sm sm:text-base font-bold">
@@ -110,17 +108,15 @@ const wireTypeRows: WireTypeRow[] = [
             </div>
           </div>
           <p class="text-base sm:text-lg text-ink/85 leading-relaxed">
-            That 4-bit wire type tells the decoder both the data type and how many bytes follow the
-            tag. Booleans live right inside the tag (<strong>0 value bytes</strong>), integers and
-            floats use either a 1, 2, 4, or 9-byte Prefix-Varint or a fixed 4 or 8-byte word, and
-            every variable-length value (strings, byte slices, sub-messages, arrays, and maps)
-            starts with its total byte length so a reader can either decode it or skip past it in
-            one step.
+            The low 4 bits of each tag carry both the data type and how to size the value. Booleans
+            take 0 value bytes (<code>2</code> = false, <code>3</code> = true). Integers and floats
+            use a 1/2/4/9-byte Prefix-Varint or a fixed 4/8-byte word; strings, bytes, sub-messages,
+            arrays, and maps start with a <code>ByteLen</code> Prefix-Varint.
           </p>
         </div>
 
         <!-- Concrete Wire Breakdown Example -->
-        <div class="lg:col-span-7 min-w-0">
+        <div class="lg:col-span-7 min-w-0 select-none">
           <div class="os-window overflow-hidden">
             <div class="os-titlebar bg-[#E5E0D5]">
               <span class="font-mono text-sm sm:text-base font-bold uppercase">
@@ -223,15 +219,10 @@ const wireTypeRows: WireTypeRow[] = [
                 wire types.
               </span>
             </h3>
-            <p class="mt-2.5 text-base sm:text-lg text-ink/80 leading-relaxed">
-              Every field tag carries one of 16 wire types (<code>0..15</code>), grouped below by
-              how the value bytes are framed on the wire. See{' '}
-              <a href="/spec#sec-6" class="doc-link">
-                Section 6 of the specification
-              </a>{' '}
-              for full byte-level rules.
-            </p>
           </div>
+          <a href="/spec#sec-6" class="doc-link font-mono text-xs sm:text-sm font-bold uppercase">
+            Section 6 of the spec &rarr;
+          </a>
         </div>
 
         <div class="overflow-x-auto border-2 border-ink rounded-md bg-[#FAF8F2]">

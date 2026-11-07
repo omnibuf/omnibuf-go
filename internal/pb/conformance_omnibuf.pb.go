@@ -124,7 +124,7 @@ func (x *AllTypesSubMsg) decodeOmniBuf(data []byte, zeroCopy bool, depth int, me
 				return fmt.Errorf("omnibuf: invalid Field #0 wire type %d", wt)
 			}
 			var err error
-			pos, err = wire.SkipValue(data, pos, wt)
+			pos, err = omnibuf.ValidateValue(data, pos, wt, depth)
 			if err != nil {
 				return err
 			}
@@ -607,6 +607,9 @@ func (x *TestAllTypes) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merg
 			start := len(x.F11SubMsgArr)
 			total := start + count
 			if cap(x.F11SubMsgArr) < total {
+				if _, ok := wire.CountSubMsgArrElems(body); !ok {
+					return fmt.Errorf("omnibuf: invalid submsg array")
+				}
 				slab := make([]AllTypesSubMsg, count)
 				next := make([]*AllTypesSubMsg, total, wire.GrowCapacity(cap(x.F11SubMsgArr), total))
 				copy(next, x.F11SubMsgArr)
@@ -653,7 +656,7 @@ func (x *TestAllTypes) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merg
 				clear(x.F12MapStrUint)
 			}
 			if x.F12MapStrUint == nil {
-				x.F12MapStrUint = make(map[string]uint64, count)
+				x.F12MapStrUint = make(map[string]uint64, min(count, 4096))
 			}
 			seenMask |= 1 << 11
 			for j := 0; j < count; j++ {
@@ -725,7 +728,7 @@ func (x *TestAllTypes) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merg
 				return fmt.Errorf("omnibuf: invalid Field #0 wire type %d", wt)
 			}
 			var err error
-			pos, err = wire.SkipValue(data, pos, wt)
+			pos, err = omnibuf.ValidateValue(data, pos, wt, depth)
 			if err != nil {
 				return err
 			}

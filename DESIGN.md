@@ -102,7 +102,7 @@ components:
 
 OmniBuf's visual identity combines the clarity of a printed Swiss technical manual with classic 1980s Macintosh workstation window chrome and byte-level engineering blueprints. Surfaces rest on a warm drafting-paper canvas overlaid with a faint 32px technical grid, giving every diagram, benchmark chart, and wire-format breakdown the feel of an interactive hardware reference sheet.
 
-Instead of pretending to be an abstract cloud service, the interface treats data structures as physical objects you can inspect and measure. Containers use crisp 2px ink borders, striped classic OS title bars, and hard zero-blur offset shadows. Geometric grotesque headlines pair with italic editorial serif counterpoints and dense monospace byte tables so engineers can scan high-level claims and immediately drill down into exact bit layouts.
+The interface treats data structures as physical objects you can inspect and measure, not an abstract cloud service. Containers use crisp 2px ink borders, striped classic OS title bars, and hard zero-blur offset shadows. Geometric grotesque headlines pair with italic editorial serif counterpoints and dense monospace byte tables so engineers can scan high-level claims and immediately drill down into exact bit layouts.
 
 The system explicitly rejects neon SaaS gradients, frosted glassmorphism, diffuse drop shadows, and sterile corporate documentation templates. Every visual element is tactile, high-contrast, and mechanical, with an optional "Night Workstation Manual" dark theme (`html.dark`) that maps the paper canvas to deep slate (`#0F1115`) while preserving crisp borders, offset shadows, and Signal Orange / Acid Lime accents.
 
@@ -217,7 +217,7 @@ Components feel tactile and mechanical: classic OS window panels with striped ti
 - **Do** reserve `.os-window` and `.os-titlebar` with `.os-stripes` sparingly for flagship interactive diagrams, side-by-side code comparison frames, and benchmark chart panels; use architectural horizontal ledger rows (`border-t-2 border-ink divide-y-2 divide-ink/20`) for capability lists, motivation points, and FAQs so section headings stand out cleanly.
 - **Do** frame interactive buttons and callout boxes with a `2px solid #111111` border and a hard zero-blur offset shadow (`4px`, `6px`, or `10px`).
 - **Do** pair uppercase bold `Space Grotesk` with a normal-case `Instrument Serif Italic` phrase in Signal Orange (`#FF4F18`) for major section headings.
-- **Do** give every section item with readable prose its own entire horizontal row (`border-t-2 border-ink divide-y-2 divide-ink/20`) rather than splitting prose into multi-column panels.
+- **Do** give every section item with readable prose its own entire horizontal row (`border-t-2 border-ink divide-y-2 divide-ink/20`). Multi-column panels are reserved for data tables and charts.
 - **Do** use `buf` (`buf.gen.yaml` and `buf generate`) rather than raw `protoc` CLI flags in documentation, onboarding snippets, and code generation examples.
 - **Do** provide dedicated desktop (horizontal) and mobile (vertical stacked) SVG layouts for complex architectural and wire-format diagrams so text never shrinks below legibility.
 
@@ -227,4 +227,4 @@ Components feel tactile and mechanical: classic OS window panels with striped ti
 - **Don't** use blurred drop shadows (`box-shadow` with blur > `0px`), glassmorphism (`backdrop-filter: blur`), or soft neumorphic gradients anywhere in the interface.
 - **Don't** use pill-shaped (`border-radius: 9999px`) buttons or containers; keep radii between `3px` and `8px`.
 - **Don't** set body paragraphs or UI controls in `Instrument Serif`; reserve the serif strictly for display headline counterpoints.
-- **Don't** use em-dashes or generic AI filler copy inside component labels, callout cards, or technical explanations.
+- **Don't** use em-dashes, `"We're still paying for..."` (or any `"paying for"` phrasing), rhetorical question hooks, or generic AI filler copy inside component labels, callout cards, or technical explanations.

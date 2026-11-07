@@ -20,15 +20,16 @@
     >
       <div class="lg:col-span-6 space-y-2.5 min-w-0">
         <h3 class="text-2xl sm:text-3xl font-bold uppercase tracking-tight leading-snug">
-          Every wire type is explicit
+          Self-describing wire types
         </h3>
         <p class="text-base sm:text-lg text-ink/85 leading-relaxed max-w-[65ch]">
-          In Protobuf, strings, byte slices, sub-messages, maps, and packed arrays all share{' '}
-          <code>Wire Type 2</code>, while 32-bit and 64-bit wire types mix floats with signed and
-          unsigned fixed integers. OmniBuf's 4-bit tag and explicit collection headers give each of
-          those its own wire type so <code>DecodeBlind</code> recovers the exact wire type and value
-          of every present field without a schema (while enum label names, omitted defaults, and
-          inactive <code>oneof</code> fields still require a schema).
+          Protobuf only has a 3-bit wire type, so strings, byte slices, sub-messages, maps, and
+          packed arrays all get lumped into <code>Wire Type 2</code>. Fixed 32-bit and 64-bit
+          numbers mix floats with signed and unsigned integers. OmniBuf widens the wire type to 4
+          bits and puts element types on arrays and maps. Calling <code>DecodeBlind</code> on a raw
+          buffer gives you back the exact numbers, booleans, strings, arrays, and maps that were
+          sent. You only need the schema for things that aren't sent on the wire, like enum names,
+          default values, or <code>oneof</code> groupings.
         </p>
       </div>
       <div class="lg:col-span-6 grid sm:grid-cols-2 gap-3.5 font-mono text-sm min-w-0">
@@ -55,24 +56,24 @@
     >
       <div class="lg:col-span-6 space-y-3 min-w-0">
         <h3 class="text-2xl sm:text-3xl font-bold uppercase tracking-tight leading-snug">
-          Field names with Field #0
+          Optional field names in Field #0
         </h3>
         <p class="text-base sm:text-lg text-ink/85 leading-relaxed max-w-[65ch]">
-          By default, packets only carry field numbers to stay small. When you want full string keys
-          on the wire too, turn on <code>Field #0</code> (<code>omnibuf.v1.SchemaMeta</code>) to
-          write a field-name table once at the top of the packet.
+          By default, OmniBuf only writes numeric field IDs to keep packets small. Turning on{' '}
+          <code>Field #0</code> (<code>omnibuf.v1.SchemaMeta</code>) writes a field-number-to-name
+          map once at the start of the packet so the wire bytes carry their own string field names.
         </p>
         <p class="text-base sm:text-lg text-ink/85 leading-relaxed max-w-[65ch]">
-          Where this really shines is arrays and maps of nested messages. In JSON or MessagePack, an
-          array of 1,000 structs repeats every single field name string 1,000 times on the wire. In
-          OmniBuf, <code>Field #0</code> records the child message's field names{' '}
-          <strong>once</strong> on the parent collection field (via{' '}
-          <a href="/spec#sec-8-3" class="doc-link">
+          For arrays and maps of structs, child field names are stored once in{' '}
+          <a href="/spec#sec-8-1" class="doc-link">
             <code>SchemaMeta.children</code>
-          </a>
-          ), and every element in the array or map inherits those names while encoding only compact
-          field numbers. Even with just 4 nested <code>Neighbor</code> items in our benchmark
-          packet, OmniBuf with Field #0 enabled is already smaller than both MessagePack and JSON.
+          </a>{' '}
+          and inherited by every item in the list. In JSON or MessagePack, an array of 1,000 objects
+          repeats the key strings <code>"router_id"</code> and <code>"latency_ns"</code> 1,000
+          times. OmniBuf writes those strings once in Field #0 and uses compact field numbers inside
+          the elements. Even on our benchmark packet with just 4 <code>Neighbor</code> items, a
+          self-describing OmniBuf packet (630 B) is smaller than MessagePack (656 B) and JSON (803
+          B).
         </p>
       </div>
       <div class="lg:col-span-6 font-mono text-xs sm:text-sm min-w-0">
@@ -120,12 +121,11 @@
           Merge messages by appending raw bytes
         </h3>
         <p class="text-base sm:text-lg text-ink/85 leading-relaxed max-w-[65ch]">
-          Packets have no file header or footer. When you concatenate two encoded buffers (
-          <code>append(msgA, msgB...)</code>) and unmarshal the combined bytes, later scalar fields
-          overwrite earlier ones, nested messages merge their fields recursively, map entries merge
-          by key, and repeated array fields (<code>WireArray</code>) append their elements in order
-          (whereas low-level single-field lookup via <code>LocateField</code> returns the last
-          occurrence). No decode or re-encode step is required to merge two packets.
+          There is no file header or footer, so concatenating two encoded buffers (
+          <code>append(msgA, msgB...)</code>) produces a valid merged message. Unmarshaling the
+          combined slice lets later scalar values win, merges nested messages field-by-field, merges
+          maps by key, and appends array elements in order. The low-level <code>LocateField</code>{' '}
+          scanner does not merge; it returns the last occurrence of that field tag.
         </p>
       </div>
       <div class="lg:col-span-6 font-mono text-sm min-w-0">
@@ -145,19 +145,18 @@
           Native map wire type
         </h3>
         <p class="text-base sm:text-lg text-ink/85 leading-relaxed max-w-[75ch]">
-          Protobuf doesn't have a dedicated wire type for maps. When you write{' '}
-          <code>map&lt;string, uint64&gt; counters = 1</code>, the compiler turns it into a repeated
-          sub-message (<code>repeated CountersEntry</code>) behind the scenes. Every key-value pair
-          gets wrapped in 4 extra bytes of field tags and sub-message lengths (<code>0a 05</code>,{' '}
-          <code>0a</code>, <code>10</code>), and the decoder has to parse a sub-message for every
-          entry in the map.
+          Protobuf has no dedicated wire type for maps. A declaration such as{' '}
+          <code>map&lt;string, uint64&gt; counters = 1</code> compiles down to a repeated
+          sub-message (<code>repeated CountersEntry</code>). Every key-value pair gets wrapped in 4
+          extra bytes of field tags and sub-message lengths (<code>0a 05</code>, <code>0a</code>,{' '}
+          <code>10</code>), and the decoder has to parse a sub-message for every entry in the map.
         </p>
         <p class="text-base sm:text-lg text-ink/85 leading-relaxed max-w-[75ch]">
-          OmniBuf has a native map wire type (<code>WireMap = 14</code>). It writes a 2-byte header
-          with the key and value wire types once (<code>0A 00</code> for{' '}
-          <code>WireString = 10</code> and <code>WireUint = 0</code>), followed by the entry count
-          and the raw <code>[Key][Value]</code> pairs. In this example, each entry takes{' '}
-          <strong>3 bytes instead of 7</strong> (36 B vs. 70 B for a 10-entry map).
+          OmniBuf has a dedicated map wire type (<code>WireMap = 14</code>). It writes the key and
+          value types once in a 2-byte header (<code>0A 00</code> for <code>WireString</code> and{' '}
+          <code>WireUint</code>), then the entry count, and then the raw <code>[Key][Value]</code>{' '}
+          pairs back-to-back. Each entry in this example takes <strong>3 bytes instead of 7</strong>
+          , so a 10-entry map drops from 70 bytes to 36.
         </p>
       </div>
 

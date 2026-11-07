@@ -185,9 +185,32 @@ func skipLargeContainer(packet []byte, pos int) (int, bool) {
 	return pos, pos <= len(packet)
 }
 
+// ValidateValue validates a single field payload starting at data[pos] with wire type wt
+// at the given container nesting depth, enforcing MaxNestingDepth and full inner validation.
+func ValidateValue(data []byte, pos int, wt uint8, depth int) (int, error) {
+	return skipValueWithDepth(data, pos, wt, depth)
+}
+
 func skipValue(b []byte, pos int, wireType uint8) (int, error) {
+	return skipValueWithDepth(b, pos, wireType, 0)
+}
+
+func skipValueWithDepth(b []byte, pos int, wireType uint8, depth int) (int, error) {
+	if depth > MaxNestingDepth {
+		return 0, fmt.Errorf("omnibuf: nesting depth %d exceeds MaxNestingDepth (%d)", depth, MaxNestingDepth)
+	}
 	if pos < 0 || pos > len(b) {
 		return 0, fmt.Errorf("omnibuf: position %d out of bounds", pos)
+	}
+	if wireType == wireSubMsg {
+		body, end, err := readLenSlice(b, pos, 0)
+		if err != nil {
+			return 0, err
+		}
+		if err := validateMessageBytes(body, depth+1); err != nil {
+			return 0, err
+		}
+		return end, nil
 	}
 	if wireType == wireArray || wireType == wireMap || wireType == wireExtended {
 		length, ln := decodeVarint(b[pos:])
@@ -195,14 +218,44 @@ func skipValue(b []byte, pos int, wireType uint8) (int, error) {
 			return 0, fmt.Errorf("omnibuf: invalid container length")
 		}
 		end := pos + ln + int(length)
+		body := b[pos+ln : end]
 		switch wireType {
 		case wireArray:
-			if _, _, _, ok := parseArrayHeader(b[pos+ln : end]); !ok {
+			if depth+1 > MaxNestingDepth {
+				return 0, fmt.Errorf("omnibuf: nesting depth %d exceeds MaxNestingDepth (%d)", depth+1, MaxNestingDepth)
+			}
+			elemWT, count, p, ok := parseArrayHeader(body)
+			if !ok {
 				return 0, fmt.Errorf("omnibuf: invalid array header")
 			}
+			if err := validateArrayBody(body, p, elemWT, count, depth+1); err != nil {
+				return 0, err
+			}
 		case wireMap:
-			if _, _, _, _, ok := parseMapHeader(b[pos+ln : end]); !ok {
+			if depth+1 > MaxNestingDepth {
+				return 0, fmt.Errorf("omnibuf: nesting depth %d exceeds MaxNestingDepth (%d)", depth+1, MaxNestingDepth)
+			}
+			keyWT, valWT, count, p, ok := parseMapHeader(body)
+			if !ok {
 				return 0, fmt.Errorf("omnibuf: invalid map header")
+			}
+			for range count {
+				var err error
+				p, err = validateContainerEntry(body, p, keyWT, depth+1)
+				if err != nil {
+					return 0, err
+				}
+				p, err = validateContainerEntry(body, p, valWT, depth+1)
+				if err != nil {
+					return 0, err
+				}
+			}
+			if p != len(body) {
+				return 0, fmt.Errorf("omnibuf: trailing map bytes")
+			}
+		case wireExtended:
+			if _, en := decodeVarint(body); en == 0 {
+				return 0, fmt.Errorf("omnibuf: invalid WireExtended header")
 			}
 		}
 		return end, nil
@@ -213,6 +266,83 @@ func skipValue(b []byte, pos int, wireType uint8) (int, error) {
 		return 0, fmt.Errorf("omnibuf: truncated or invalid wireType %d at %d", wireType, pos)
 	}
 	return nextPos, nil
+}
+
+func validateArrayBody(body []byte, p int, elemWT uint8, count, depth int) error {
+	switch elemWT {
+	case wireBoolFalse:
+		if len(body)-p != count {
+			return fmt.Errorf("omnibuf: invalid bool array length")
+		}
+		for i := range count {
+			if body[p+i] > 1 {
+				return fmt.Errorf("omnibuf: invalid bool byte in array")
+			}
+		}
+		return nil
+	case wireFixed32, wireSfixed32, wireFloat32:
+		if len(body)-p != count*4 {
+			return fmt.Errorf("omnibuf: invalid 32-bit array length")
+		}
+		return nil
+	case wireFixed64, wireSfixed64, wireFloat64:
+		if len(body)-p != count*8 {
+			return fmt.Errorf("omnibuf: invalid 64-bit array length")
+		}
+		return nil
+	}
+	for range count {
+		var err error
+		p, err = validateContainerEntry(body, p, elemWT, depth)
+		if err != nil {
+			return err
+		}
+	}
+	if p != len(body) {
+		return fmt.Errorf("omnibuf: trailing array bytes")
+	}
+	return nil
+}
+
+func validateContainerEntry(body []byte, p int, wt uint8, depth int) (int, error) {
+	if wt == wireBoolFalse {
+		if p >= len(body) || body[p] > 1 {
+			return 0, fmt.Errorf("omnibuf: invalid bool byte in container")
+		}
+		return p + 1, nil
+	}
+	return skipValueWithDepth(body, p, wt, depth)
+}
+
+func validateMessageBytes(data []byte, depth int) error {
+	if depth > MaxNestingDepth {
+		return fmt.Errorf("omnibuf: nesting depth %d exceeds MaxNestingDepth (%d)", depth, MaxNestingDepth)
+	}
+	pos := 0
+	n := len(data)
+	for pos < n {
+		tag, tn := decodeVarint(data[pos:])
+		if tn == 0 || tag>>4 > maxProtobufFieldNumber {
+			return fmt.Errorf("omnibuf: invalid or truncated tag")
+		}
+		pos += tn
+		fnum := tag >> 4
+		wt := uint8(tag & 0x0F)
+		if fnum == 0 {
+			nextPos, err := validateField0(data, pos, wt, depth)
+			if err != nil {
+				return err
+			}
+			pos = nextPos
+			continue
+		}
+		nextPos, err := skipValueWithDepth(data, pos, wt, depth)
+		if err != nil {
+			return err
+		}
+		pos = nextPos
+	}
+	return nil
 }
 
 func nextContainerField(packet []byte, pos int, targetField uint16, expWT uint8, minLen uint64) (body []byte, nextPos int, matched bool, valid bool) {

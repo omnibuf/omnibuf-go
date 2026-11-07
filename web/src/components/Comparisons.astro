@@ -47,8 +47,8 @@ const miniLanguagePreviews = [
       <span class="font-serif italic font-normal normal-case text-[#FF4F18]">other formats.</span>
     </h2>
     <p class="mt-3 text-lg sm:text-xl text-ink/80 font-medium leading-relaxed">
-      Wire size is fixed by the specification, while encode and decode speed depend on each language
-      implementation. Check the full{' '}
+      Wire size is the same across languages, and encode/decode speed depends on the runtime. Full
+      numbers and test setup are on the{' '}
       <a href="/go#benchmarks" class="doc-link">
         Go benchmarks
       </a>{' '}
@@ -56,7 +56,7 @@ const miniLanguagePreviews = [
       <a href="/es#benchmarks" class="doc-link">
         TypeScript &amp; JS benchmarks
       </a>{' '}
-      for exact numbers and methodology.
+      pages.
     </p>
   </div>
 
@@ -104,7 +104,7 @@ const miniLanguagePreviews = [
             <!-- OmniBuf Row -->
             <div
               class="grid grid-cols-2 items-center py-1"
-              title={`${omni.name} — Encode: ${omni.encVal} ns, Decode: ${omni.decVal} ns`}
+              title={`${omni.name} - Encode: ${omni.encVal} ns, Decode: ${omni.decVal} ns`}
             >
               <div class="flex items-center justify-end pr-0.5 min-w-0">
                 <svg
@@ -156,7 +156,7 @@ const miniLanguagePreviews = [
               {rest.map((r) => (
                 <div
                   class="grid grid-cols-2 items-center"
-                  title={`${r.name} — Encode: ${r.encVal} ns, Decode: ${r.decVal} ns`}
+                  title={`${r.name} - Encode: ${r.encVal} ns, Decode: ${r.decVal} ns`}
                 >
                   <div class="flex items-center justify-end pr-0.5 min-w-0">
                     <div
@@ -220,7 +220,7 @@ const miniLanguagePreviews = [
   </div>
 
   {packetSizeCat && (
-    <div id="packet-size" class="os-window overflow-hidden mb-10 scroll-mt-20">
+    <div id="packet-size" class="os-window overflow-hidden mb-10 scroll-mt-20 select-none">
       <div class="os-titlebar bg-[#E5E0D5]">
         <span class="font-mono text-xs sm:text-sm font-bold uppercase">{packetSizeCat.title}</span>
         <div class="os-stripes" />
@@ -290,9 +290,7 @@ const miniLanguagePreviews = [
     <!-- Standalone OmniBuf Panel Explaining the 5 Radar Scores -->
     <div id="compare-omnibuf" class="os-window overflow-hidden scroll-mt-20 flex flex-col">
       <div class="os-titlebar bg-[#E5E0D5]">
-        <h3 class="font-mono text-sm sm:text-base font-bold uppercase">
-          OmniBuf (How the Scores Work)
-        </h3>
+        <h3 class="font-mono text-sm sm:text-base font-bold uppercase">OmniBuf Baseline</h3>
         <div class="os-stripes"></div>
       </div>
 

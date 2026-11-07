@@ -6,9 +6,11 @@ import Quickstart from '../components/Quickstart.astro';
 import Benchmarks from '../components/Benchmarks.astro';
 import Footer from '../components/Footer.astro';
 
-const opaqueSpliceCode = `view := pb.PeerOpaque(pkt)
-router, ok := view.Router()
-updated := view.SetActive(false)`;
+const opaqueSpliceCode = `var view pb.OpaquePeerUpdate
+_ = view.Unmarshal(pkt)
+router := view.GetRouterId()
+view.SetActive(false)
+updated := view.MarshalAppend(nil)`;
 
 const field0BlindCode = `opts := omnibuf.MarshalOptions{SelfDescribing: true}
 pkt, err := opts.Marshal(&peer)
@@ -22,7 +24,7 @@ const goFaqItems = [
     id: 'go-faq-opaque',
     question: 'Do I have to parse the whole message to read one field?',
     paragraphs: [
-      'No. While <code>omnibuf.Unmarshal</code> decodes a full message buffer into a struct, generated <code>Opaque</code> views (and low-level helpers like <code>wire.LocateField</code> or <code>wire.ReadString</code>) hop over preceding field headers by byte length and read or splice just the field you asked for without parsing or allocating the rest of the packet.',
+      '<code>omnibuf.Unmarshal</code> unpacks the full struct, whereas the generated <code>Opaque</code> view (and <code>wire.LocateField</code>) steps over earlier field headers by their byte lengths to read or overwrite a single field in the raw slice.',
     ],
     codeBlock: opaqueSpliceCode,
     codeLabel: 'Example',
@@ -31,7 +33,7 @@ const goFaqItems = [
     id: 'go-faq-blind',
     question: 'How do I decode without a schema?',
     paragraphs: [
-      'Call <code>omnibuf.DecodeBlind(pkt)</code> to decode any packet into a map keyed by field number. If you also want field names in that map, encode with <code>MarshalOptions{SelfDescribing: true}</code> to include Field #0.',
+      '<code>omnibuf.DecodeBlind(pkt)</code> returns a map keyed by field number. Setting <code>MarshalOptions{SelfDescribing: true}</code> on encode embeds Field #0 so <code>DecodeBlind</code> keys the map by field name.',
     ],
     codeBlock: field0BlindCode,
     codeLabel: 'Example',
@@ -40,7 +42,7 @@ const goFaqItems = [
     id: 'go-faq-zerocopy',
     question: 'What does zeroCopy do?',
     paragraphs: [
-      'Passing <code>true</code> to <code>UnmarshalOmniBuf(pkt, true)</code> points Go strings straight at the <code>pkt</code> slice instead of allocating and copying. Only use <code>true</code> if <code>pkt</code> will not be overwritten while the struct is still in use.',
+      'Passing <code>true</code> to <code>UnmarshalOmniBuf(pkt, true)</code> aliases decoded Go strings directly to the <code>pkt</code> byte slice via <code>unsafe.String</code> with zero heap allocations. The caller must keep <code>pkt</code> immutable for the lifetime of the decoded strings.',
     ],
     codeBlock: zeroCopyBufferCode,
     codeLabel: 'Example',
@@ -49,7 +51,7 @@ const goFaqItems = [
     id: 'go-faq-plugin',
     question: 'Do I need protoc-gen-omnibuf?',
     paragraphs: [
-      'It is optional, though worth adding when you want maximum speed. <code>omnibuf.Marshal</code> and <code>omnibuf.Unmarshal</code> work without a plugin. Adding <code>protoc-gen-omnibuf</code> provides faster generated codecs and <code>Opaque</code> views over OmniBuf packets.',
+      'It is optional. <code>omnibuf.Marshal</code> and <code>omnibuf.Unmarshal</code> work directly on tagged Go structs and standard <code>.pb.go</code> types; <code>protoc-gen-omnibuf</code> adds generated <code>Opaque</code> views and single-pass struct methods.',
     ],
   },
 ];
@@ -72,7 +74,7 @@ const goFaqJsonLd = {
 
 <Layout
   title="OmniBuf for Go | Struct Tags, Protobuf Structs & protoc-gen-omnibuf"
-  description="Use OmniBuf in Go: serialize plain Go structs with omnibuf struct tags, drop in on standard Protobuf structs, or generate single-pass codecs and lazy Opaque readers with protoc-gen-omnibuf."
+  description="Use OmniBuf in Go: serialize plain Go structs with omnibuf struct tags, pass in standard .pb.go Protobuf structs, or generate single-pass codecs and Opaque views with protoc-gen-omnibuf."
 >
   <Navbar currentPage="go" />
 
@@ -90,23 +92,23 @@ const goFaqJsonLd = {
       <div class="mt-6 grid lg:grid-cols-12 gap-6 lg:gap-8 items-end">
         <div class="lg:col-span-7 space-y-4">
           <p class="text-lg sm:text-2xl text-ink/85 font-medium leading-snug">
-            You can use OmniBuf in Go on{' '}
+            There are three ways to use OmniBuf in Go: put{' '}
             <a href="#struct-tags" class="doc-link">
-              plain Go structs
+              struct tags on plain Go structs
             </a>
-            , existing{' '}
+            , pass in your existing{' '}
             <a href="#pb-go-structs" class="doc-link">
-              standard Protobuf structs
+              <code>.pb.go</code> Protobuf structs
             </a>
-            , or with the{' '}
+            , or generate code with{' '}
             <a href="#plugin-tiers" class="doc-link">
-              protoc-gen-omnibuf plugin
+              <code>protoc-gen-omnibuf</code>
             </a>
-            . Check the{' '}
+            . The{' '}
             <a href="#benchmarks" class="doc-link">
-              Go benchmarks
+              benchmarks below
             </a>{' '}
-            below to see how each option performs.
+            show the speed trade-offs for each.
           </p>
           <div class="flex flex-wrap gap-3 font-mono text-sm sm:text-base pt-1 no-print">
             <a

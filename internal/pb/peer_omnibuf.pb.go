@@ -161,7 +161,7 @@ func (x *Location) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merge bo
 				return fmt.Errorf("omnibuf: invalid Field #0 wire type %d", wt)
 			}
 			var err error
-			pos, err = wire.SkipValue(data, pos, wt)
+			pos, err = omnibuf.ValidateValue(data, pos, wt, depth)
 			if err != nil {
 				return err
 			}
@@ -395,7 +395,7 @@ func (x *Neighbor) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merge bo
 				return fmt.Errorf("omnibuf: invalid Field #0 wire type %d", wt)
 			}
 			var err error
-			pos, err = wire.SkipValue(data, pos, wt)
+			pos, err = omnibuf.ValidateValue(data, pos, wt, depth)
 			if err != nil {
 				return err
 			}
@@ -828,6 +828,9 @@ func (x *PeerUpdate) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merge 
 			start := len(x.Neighbors)
 			total := start + count
 			if cap(x.Neighbors) < total {
+				if _, ok := wire.CountSubMsgArrElems(body); !ok {
+					return fmt.Errorf("omnibuf: invalid submsg array")
+				}
 				slab := make([]Neighbor, count)
 				next := make([]*Neighbor, total, wire.GrowCapacity(cap(x.Neighbors), total))
 				copy(next, x.Neighbors)
@@ -870,7 +873,7 @@ func (x *PeerUpdate) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merge 
 				return fmt.Errorf("omnibuf: invalid Field #0 wire type %d", wt)
 			}
 			var err error
-			pos, err = wire.SkipValue(data, pos, wt)
+			pos, err = omnibuf.ValidateValue(data, pos, wt, depth)
 			if err != nil {
 				return err
 			}

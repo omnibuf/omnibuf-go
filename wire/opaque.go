@@ -25,6 +25,7 @@ func SpliceFields(dst, raw []byte, dirtyMask uint64, maxField uint16, appendDirt
 	}
 	pos := 0
 	cleanStart := 0
+	validEnd := 0
 	var emitted uint64
 
 	for pos < n {
@@ -51,13 +52,28 @@ func SpliceFields(dst, raw []byte, dirtyMask uint64, maxField uint16, appendDirt
 			pos += tn
 		}
 
-		// Fast-skip field value to find fieldEnd
-		nextPos, ok := fastSkipValue(raw, pos, wt)
-		if !ok {
+		if fnum == 0 && wt != WireSubMsg {
 			break
+		}
+
+		// Skip field value and validate container headers to find fieldEnd
+		var nextPos int
+		if wt == WireArray || wt == WireMap || wt == WireExtended {
+			var err error
+			nextPos, err = SkipValue(raw, pos, wt)
+			if err != nil {
+				break
+			}
+		} else {
+			var ok bool
+			nextPos, ok = fastSkipValue(raw, pos, wt)
+			if !ok {
+				break
+			}
 		}
 		pos = nextPos
 		fieldEnd := pos
+		validEnd = fieldEnd
 
 		var bit uint64
 		if fnum < 64 {
@@ -77,8 +93,8 @@ func SpliceFields(dst, raw []byte, dirtyMask uint64, maxField uint16, appendDirt
 		}
 	}
 
-	if cleanStart < n {
-		dst = append(dst, raw[cleanStart:n]...)
+	if cleanStart < validEnd {
+		dst = append(dst, raw[cleanStart:validEnd]...)
 	}
 
 	// Append any newly added dirty fields that were not present in raw

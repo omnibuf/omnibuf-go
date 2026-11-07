@@ -20,7 +20,7 @@ type MarshalOptions struct {
 	// reproducible builds, and content-addressable hashing).
 	Deterministic bool
 
-	// SelfDescribing emits Field #0 (Tag = 0x0B, wireSubMsg = 5, omnibuf.v1.SchemaMeta)
+	// SelfDescribing emits Field #0 (Tag = 0x19, wireSubMsg = 12, omnibuf.v1.SchemaMeta)
 	// at byte 0 of the root message with field names and nested children schemas.
 	SelfDescribing bool
 }
@@ -57,7 +57,7 @@ func (o MarshalOptions) marshalProtoReflectAppend(dst []byte, m protoreflect.Mes
 		dst = dst[:0]
 	}
 	if o.SelfDescribing {
-		meta := buildProtoReflectSchemaMeta(m.Descriptor(), 0)
+		meta := buildProtoReflectSchemaMeta(m.Descriptor(), 0, nil)
 		dst = appendField0SchemaMetaDeterministic(dst, meta, o.Deterministic)
 	}
 	bodyOpts := o
@@ -65,10 +65,16 @@ func (o MarshalOptions) marshalProtoReflectAppend(dst []byte, m protoreflect.Mes
 	return encodeProtoReflectMsg(dst, m, bodyOpts)
 }
 
-func buildProtoReflectSchemaMeta(md protoreflect.MessageDescriptor, depth int) *SchemaMeta {
-	if md == nil || depth > 8 {
+func buildProtoReflectSchemaMeta(md protoreflect.MessageDescriptor, depth int, active map[protoreflect.FullName]bool) *SchemaMeta {
+	if md == nil || depth > MaxNestingDepth || active[md.FullName()] {
 		return nil
 	}
+	if active == nil {
+		active = make(map[protoreflect.FullName]bool)
+	}
+	active[md.FullName()] = true
+	defer delete(active, md.FullName())
+
 	fields := md.Fields()
 	nFields := fields.Len()
 	meta := &SchemaMeta{
@@ -80,12 +86,17 @@ func buildProtoReflectSchemaMeta(md protoreflect.MessageDescriptor, depth int) *
 		fnum := uint32(fd.Number())
 		meta.Fields[fnum] = string(fd.Name())
 		var childMD protoreflect.MessageDescriptor
+		childDepth := depth + 1
 		if fd.IsMap() && fd.MapValue().Kind() == protoreflect.MessageKind {
 			childMD = fd.MapValue().Message()
+			childDepth = depth + 2
 		} else if !fd.IsMap() && fd.Kind() == protoreflect.MessageKind {
 			childMD = fd.Message()
+			if fd.IsList() {
+				childDepth = depth + 2
+			}
 		}
-		if child := buildProtoReflectSchemaMeta(childMD, depth+1); child != nil {
+		if child := buildProtoReflectSchemaMeta(childMD, childDepth, active); child != nil {
 			if meta.Children == nil {
 				meta.Children = make(map[uint32]*SchemaMeta)
 			}
@@ -474,7 +485,7 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 
 		fd := fields.ByNumber(protoreflect.FieldNumber(fnum))
 		if fd == nil {
-			nextPos, err := skipValue(data, pos, wt)
+			nextPos, err := skipValueWithDepth(data, pos, wt, depth)
 			if err != nil {
 				return err
 			}
@@ -490,7 +501,7 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 
 		if fd.IsMap() {
 			if wt != wireMap {
-				nextPos, err := skipValue(data, pos, wt)
+				nextPos, err := skipValueWithDepth(data, pos, wt, depth)
 				if err != nil {
 					return err
 				}
@@ -541,7 +552,7 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 
 		if fd.IsList() {
 			if wt != wireArray {
-				nextPos, err := skipValue(data, pos, wt)
+				nextPos, err := skipValueWithDepth(data, pos, wt, depth)
 				if err != nil {
 					return err
 				}
@@ -592,7 +603,7 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 		// Singular field:
 		if fd.Kind() == protoreflect.BoolKind {
 			if wt != wireBoolFalse && wt != wireBoolTrue {
-				nextPos, err := skipValue(data, pos, wt)
+				nextPos, err := skipValueWithDepth(data, pos, wt, depth)
 				if err != nil {
 					return err
 				}
@@ -610,7 +621,7 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 		if wt != expWT {
 			// Known field with a different wire type: validated and skipped
 			// like an unknown field (Protobuf semantics, shared by all tiers).
-			nextPos, err := skipValue(data, pos, wt)
+			nextPos, err := skipValueWithDepth(data, pos, wt, depth)
 			if err != nil {
 				return err
 			}
