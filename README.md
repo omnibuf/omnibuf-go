@@ -19,7 +19,10 @@ Go runtime library (`package omnibuf`) and `protoc-gen-omnibuf` compiler plugin 
 
 ```bash
 go get github.com/omnibuf/omnibuf-go
+
+# Install the protoc-gen-omnibuf compiler plugin via Go or Homebrew:
 go install github.com/omnibuf/omnibuf-go/cmd/protoc-gen-omnibuf@latest
+# or: brew install omnibuf/tap/protoc-gen-omnibuf
 ```
 
 ---
