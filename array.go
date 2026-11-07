@@ -1,7 +1,7 @@
 package omnibuf
 
 import (
-	"github.com/sudorandom/omnibuf/wire"
+	"github.com/omnibuf/omnibuf-go/wire"
 )
 
 type intOrUint interface {

@@ -20,7 +20,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/sudorandom/omnibuf"
+	"github.com/omnibuf/omnibuf-go"
 )
 
 // EmbeddedCorpusJSON holds the built-in language-independent conformance test corpus

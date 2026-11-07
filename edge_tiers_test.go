@@ -9,9 +9,9 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/dynamicpb"
 
-	. "github.com/sudorandom/omnibuf"
-	"github.com/sudorandom/omnibuf/internal/pb"
-	. "github.com/sudorandom/omnibuf/wire"
+	. "github.com/omnibuf/omnibuf-go"
+	"github.com/omnibuf/omnibuf-go/internal/pb"
+	. "github.com/omnibuf/omnibuf-go/wire"
 )
 
 // ============================================================================

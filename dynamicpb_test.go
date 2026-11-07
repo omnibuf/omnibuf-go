@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	. "github.com/sudorandom/omnibuf"
-	. "github.com/sudorandom/omnibuf/wire"
+	. "github.com/omnibuf/omnibuf-go"
+	. "github.com/omnibuf/omnibuf-go/wire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"

@@ -1,19 +1,26 @@
-# OmniBuf
+# OmniBuf for Go (`omnibuf-go`)
 
-[![CI](https://github.com/sudorandom/omnibuf/actions/workflows/ci.yml/badge.svg)](https://github.com/sudorandom/omnibuf/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/sudorandom/omnibuf.svg)](https://pkg.go.dev/github.com/sudorandom/omnibuf)
-[![Website](https://img.shields.io/badge/website-omnibuf.com-111111?style=flat&labelColor=111111&color=D4FF33)](https://omnibuf.com)
+[![CI](https://github.com/omnibuf/omnibuf-go/actions/workflows/ci.yml/badge.svg)](https://github.com/omnibuf/omnibuf-go/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/omnibuf/omnibuf-go.svg)](https://pkg.go.dev/github.com/omnibuf/omnibuf-go)
+[![Website](https://img.shields.io/badge/website-omnibuf.com-111111?style=flat&labelColor=111111&color=D4FF33)](https://omnibuf.com/go)
 
-**[Website (omnibuf.com)](https://omnibuf.com)** · **[How It Works](https://omnibuf.com/how-it-works)** · **[Go Implementation](https://omnibuf.com/go)** · **[TypeScript / JS](https://omnibuf.com/es)** · **[Wire Format Specification](https://omnibuf.com/spec)**
+**[Website (omnibuf.com)](https://omnibuf.com)** · **[How It Works](https://omnibuf.com/how-it-works)** · **[Go Documentation](https://omnibuf.com/go)** · **[TypeScript / JS (`omnibuf-es`)](https://github.com/omnibuf/omnibuf-es)** · **[CLI (`omnibuf-cli`)](https://github.com/omnibuf/omnibuf-cli)** · **[Wire Format Specification](https://omnibuf.com/spec)**
 
-**OmniBuf** is a binary wire format for Protocol Buffers (`.proto` schemas) built around four ideas:
+Go runtime library (`package omnibuf`) and `protoc-gen-omnibuf` compiler plugin for the **OmniBuf** binary wire format:
 
 1. **Keep `.proto` schemas and Go structs:** Existing `.proto` files, `protoc-gen-go` structs, and `dynamicpb` messages work without changes.
-2. **Fix Protobuf's CPU bottlenecks:** Prefix-Varints (`TZCNT`) decode integers in a single load with no byte-by-byte continuation loop, and 2-byte length backpatching encodes messages in a single forward pass with no two-pass size walk (~6x faster encode and ~7x faster zero-copy decode than `google.golang.org/protobuf`).
+2. **Single-pass encode & zero-loop varints:** Prefix-Varints (`TZCNT`) decode integers in a single load with no byte-by-byte continuation loop, and 2-byte length backpatching encodes messages in a single forward pass (~6x faster encode and ~6x faster zero-copy decode than `google.golang.org/protobuf`).
 3. **Inspect packets without a schema (`DecodeBlind`):** Explicit 4-bit wire types (`0..15`) replace Protobuf's overloaded `Wire Type 2`, and optional **Field `#0`** metadata attaches field names on the wire when needed.
-4. **Stay a flat `[Tag][Value]` stream:** No vtables or pointer graphs. Containers carry outer byte lengths for single-step skipping (`LocateField`), and concatenating two packets (`append(msgA, msgB...)`) merges them just like Protobuf.
+4. **Flat `[Tag][Value]` stream:** Containers carry outer byte lengths for single-step skipping (`LocateField`) and in-place field splicing (`SpliceFields`), and concatenating two packets (`append(msgA, msgB...)`) merges them just like Protobuf.
 
-> **Language Support:** OmniBuf ships first-party implementations for **Go** (`github.com/sudorandom/omnibuf`) and **TypeScript / JavaScript** ([`sudorandom/omnibuf-es`](https://github.com/sudorandom/omnibuf-es): `@omnibuf/core`, `@omnibuf/node`, `@omnibuf/web`, and `@omnibuf/protoc-gen-omnibuf-es`). The wire format is a flat `[Tag][Value]` stream with 4 integer widths and 16 wire types (no vtables or relative pointer graphs), making it straightforward to port to additional languages.
+---
+
+## Install
+
+```bash
+go get github.com/omnibuf/omnibuf-go
+go install github.com/omnibuf/omnibuf-go/cmd/protoc-gen-omnibuf@latest
+```
 
 ---
 
@@ -31,7 +38,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/sudorandom/omnibuf"
+	"github.com/omnibuf/omnibuf-go"
 )
 
 type PeerEvent struct {
@@ -53,7 +60,6 @@ func main() {
 		Tags:      []string{"tier1", "ebgp"},
 	}
 
-	// Marshal (or use MarshalOptions{SelfDescribing: true} to embed Field #0 names)
 	wire, err := omnibuf.MarshalOptions{SelfDescribing: true}.Marshal(in)
 	if err != nil {
 		panic(err)
@@ -64,7 +70,6 @@ func main() {
 		panic(err)
 	}
 
-	// Inspect without the Go struct definition (uses Field #0 names when present)
 	blind, err := omnibuf.DecodeBlind(wire)
 	if err != nil {
 		panic(err)
@@ -72,16 +77,6 @@ func main() {
 	fmt.Println(blind)
 }
 ```
-
-#### Struct Tag Reference (`omnibuf:"..."`)
-
-| Tag Option | Example | Description |
-| :--- | :--- | :--- |
-| `<fieldNum>` | `omnibuf:"1"` | Field number (`1..65535`). Required for serialized fields. |
-| `name=<name>` | `omnibuf:"2,name=router_id"` | Custom field name emitted in `Field #0` (`SchemaMeta`) when `SelfDescribing: true` is enabled (defaults to the Go field name). |
-| `wire=<type>` | `omnibuf:"4,wire=fixed32"` | Overrides the inferred wire encoding (`uint`, `sint`, `fixed32`, `fixed64`, `string`, `bytes`). |
-| `omitempty` | `omnibuf:"5,omitempty"` | Skips encoding the field when it holds its Go zero value or an empty slice/map. |
-| `-` | `omnibuf:"-"` | Ignores the field during encoding and decoding (even if a `protobuf` tag is present). |
 
 ### 2. Existing `.pb.go` Structs (`protoc-gen-go`)
 
@@ -92,7 +87,7 @@ import (
 	"fmt"
 
 	"example.com/yourproject/pb"
-	"github.com/sudorandom/omnibuf"
+	"github.com/omnibuf/omnibuf-go"
 )
 
 func main() {
@@ -102,19 +97,16 @@ func main() {
 		Active:   true,
 	}
 
-	// Marshal any .pb.go struct or protoreflect.Message into OmniBuf wire bytes
 	wire, err := omnibuf.Marshal(msg)
 	if err != nil {
 		panic(err)
 	}
 
-	// Unmarshal back into a struct
 	var out pb.PeerUpdate
 	if err := omnibuf.Unmarshal(wire, &out); err != nil {
 		panic(err)
 	}
 
-	// Or inspect values without a schema (DecodeBlind)
 	blind, err := omnibuf.DecodeBlind(wire)
 	if err != nil {
 		panic(err)
@@ -125,83 +117,16 @@ func main() {
 
 ---
 
-## CLI Usage (`omnibuf`)
-
-Build or install the CLI tool:
+## Development
 
 ```bash
-go install github.com/sudorandom/omnibuf/cmd/omnibuf@latest
-# or locally via just:
-just build-cli
-```
-
-```bash
-# Blind decode any OmniBuf packet to JSON without a schema
-omnibuf decode testdata/golden/peer_update.field0.obuf
-
-# Decode using a FileDescriptorSet (.json, .pb, or .pb.gz)
-omnibuf decode -s testdata/golden/peer.fds.pb.gz -t PeerUpdate testdata/golden/peer_update.shared.obuf
-
-# Encode JSON to OmniBuf wire bytes using a FileDescriptorSet (.json, .pb, or .pb.gz)
-omnibuf encode -s testdata/golden/peer.fds.pb.gz -t PeerUpdate testdata/golden/peer_update.input.json -o out.obuf
-
-# Encode with Field #0 inline field names and output hex
-omnibuf encode -s testdata/golden/peer.fds.json -t PeerUpdate --field0 --hex testdata/golden/peer_update.input.json
-
-# Run the self-contained conformance suite against a target language client
-omnibuf conformance ./bin/conformance-go
-omnibuf conformance node ../omnibuf-es/packages/omnibuf-node/dist/bin/conformance-es.js
-```
-
-Schema files and their decompressed contents are each limited to 64 MiB by default.
-Use `--max-schema-bytes` with `encode` or `decode` to set a different positive byte limit.
-
----
-
-## Conformance Testing (`conformance-runner` / `omnibuf conformance`)
-
-OmniBuf includes a self-contained conformance test runner modeled after Protobuf's `conformance-test-runner`, `protovalidate-conformance`, and Connect's conformance runner. The test corpus (`internal/conformance/conformance_corpus.json`) is embedded directly into the runner binary so language implementations do not need to copy test vectors across repositories.
-
-The runner spawns a language-specific conformance client binary (`cmd/conformance-go` for Go, `omnibuf-conformance-es` for TypeScript/Node.js) and exchanges 4-byte little-endian `uint32` length-prefixed `ConformanceRequest` and `ConformanceResponse` messages (defined in [`proto/omnibuf/conformance/conformance.proto`](proto/omnibuf/conformance/conformance.proto)) over `stdin` and `stdout` across all four implementation tiers:
-
-- `TEST_TIER_PLUGIN` (`1`): Generated plugin codecs (`protoc-gen-omnibuf-*`) and lazy `Opaque` views (`test_opaque_splice` / `test_opaque_splice_shrink`)
-
-  The Go adapter also checks runtime splicing into overlapping destination storage with 0-, 3-, and 32-byte prefixes, verifying prefix preservation, identical output, and an unchanged source packet.
-- `TEST_TIER_PROTOBUF_TYPES` (`2`): Standard Protobuf descriptors and generated Protobuf message types
-- `TEST_TIER_ANNOTATED_STRUCT` (`3`): Plain language structs, classes, or declarative schemas
-- `TEST_TIER_BLIND` (`4`): Schema-less inspection (`DecodeBlind` / `decodeBlind`)
-
-```bash
-# Build and run the Go conformance suite via just
-just conformance
-
-# Or install the standalone runner binary for use in other language repositories
-go install github.com/sudorandom/omnibuf/cmd/conformance-runner@latest
-conformance-runner ./path/to/conformance-client
-```
-
----
-
-## Development Quick Start
-
-```bash
-# Install tool dependencies (buf, go, golangci-lint, just, node, pnpm) via mise
-mise install
-
-# Format and lint Go, Protobuf schemas (buf), and frontend
-just fmt
+just fmt-check
 just lint
-
-# Run all unit, conformance, golden, and dynamicpb matrix tests
 just test
-
-# Run the fuzzer
+just conformance
 just fuzz 10s
-
-# Run the complete benchmark suite
-just bench
-
-# Start the Astro website dev server (or build into web/dist)
-just web-dev
-just web-build
 ```
+
+## License
+
+Released under the [MIT License](./LICENSE).

@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	flatbuffers "github.com/google/flatbuffers/go"
-	. "github.com/sudorandom/omnibuf"
-	"github.com/sudorandom/omnibuf/internal/pb"
+	. "github.com/omnibuf/omnibuf-go"
+	"github.com/omnibuf/omnibuf-go/internal/pb"
 	"google.golang.org/protobuf/proto"
 )
 

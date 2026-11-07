@@ -1,4 +1,4 @@
-module github.com/sudorandom/omnibuf
+module github.com/omnibuf/omnibuf-go
 
 go 1.25.0
 

@@ -10,8 +10,8 @@ import (
 )
 
 var required = []string{
-	"github.com/sudorandom/omnibuf.decodeVarint",
-	"github.com/sudorandom/omnibuf/wire.DecodeVarint",
+	"github.com/omnibuf/omnibuf-go.decodeVarint",
+	"github.com/omnibuf/omnibuf-go/wire.DecodeVarint",
 }
 
 func main() {

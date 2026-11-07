@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	ob "github.com/sudorandom/omnibuf"
-	"github.com/sudorandom/omnibuf/internal/pb"
-	"github.com/sudorandom/omnibuf/wire"
+	ob "github.com/omnibuf/omnibuf-go"
+	"github.com/omnibuf/omnibuf-go/internal/pb"
+	"github.com/omnibuf/omnibuf-go/wire"
 )
 
 // A small, valid packet must not cause quadratic cumulative allocation when

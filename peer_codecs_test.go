@@ -13,8 +13,8 @@ import (
 	flatbuffers "github.com/google/flatbuffers/go"
 	"github.com/hamba/avro/v2"
 	"github.com/hamba/avro/v2/ocf"
-	. "github.com/sudorandom/omnibuf"
-	. "github.com/sudorandom/omnibuf/wire"
+	. "github.com/omnibuf/omnibuf-go"
+	. "github.com/omnibuf/omnibuf-go/wire"
 	"github.com/vmihailenco/msgpack/v5"
 	"google.golang.org/protobuf/encoding/protowire"
 )

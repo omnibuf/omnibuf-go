@@ -50,7 +50,7 @@ func TestGeneratedWideTags(t *testing.T) {
 	}
 	structFields.WriteString("\tFlag bool `omnibuf:\"65535\"`\n\tNumbers []uint32 `omnibuf:\"70\"`\n\tFixedNums []uint32 `omnibuf:\"71,wire=fixed32\"`\n")
 	testSource := `package pb
-import("testing";"reflect";"github.com/sudorandom/omnibuf/wire")
+import("testing";"reflect";"github.com/omnibuf/omnibuf-go/wire")
 type Wide struct {
 ` + structFields.String() + `}
 func TestRoundTrip(t *testing.T){

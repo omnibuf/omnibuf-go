@@ -5,9 +5,9 @@ import (
 	"reflect"
 	"testing"
 
-	ob "github.com/sudorandom/omnibuf"
-	"github.com/sudorandom/omnibuf/internal/pb"
-	"github.com/sudorandom/omnibuf/wire"
+	ob "github.com/omnibuf/omnibuf-go"
+	"github.com/omnibuf/omnibuf-go/internal/pb"
+	"github.com/omnibuf/omnibuf-go/wire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"

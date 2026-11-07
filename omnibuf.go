@@ -3,7 +3,7 @@
 // It supports three usage modes in Go:
 //   - Plain Go structs annotated with `omnibuf:"<fieldNum>[,name=<name>][,wire=<wireType>][,omitempty]"`
 //   - Existing protoc-gen-go generated structs (*pb.Message) and dynamicpb.Message via Marshal and Unmarshal
-//   - Generated single-pass codecs and Opaque zero-decode lazy readers via protoc-gen-omnibuf (using github.com/sudorandom/omnibuf/wire)
+//   - Generated single-pass codecs and Opaque zero-decode lazy readers via protoc-gen-omnibuf (using github.com/omnibuf/omnibuf-go/wire)
 package omnibuf
 
 import (
@@ -12,7 +12,7 @@ import (
 	"sort"
 	"unsafe"
 
-	"github.com/sudorandom/omnibuf/wire"
+	"github.com/omnibuf/omnibuf-go/wire"
 )
 
 // Explicit 4-bit Wire Types (0..15) encoded in the low 4 bits of the field tag:

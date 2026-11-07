@@ -13,7 +13,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	. "github.com/sudorandom/omnibuf"
+	. "github.com/omnibuf/omnibuf-go"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"

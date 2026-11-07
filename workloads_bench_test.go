@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	ob "github.com/sudorandom/omnibuf"
-	"github.com/sudorandom/omnibuf/internal/pb"
+	ob "github.com/omnibuf/omnibuf-go"
+	"github.com/omnibuf/omnibuf-go/internal/pb"
 	"google.golang.org/protobuf/proto"
 )
 

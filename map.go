@@ -3,7 +3,7 @@ package omnibuf
 import (
 	"slices"
 
-	"github.com/sudorandom/omnibuf/wire"
+	"github.com/omnibuf/omnibuf-go/wire"
 )
 
 func parseMapHeader(body []byte) (keyWT, valWT uint8, count, pos int, ok bool) {

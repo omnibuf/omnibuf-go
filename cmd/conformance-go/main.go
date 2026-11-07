@@ -15,10 +15,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sudorandom/omnibuf"
-	"github.com/sudorandom/omnibuf/internal/conformance"
-	"github.com/sudorandom/omnibuf/internal/pb"
-	"github.com/sudorandom/omnibuf/wire"
+	"github.com/omnibuf/omnibuf-go"
+	"github.com/omnibuf/omnibuf-go/internal/conformance"
+	"github.com/omnibuf/omnibuf-go/internal/pb"
+	"github.com/omnibuf/omnibuf-go/wire"
 )
 
 func main() {

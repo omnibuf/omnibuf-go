@@ -15,10 +15,10 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	. "github.com/sudorandom/omnibuf"
-	"github.com/sudorandom/omnibuf/internal/conformance"
-	"github.com/sudorandom/omnibuf/internal/pb"
-	. "github.com/sudorandom/omnibuf/wire"
+	. "github.com/omnibuf/omnibuf-go"
+	"github.com/omnibuf/omnibuf-go/internal/conformance"
+	"github.com/omnibuf/omnibuf-go/internal/pb"
+	. "github.com/omnibuf/omnibuf-go/wire"
 )
 
 // ============================================================================
@@ -2476,14 +2476,10 @@ func TestLargeContainerExpansionOver16KB(t *testing.T) {
 func TestConformanceRunnerAdapterHarness(t *testing.T) {
 	tmpDir := t.TempDir()
 	runnerBin := filepath.Join(tmpDir, "conformance-runner")
-	cliBin := filepath.Join(tmpDir, "omnibuf")
 	adapterBin := filepath.Join(tmpDir, "conformance-go")
 
 	if out, err := exec.Command("go", "build", "-o", runnerBin, "./cmd/conformance-runner").CombinedOutput(); err != nil {
 		t.Fatalf("build conformance-runner failed: %v\n%s", err, out)
-	}
-	if out, err := exec.Command("go", "build", "-o", cliBin, "./cmd/omnibuf").CombinedOutput(); err != nil {
-		t.Fatalf("build omnibuf CLI failed: %v\n%s", err, out)
 	}
 	if out, err := exec.Command("go", "build", "-o", adapterBin, "./cmd/conformance-go").CombinedOutput(); err != nil {
 		t.Fatalf("build conformance-go failed: %v\n%s", err, out)
@@ -2510,20 +2506,4 @@ func TestConformanceRunnerAdapterHarness(t *testing.T) {
 		t.Fatalf("self-contained conformance-runner CLI failed: %v\n%s", err, out)
 	}
 	t.Logf("\n%s", strings.TrimSpace(string(out)))
-
-	// 3. Verify `omnibuf conformance` subcommand runs self-contained from tmpDir
-	// #nosec G204 -- cliBin and adapterBin are built in t.TempDir() above
-	cmdCLI := exec.Command(cliBin, "conformance", "--json", adapterBin)
-	cmdCLI.Dir = tmpDir
-	jsonOut, err := cmdCLI.CombinedOutput()
-	if err != nil {
-		t.Fatalf("omnibuf conformance --json failed: %v\n%s", err, jsonOut)
-	}
-	var parsedSum conformance.Summary
-	if err := json.Unmarshal(jsonOut, &parsedSum); err != nil {
-		t.Fatalf("unmarshal omnibuf conformance --json output failed: %v\n%s", err, jsonOut)
-	}
-	if parsedSum.PassedCases != sum.PassedCases || len(parsedSum.Failures) != 0 {
-		t.Fatalf("omnibuf conformance summary mismatch: got %+v, want %+v", parsedSum, sum)
-	}
 }

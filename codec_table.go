@@ -16,7 +16,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/sudorandom/omnibuf/wire"
+	"github.com/omnibuf/omnibuf-go/wire"
 )
 
 // ============================================================================

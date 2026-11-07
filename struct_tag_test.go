@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	. "github.com/sudorandom/omnibuf"
-	. "github.com/sudorandom/omnibuf/wire"
+	. "github.com/omnibuf/omnibuf-go"
+	. "github.com/omnibuf/omnibuf-go/wire"
 )
 
 type CustomRole string

@@ -6,12 +6,12 @@ import (
 	"os"
 	"strings"
 
+	"github.com/omnibuf/omnibuf-go/wire"
 	_ "github.com/planetscale/vtprotobuf/features/marshal"
 	_ "github.com/planetscale/vtprotobuf/features/pool"
 	_ "github.com/planetscale/vtprotobuf/features/size"
 	_ "github.com/planetscale/vtprotobuf/features/unmarshal"
 	vtgenerator "github.com/planetscale/vtprotobuf/generator"
-	"github.com/sudorandom/omnibuf/wire"
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -79,7 +79,7 @@ func peerProtoRequest() *pluginpb.CodeGeneratorRequest {
 		Name:    proto.String("omnibuf/bench/peer.proto"),
 		Package: proto.String("omnibuf.bench"),
 		Options: &descriptorpb.FileOptions{
-			GoPackage: proto.String("github.com/sudorandom/omnibuf/internal/pb;pb"),
+			GoPackage: proto.String("github.com/omnibuf/omnibuf-go/internal/pb;pb"),
 		},
 		MessageType: []*descriptorpb.DescriptorProto{
 			{
@@ -158,7 +158,7 @@ func conformanceProtoRequest() *pluginpb.CodeGeneratorRequest {
 		Name:    proto.String("omnibuf/conformance/conformance.proto"),
 		Package: proto.String("omnibuf.conformance"),
 		Options: &descriptorpb.FileOptions{
-			GoPackage: proto.String("github.com/sudorandom/omnibuf/internal/pb;pb"),
+			GoPackage: proto.String("github.com/omnibuf/omnibuf-go/internal/pb;pb"),
 		},
 		MessageType: []*descriptorpb.DescriptorProto{
 			{
@@ -247,7 +247,7 @@ func runVTProtoGen(outPath string) error {
 		Poolable:        vtgenerator.NewObjectSet(),
 		PoolableExclude: vtgenerator.NewObjectSet(),
 	}
-	_ = cfg.Poolable.Set("github.com/sudorandom/omnibuf/internal/pb.*")
+	_ = cfg.Poolable.Set("github.com/omnibuf/omnibuf-go/internal/pb.*")
 	gen, err := vtgenerator.NewGenerator(plugin, []string{"marshal", "size", "unmarshal", "unmarshal_unsafe", "pool"}, &cfg)
 	if err != nil {
 		return err
@@ -311,8 +311,8 @@ func generateFile(gen *protogen.Plugin, file *protogen.File) {
 		g.P(`	"math"`)
 	}
 	g.P()
-	g.P(`	"github.com/sudorandom/omnibuf"`)
-	g.P(`	"github.com/sudorandom/omnibuf/wire"`)
+	g.P(`	"github.com/omnibuf/omnibuf-go"`)
+	g.P(`	"github.com/omnibuf/omnibuf-go/wire"`)
 	g.P(")")
 	g.P()
 

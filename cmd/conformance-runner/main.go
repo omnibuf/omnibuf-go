@@ -16,7 +16,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sudorandom/omnibuf/internal/conformance"
+	"github.com/omnibuf/omnibuf-go/internal/conformance"
 )
 
 func main() {
