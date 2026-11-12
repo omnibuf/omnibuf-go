@@ -551,6 +551,49 @@ func TestOmniBufStructTags_OmitEmpty(t *testing.T) {
 	}
 }
 
+func TestStructTag32BitIntUintMemorySafety(t *testing.T) {
+	type IntUintAdjacent struct {
+		A         int    `omnibuf:"1"`
+		Sentinel1 uint32 `omnibuf:"-"`
+		B         uint   `omnibuf:"3"`
+		Sentinel2 uint32 `omnibuf:"-"`
+		Ints      []int  `omnibuf:"5"`
+		Uints     []uint `omnibuf:"6"`
+		FixedInt  int    `omnibuf:"7,wire=fixed64"`
+		Sentinel3 uint32 `omnibuf:"-"`
+		FixedUint uint   `omnibuf:"9,wire=fixed64"`
+		Sentinel4 uint32 `omnibuf:"-"`
+	}
+	in := IntUintAdjacent{
+		A:         -42,
+		Sentinel1: 0xdeadbeef,
+		B:         99,
+		Sentinel2: 0xcafebabe,
+		Ints:      []int{-10, 20, -30},
+		Uints:     []uint{1, 2, 3},
+		FixedInt:  -77,
+		Sentinel3: 0x11223344,
+		FixedUint: 88,
+		Sentinel4: 0x55667788,
+	}
+	pkt, err := Marshal(&in)
+	if err != nil {
+		t.Fatalf("Marshal IntUintAdjacent failed: %v", err)
+	}
+	out := IntUintAdjacent{
+		Sentinel1: 0xdeadbeef,
+		Sentinel2: 0xcafebabe,
+		Sentinel3: 0x11223344,
+		Sentinel4: 0x55667788,
+	}
+	if err := Unmarshal(pkt, &out); err != nil {
+		t.Fatalf("Unmarshal IntUintAdjacent failed: %v", err)
+	}
+	if !reflect.DeepEqual(out, in) {
+		t.Fatalf("IntUintAdjacent roundtrip/memory corruption: got %+v, want %+v", out, in)
+	}
+}
+
 func TestOmniBufStructTags_PrecedenceOverProtobufTag(t *testing.T) {
 	type MixedTagStruct struct {
 		// omnibuf tag overrides protobuf field number, name, and wire type

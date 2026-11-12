@@ -129,47 +129,49 @@ func fastSkipValue(packet []byte, pos int, wt uint8) (int, bool) {
 	n := len(packet)
 	switch wt {
 	case wireUint, wireSint:
-		if pos >= n {
+		if uint(pos) >= uint(n) {
 			return 0, false
 		}
 		vb := packet[pos]
 		if (vb & 1) != 0 {
-			pos++
+			return pos + 1, true
 		} else if (vb & 2) != 0 {
-			pos += 2
+			return pos + 2, n-pos >= 2
 		} else if (vb & 4) != 0 {
-			pos += 4
+			return pos + 4, n-pos >= 4
 		} else if vb == 0 {
-			pos += 9
-		} else {
-			return 0, false
+			return pos + 9, n-pos >= 9
 		}
-		return pos, pos <= n
+		return 0, false
 	case wireBoolFalse, wireBoolTrue:
-		return pos, true
+		return pos, uint(pos) <= uint(n)
 	case wireString, wireBytes, wireSubMsg, wireArray, wireMap, wireExtended:
-		if pos >= n {
+		if uint(pos) >= uint(n) {
 			return 0, false
 		}
 		lb := packet[pos]
 		if (lb & 1) != 0 {
-			pos += 1 + int(lb>>1)
-			return pos, pos <= n
+			l := int(lb >> 1)
+			return pos + 1 + l, n-pos-1 >= l
 		}
 		if (lb & 2) != 0 {
-			if pos+2 > n {
+			if n-pos < 2 {
 				return 0, false
 			}
-			pos += 2 + int(binary.LittleEndian.Uint16(packet[pos:pos+2])>>2)
-			return pos, pos <= n
+			l := int(binary.LittleEndian.Uint16(packet[pos:pos+2]) >> 2)
+			return pos + 2 + l, n-pos-2 >= l
 		}
 		return skipLargeContainer(packet, pos)
 	case wireFixed32, wireFloat32, wireSfixed32:
-		pos += 4
-		return pos, pos <= n
+		if uint(pos) > uint(n) || n-pos < 4 {
+			return 0, false
+		}
+		return pos + 4, true
 	case wireFixed64, wireFloat64, wireSfixed64:
-		pos += 8
-		return pos, pos <= n
+		if uint(pos) > uint(n) || n-pos < 8 {
+			return 0, false
+		}
+		return pos + 8, true
 	default:
 		return 0, false
 	}

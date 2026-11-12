@@ -393,6 +393,25 @@ func precomputeFieldTag(fc *fieldCodec) {
 	}
 }
 
+var ptrIntBytes = unsafe.Sizeof(int(0))
+
+func sizedIntKind(k reflect.Kind) reflect.Kind {
+	switch k {
+	case reflect.Int:
+		if ptrIntBytes == 4 {
+			return reflect.Int32
+		}
+		return reflect.Int64
+	case reflect.Uint:
+		if ptrIntBytes == 4 {
+			return reflect.Uint32
+		}
+		return reflect.Uint64
+	default:
+		return k
+	}
+}
+
 func configureFieldCodec(fc *fieldCodec, sf reflect.StructField, ft reflect.Type, wireOpt string, building map[reflect.Type]*structCodec) (err error) {
 	defer func() {
 		if err == nil {
@@ -401,7 +420,7 @@ func configureFieldCodec(fc *fieldCodec, sf reflect.StructField, ft reflect.Type
 		}
 	}()
 
-	switch ft.Kind() {
+	switch sizedIntKind(ft.Kind()) {
 	case reflect.Uint8:
 		switch wireOpt {
 		case "", "uint":
@@ -453,7 +472,7 @@ func configureFieldCodec(fc *fieldCodec, sf reflect.StructField, ft reflect.Type
 		default:
 			return fmt.Errorf("omnibuf: unsupported wire type %q for %v on %s", wireOpt, ft, sf.Name)
 		}
-	case reflect.Uint64, reflect.Uint:
+	case reflect.Uint64:
 		switch wireOpt {
 		case "", "uint":
 			fc.kind = kindUint64
@@ -521,7 +540,7 @@ func configureFieldCodec(fc *fieldCodec, sf reflect.StructField, ft reflect.Type
 		default:
 			return fmt.Errorf("omnibuf: unsupported wire type %q for %v on %s", wireOpt, ft, sf.Name)
 		}
-	case reflect.Int64, reflect.Int:
+	case reflect.Int64:
 		switch wireOpt {
 		case "", "sint":
 			fc.kind = kindInt64
@@ -618,7 +637,7 @@ func configureFieldCodec(fc *fieldCodec, sf reflect.StructField, ft reflect.Type
 
 func configureSliceFieldCodec(fc *fieldCodec, sf reflect.StructField, ft reflect.Type, wireOpt string, building map[reflect.Type]*structCodec) error {
 	elem := ft.Elem()
-	switch elem.Kind() {
+	switch sizedIntKind(elem.Kind()) {
 	case reflect.Uint8:
 		switch wireOpt {
 		case "", "bytes":
@@ -706,7 +725,7 @@ func configureSliceFieldCodec(fc *fieldCodec, sf reflect.StructField, ft reflect
 		default:
 			return fmt.Errorf("omnibuf: unsupported wire type %q for %v on %s", wireOpt, ft, sf.Name)
 		}
-	case reflect.Uint64, reflect.Uint:
+	case reflect.Uint64:
 		switch wireOpt {
 		case "", "uint":
 			fc.kind = kindUint64Slice
@@ -774,7 +793,7 @@ func configureSliceFieldCodec(fc *fieldCodec, sf reflect.StructField, ft reflect
 		default:
 			return fmt.Errorf("omnibuf: unsupported wire type %q for %v on %s", wireOpt, ft, sf.Name)
 		}
-	case reflect.Int64, reflect.Int:
+	case reflect.Int64:
 		switch wireOpt {
 		case "", "sint":
 			fc.kind = kindInt64Slice
