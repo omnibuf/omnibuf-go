@@ -409,10 +409,12 @@ func nextContainerField(packet []byte, pos int, targetField uint16, expWT uint8,
 
 // Encoder encodes OmniBuf messages into a reusable contiguous byte buffer in a single forward pass.
 type Encoder struct {
-	buf        []byte
-	lenStack   [maxNestingDepth * 2]int
-	depth      int
-	countStack [maxNestingDepth * 2]int
+	buf           []byte
+	lenStack      [maxNestingDepth * 2]int
+	depth         int
+	countStack    [maxNestingDepth * 2]int
+	lenOverflow   []int
+	countOverflow []int
 }
 
 // NewEncoder creates an Encoder with the specified initial buffer capacity.

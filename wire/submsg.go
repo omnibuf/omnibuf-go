@@ -9,11 +9,26 @@ import (
 // Nested Sub-Message & Sub-Message Array Wire Types (WireSubMsg, WireArray)
 // ============================================================================
 
+func (e *Encoder) pushStack(lenPos, count int) {
+	idx := e.depth - len(e.lenStack)
+	if idx < len(e.lenOverflow) {
+		e.lenOverflow[idx] = lenPos
+		e.countOverflow[idx] = count
+		return
+	}
+	e.lenOverflow = append(e.lenOverflow, lenPos)
+	e.countOverflow = append(e.countOverflow, count)
+}
+
 // BeginSubMsg starts a nested sub-message (WireSubMsg) in a single pass by reserving a 2-byte
 // Prefix-Varint length slot.
 func (e *Encoder) BeginSubMsg(fieldNum uint16) {
 	e.writeTag(fieldNum, WireSubMsg)
-	e.lenStack[e.depth] = len(e.buf)
+	if uint(e.depth) < uint(len(e.lenStack)) {
+		e.lenStack[e.depth] = len(e.buf)
+	} else {
+		e.pushStack(len(e.buf), 0)
+	}
 	e.depth++
 	e.buf = append(e.buf, 0, 0) // Reserve 2B Prefix-Varint length
 }
@@ -21,23 +36,41 @@ func (e *Encoder) BeginSubMsg(fieldNum uint16) {
 // EndSubMsg finishes the current nested sub-message and backpatches its byte length.
 func (e *Encoder) EndSubMsg() {
 	e.depth--
-	lenPos := e.lenStack[e.depth]
+	var lenPos int
+	if uint(e.depth) < uint(len(e.lenStack)) {
+		lenPos = e.lenStack[e.depth]
+	} else {
+		lenPos = e.lenOverflow[e.depth-len(e.lenStack)]
+	}
 	e.buf = BackpatchContainerLen(e.buf, lenPos)
 }
 
 // BeginSubMsgArr starts a repeated sub-message array (WireArray) in a single pass.
 func (e *Encoder) BeginSubMsgArr(fieldNum uint16) {
 	e.writeTag(fieldNum, WireArray)
-	e.lenStack[e.depth] = len(e.buf)
+	if uint(e.depth) < uint(len(e.lenStack)) {
+		e.lenStack[e.depth] = len(e.buf)
+		e.countStack[e.depth] = 0
+	} else {
+		e.pushStack(len(e.buf), 0)
+	}
 	e.depth++
-	e.countStack[e.depth-1] = 0
 	e.buf = append(e.buf, 0, 0, WireSubMsg, 0) // 2B Length, 1B element type, 1B count
 }
 
 // BeginSubMsgElem starts the next element inside an open WireArray by reserving its 2-byte length prefix.
 func (e *Encoder) BeginSubMsgElem() {
-	e.countStack[e.depth-1]++
-	e.lenStack[e.depth] = len(e.buf)
+	parent := e.depth - 1
+	if uint(parent) < uint(len(e.countStack)) {
+		e.countStack[parent]++
+	} else {
+		e.countOverflow[parent-len(e.countStack)]++
+	}
+	if uint(e.depth) < uint(len(e.lenStack)) {
+		e.lenStack[e.depth] = len(e.buf)
+	} else {
+		e.pushStack(len(e.buf), 0)
+	}
 	e.depth++
 	e.buf = append(e.buf, 0, 0) // Reserve 2B ElemByteLen Prefix-Varint
 }
@@ -45,15 +78,28 @@ func (e *Encoder) BeginSubMsgElem() {
 // EndSubMsgElem finishes the current element inside an open WireArray and backpatches its length.
 func (e *Encoder) EndSubMsgElem() {
 	e.depth--
-	lenPos := e.lenStack[e.depth]
+	var lenPos int
+	if uint(e.depth) < uint(len(e.lenStack)) {
+		lenPos = e.lenStack[e.depth]
+	} else {
+		lenPos = e.lenOverflow[e.depth-len(e.lenStack)]
+	}
 	e.buf = BackpatchContainerLen(e.buf, lenPos)
 }
 
 // EndSubMsgArr backpatches the total byte length of the open WireArray.
 func (e *Encoder) EndSubMsgArr() {
 	e.depth--
-	lenPos := e.lenStack[e.depth]
-	e.buf = PatchReservedVarint(e.buf, lenPos+3, uint64(e.countStack[e.depth]))
+	var lenPos, count int
+	if uint(e.depth) < uint(len(e.lenStack)) {
+		lenPos = e.lenStack[e.depth]
+		count = e.countStack[e.depth]
+	} else {
+		idx := e.depth - len(e.lenStack)
+		lenPos = e.lenOverflow[idx]
+		count = e.countOverflow[idx]
+	}
+	e.buf = PatchReservedVarint(e.buf, lenPos+3, uint64(count))
 	e.buf = BackpatchContainerLen(e.buf, lenPos)
 }
 

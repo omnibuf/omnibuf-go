@@ -301,3 +301,36 @@ func TestUnknownFieldDepthAndReservedTagsAndSpliceValidation(t *testing.T) {
 		t.Fatalf("AppendUint32Arr failed to preserve orig slice: got %v", gotSlice)
 	}
 }
+
+func TestWireEncoderStackGrowthBeyond64(t *testing.T) {
+	enc := wire.NewEncoder(256)
+	const levels = 40 // 40 SubMsgArr + 40 SubMsgElem = 80 stack slots (> 64)
+	for range levels {
+		enc.BeginSubMsgArr(1)
+		enc.BeginSubMsgElem()
+	}
+	enc.BeginSubMsg(2)
+	enc.WriteUint(1, 777)
+	enc.EndSubMsg()
+	for range levels {
+		enc.EndSubMsgElem()
+		enc.EndSubMsgArr()
+	}
+	pkt := enc.Finish()
+	cur := pkt
+	for i := range levels {
+		elem, ok := wire.ReadSubMsgArrElem(cur, 1, 0)
+		if !ok {
+			t.Fatalf("failed reading submsg array elem at level %d", i)
+		}
+		cur = elem
+	}
+	inner, ok := wire.ReadSubMsg(cur, 2)
+	if !ok {
+		t.Fatal("failed reading inner submsg at leaf")
+	}
+	v, ok := wire.ReadUint(inner, 1)
+	if !ok || v != 777 {
+		t.Fatalf("expected inner uint 777, got %d (ok=%v)", v, ok)
+	}
+}
