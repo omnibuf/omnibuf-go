@@ -523,6 +523,32 @@ func TestOmniBufStructTags_OmitEmpty(t *testing.T) {
 	if !reflect.DeepEqual(out, partial) {
 		t.Fatalf("partial OmitEmptyStruct mismatch: got %#v, want %#v", out, partial)
 	}
+
+	// 3. Fixed-width integer fields with only the MSB set (0x80000000 / 0x8000000000000000,
+	// whose IEEE-754 float bit pattern is -0.0) must NOT be omitted as zero.
+	type OmitEmptyFixedInts struct {
+		U32 uint32 `omnibuf:"1,wire=fixed32,omitempty"`
+		I32 int32  `omnibuf:"2,wire=fixed32,omitempty"`
+		U64 uint64 `omnibuf:"3,wire=fixed64,omitempty"`
+		I64 int64  `omnibuf:"4,wire=fixed64,omitempty"`
+	}
+	msbIn := OmitEmptyFixedInts{
+		U32: 1 << 31,
+		I32: math.MinInt32,
+		U64: 1 << 63,
+		I64: math.MinInt64,
+	}
+	msbPkt, err := Marshal(&msbIn)
+	if err != nil {
+		t.Fatalf("Marshal OmitEmptyFixedInts failed: %v", err)
+	}
+	var msbOut OmitEmptyFixedInts
+	if err := Unmarshal(msbPkt, &msbOut); err != nil {
+		t.Fatalf("Unmarshal OmitEmptyFixedInts failed: %v", err)
+	}
+	if msbOut != msbIn {
+		t.Fatalf("OmitEmptyFixedInts MSB data loss: got %+v, want %+v", msbOut, msbIn)
+	}
 }
 
 func TestOmniBufStructTags_PrecedenceOverProtobufTag(t *testing.T) {

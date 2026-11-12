@@ -58,6 +58,8 @@ const (
 	kindBool
 	kindFloat32
 	kindFloat64
+	kindFixed32
+	kindFixed64
 	kindFixed32_8
 	kindFixed32_16
 	kindFixed32_64
@@ -443,7 +445,7 @@ func configureFieldCodec(fc *fieldCodec, sf reflect.StructField, ft reflect.Type
 			fc.kind = kindUint32Sint
 			fc.wireType = wireSint
 		case "fixed32":
-			fc.kind = kindFloat32
+			fc.kind = kindFixed32
 			fc.wireType = wireFixed32
 		case "fixed64":
 			fc.kind = kindFixed64_32
@@ -463,7 +465,7 @@ func configureFieldCodec(fc *fieldCodec, sf reflect.StructField, ft reflect.Type
 			fc.kind = kindFixed32_64
 			fc.wireType = wireFixed32
 		case "fixed64":
-			fc.kind = kindFloat64
+			fc.kind = kindFixed64
 			fc.wireType = wireFixed64
 		default:
 			return fmt.Errorf("omnibuf: unsupported wire type %q for %v on %s", wireOpt, ft, sf.Name)
@@ -511,7 +513,7 @@ func configureFieldCodec(fc *fieldCodec, sf reflect.StructField, ft reflect.Type
 			fc.kind = kindInt32Uint
 			fc.wireType = wireUint
 		case "fixed32":
-			fc.kind = kindFloat32
+			fc.kind = kindFixed32
 			fc.wireType = wireFixed32
 		case "fixed64":
 			fc.kind = kindSfixed64_32
@@ -531,7 +533,7 @@ func configureFieldCodec(fc *fieldCodec, sf reflect.StructField, ft reflect.Type
 			fc.kind = kindSfixed32_64
 			fc.wireType = wireFixed32
 		case "fixed64":
-			fc.kind = kindFloat64
+			fc.kind = kindFixed64
 			fc.wireType = wireFixed64
 		default:
 			return fmt.Errorf("omnibuf: unsupported wire type %q for %v on %s", wireOpt, ft, sf.Name)
@@ -1091,9 +1093,9 @@ func isFieldEmpty(fc *fieldCodec, fPtr unsafe.Pointer) bool {
 		return *(*uint8)(fPtr) == 0
 	case kindUint16, kindUint16Sint, kindInt16, kindInt16Uint, kindFixed32_16, kindSfixed32_16, kindFixed64_16, kindSfixed64_16:
 		return *(*uint16)(fPtr) == 0
-	case kindUint32, kindUint32Sint, kindInt32, kindSint32, kindInt32Uint, kindFixed64_32, kindSfixed64_32:
+	case kindUint32, kindUint32Sint, kindInt32, kindSint32, kindInt32Uint, kindFixed32, kindFixed64_32, kindSfixed64_32:
 		return *(*uint32)(fPtr) == 0
-	case kindUint64, kindUint64Sint, kindInt64, kindSint64, kindInt64Uint, kindFixed32_64, kindSfixed32_64:
+	case kindUint64, kindUint64Sint, kindInt64, kindSint64, kindInt64Uint, kindFixed64, kindFixed32_64, kindSfixed32_64:
 		return *(*uint64)(fPtr) == 0
 	case kindFloat32:
 		return *(*float32)(fPtr) == 0
@@ -1212,7 +1214,7 @@ func (sc *structCodec) encodeStruct(dst []byte, base unsafe.Pointer, st *encStat
 			dst = appendVarint(dst, uint64(uint32(*(*int32)(fPtr))))
 		case kindInt64Uint:
 			dst = appendVarint(dst, uint64(*(*int64)(fPtr)))
-		case kindFloat32:
+		case kindFloat32, kindFixed32:
 			v := *(*uint32)(fPtr)
 			dst = append(dst, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
 		case kindFixed32_8:
@@ -1230,7 +1232,7 @@ func (sc *structCodec) encodeStruct(dst []byte, base unsafe.Pointer, st *encStat
 		case kindFixed32_64, kindSfixed32_64:
 			v := uint32(*(*uint64)(fPtr))
 			dst = append(dst, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
-		case kindFloat64:
+		case kindFloat64, kindFixed64:
 			v := *(*uint64)(fPtr)
 			dst = append(dst,
 				byte(v), byte(v>>8), byte(v>>16), byte(v>>24),
@@ -1812,7 +1814,7 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 	case kindBool:
 		*(*bool)(fPtr) = (wt == wireBoolTrue)
 		return pos, nil
-	case kindFloat32:
+	case kindFloat32, kindFixed32:
 		if n-pos < 4 {
 			return 0, fmt.Errorf("omnibuf: truncated fixed32 at %d", pos)
 		}
@@ -1842,7 +1844,7 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 		}
 		*(*int64)(fPtr) = int64(int32(binary.LittleEndian.Uint32(data[pos:])))
 		return pos + 4, nil
-	case kindFloat64:
+	case kindFloat64, kindFixed64:
 		if n-pos < 8 {
 			return 0, fmt.Errorf("omnibuf: truncated fixed64 at %d", pos)
 		}
