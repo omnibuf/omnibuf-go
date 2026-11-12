@@ -805,7 +805,7 @@ func decodeArrayBlind(body []byte, schema *blindSchema, depth int) (any, error) 
 		typ = reflect.TypeOf(float64(0))
 	case wireSubMsg, wireMap:
 		typ = reflect.TypeOf(map[string]any{})
-	case wireArray:
+	case wireArray, wireExtended:
 		typ = reflect.TypeOf((*any)(nil)).Elem()
 	default:
 		return nil, fmt.Errorf("omnibuf: unsupported array element type %d", elem)

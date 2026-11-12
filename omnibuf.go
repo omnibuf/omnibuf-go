@@ -254,9 +254,7 @@ func skipValueWithDepth(b []byte, pos int, wireType uint8, depth int) (int, erro
 				return 0, fmt.Errorf("omnibuf: trailing map bytes")
 			}
 		case wireExtended:
-			if _, en := decodeVarint(body); en == 0 {
-				return 0, fmt.Errorf("omnibuf: invalid WireExtended header")
-			}
+			// ByteLen >= 1 (checked above) already guarantees the 1-byte ExtType header is present.
 		}
 		return end, nil
 	}

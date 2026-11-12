@@ -1772,6 +1772,56 @@ func TestSchemaEvolutionUnknownFieldsConformance(t *testing.T) {
 	if seq, ok := ReadUint(wireWithExt, FieldPeerSequence); !ok || seq != 123456789 {
 		t.Fatalf("ReadUint after skipping WireExtended field = (%d, %v), want 123456789", seq, ok)
 	}
+
+	// Verify all 1-byte ExtType codes (0x00..0xFF) with zero-byte extension payloads (ByteLen=1)
+	// and inside unknown WireArray(WireExtended) / WireMap(WireString, WireExtended) containers
+	// are accepted by schema-aware decoders and ValidateValue, while DecodeBlind accepts empty
+	// WireArray(WireExtended) (count=0) and rejects non-empty WireExtended elements.
+	for _, extType := range []byte{0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x18, 0x80, 0xF8, 0xFF} {
+		var pkt []byte
+		pkt = appendTag(pkt, 99, WireExtended)
+		pkt = AppendVarint(pkt, 1) // ByteLen = 1 (ExtType only, 0 payload bytes)
+		pkt = append(pkt, extType)
+		// Unknown WireArray(WireExtended) with 1 element of ByteLen=1
+		pkt = appendTag(pkt, 100, WireArray)
+		pkt = AppendVarint(pkt, 4) // ElemType(1B) + Count=1(1B) + ElemByteLen=1(1B) + ExtType(1B)
+		pkt = append(pkt, WireExtended, 0x03, 0x03, extType)
+		// Known trailing field
+		pkt = appendTag(pkt, FieldPeerSequence, WireUint)
+		pkt = AppendVarint(pkt, 777)
+
+		var dstTable pb.PeerUpdate
+		if err := Unmarshal(pkt, &dstTable); err != nil {
+			t.Fatalf("table Unmarshal rejected valid WireExtended ExtType=0x%02x: %v", extType, err)
+		}
+		var dstPlugin pb.PeerUpdate
+		if err := dstPlugin.UnmarshalOmniBuf(pkt, false); err != nil {
+			t.Fatalf("plugin UnmarshalOmniBuf rejected valid WireExtended ExtType=0x%02x: %v", extType, err)
+		}
+		var dstReflect pb.PeerUpdate
+		if err := Unmarshal(pkt, dstReflect.ProtoReflect()); err != nil {
+			t.Fatalf("Unmarshal(protoreflect) rejected valid WireExtended ExtType=0x%02x: %v", extType, err)
+		}
+		if dstTable.Sequence != 777 || dstPlugin.Sequence != 777 || dstReflect.Sequence != 777 {
+			t.Fatalf("trailing Sequence mismatch for ExtType=0x%02x", extType)
+		}
+		if _, err := DecodeBlind(pkt); err == nil {
+			t.Fatalf("expected DecodeBlind to reject unknown ExtType=0x%02x", extType)
+		}
+	}
+
+	// Empty WireArray(WireExtended) (count=0) is valid in DecodeBlind, matching empty WireMap(_, WireExtended).
+	var emptyExtArr []byte
+	emptyExtArr = appendTag(emptyExtArr, 1, WireArray)
+	emptyExtArr = AppendVarint(emptyExtArr, 2)
+	emptyExtArr = append(emptyExtArr, WireExtended, 0x01) // count = 0
+	blindEmptyExt, err := DecodeBlind(emptyExtArr)
+	if err != nil {
+		t.Fatalf("DecodeBlind rejected empty WireArray(WireExtended): %v", err)
+	}
+	if s, ok := blindEmptyExt["field_1"].([]any); !ok || len(s) != 0 {
+		t.Fatalf("DecodeBlind empty WireArray(WireExtended) = %T(%v), want empty []any", blindEmptyExt["field_1"], blindEmptyExt["field_1"])
+	}
 }
 
 // ============================================================================
