@@ -318,7 +318,21 @@ func decodeProtoScalarPayload(data []byte, pos int, k protoreflect.Kind) (protor
 }
 
 func encodeProtoReflectMsg(dst []byte, m protoreflect.Message, opts MarshalOptions) ([]byte, error) {
-	fields := m.Descriptor().Fields()
+	md := m.Descriptor()
+	if md.ExtensionRanges().Len() > 0 {
+		var extFD protoreflect.FieldDescriptor
+		m.Range(func(fd protoreflect.FieldDescriptor, _ protoreflect.Value) bool {
+			if fd.IsExtension() {
+				extFD = fd
+				return false
+			}
+			return true
+		})
+		if extFD != nil {
+			return nil, fmt.Errorf("omnibuf: protobuf extensions are not supported (%s)", extFD.FullName())
+		}
+	}
+	fields := md.Fields()
 	nFields := fields.Len()
 
 	for i := range nFields {
@@ -493,12 +507,6 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 			continue
 		}
 
-		if (fd.IsMap() || fd.IsList()) && depth+1 > MaxNestingDepth {
-			return fmt.Errorf("omnibuf: nesting depth %d exceeds MaxNestingDepth (%d)", depth+1, MaxNestingDepth)
-		}
-		alreadySeen := seen[fnum] || merge
-		seen[fnum] = true
-
 		if fd.IsMap() {
 			if wt != wireMap {
 				nextPos, err := skipValueWithDepth(data, pos, wt, depth)
@@ -508,6 +516,11 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 				pos = nextPos
 				continue
 			}
+			if depth+1 > MaxNestingDepth {
+				return fmt.Errorf("omnibuf: nesting depth %d exceeds MaxNestingDepth (%d)", depth+1, MaxNestingDepth)
+			}
+			alreadySeen := seen[fnum] || merge
+			seen[fnum] = true
 			body, nextPos, err := readLenSlice(data, pos, 3)
 			if err != nil {
 				return err
@@ -559,6 +572,11 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 				pos = nextPos
 				continue
 			}
+			if depth+1 > MaxNestingDepth {
+				return fmt.Errorf("omnibuf: nesting depth %d exceeds MaxNestingDepth (%d)", depth+1, MaxNestingDepth)
+			}
+			alreadySeen := seen[fnum] || merge
+			seen[fnum] = true
 			body, next, err := readLenSlice(data, pos, 2)
 			if err != nil {
 				return err
@@ -610,6 +628,7 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 				pos = nextPos
 				continue
 			}
+			seen[fnum] = true
 			m.Set(fd, protoreflect.ValueOfBool(wt == wireBoolTrue))
 			continue
 		}
@@ -628,6 +647,9 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 			pos = nextPos
 			continue
 		}
+
+		alreadySeen := seen[fnum] || merge
+		seen[fnum] = true
 
 		if fd.Kind() == protoreflect.MessageKind {
 			subBytes, nextPos, err := readLenSlice(data, pos, 0)
@@ -653,6 +675,18 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 		for i := range fields.Len() {
 			fd := fields.Get(i)
 			if !seen[uint32(fd.Number())] && m.Has(fd) {
+				m.Clear(fd)
+			}
+		}
+		if m.Descriptor().ExtensionRanges().Len() > 0 {
+			var staleExts []protoreflect.FieldDescriptor
+			m.Range(func(fd protoreflect.FieldDescriptor, _ protoreflect.Value) bool {
+				if fd.IsExtension() {
+					staleExts = append(staleExts, fd)
+				}
+				return true
+			})
+			for _, fd := range staleExts {
 				m.Clear(fd)
 			}
 		}

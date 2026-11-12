@@ -2,6 +2,8 @@ package omnibuf
 
 import (
 	"reflect"
+	"strconv"
+	"strings"
 	"sync"
 
 	"google.golang.org/protobuf/proto"
@@ -39,24 +41,70 @@ func needsProtoReflection(pm proto.Message) bool {
 		}
 		return false
 	}
-	use := visit(pm.ProtoReflect().Descriptor())
-	// Opaque generated APIs expose no protobuf-tagged fields to the table codec.
+	md := pm.ProtoReflect().Descriptor()
+	use := visit(md)
+	// Opaque generated APIs expose no protobuf-tagged fields to the table codec,
+	// including when an open root struct embeds an opaque child message struct.
 	if !use {
-		st := t
-		if st.Kind() == reflect.Pointer {
-			st = st.Elem()
-		}
-		hasFields := false
-		if st.Kind() == reflect.Struct {
-			for i := 0; i < st.NumField(); i++ {
-				if st.Field(i).Tag.Get("protobuf") != "" {
-					hasFields = true
-					break
-				}
-			}
-		}
-		use = !hasFields
+		use = !hasAllOpenStructFields(t, md, make(map[reflect.Type]bool))
 	}
 	reflectiveProtoTypes.Store(t, use)
 	return use
+}
+
+func hasAllOpenStructFields(t reflect.Type, md protoreflect.MessageDescriptor, visited map[reflect.Type]bool) bool {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return false
+	}
+	if visited[t] {
+		return true
+	}
+	visited[t] = true
+
+	pbFieldCount := 0
+	for i := 0; i < t.NumField(); i++ {
+		sf := t.Field(i)
+		if !sf.IsExported() {
+			continue
+		}
+		pbTag := sf.Tag.Get("protobuf")
+		if pbTag == "" || pbTag == "-" {
+			continue
+		}
+		pbFieldCount++
+		parts := strings.Split(pbTag, ",")
+		if len(parts) < 2 {
+			continue
+		}
+		fnum, err := strconv.Atoi(parts[1])
+		if err != nil {
+			continue
+		}
+		fd := md.Fields().ByNumber(protoreflect.FieldNumber(fnum))
+		if fd == nil {
+			continue
+		}
+		switch {
+		case fd.IsMap():
+			if fd.MapValue().Message() != nil && sf.Type.Kind() == reflect.Map {
+				if !hasAllOpenStructFields(sf.Type.Elem(), fd.MapValue().Message(), visited) {
+					return false
+				}
+			}
+		case fd.IsList():
+			if fd.Message() != nil && sf.Type.Kind() == reflect.Slice {
+				if !hasAllOpenStructFields(sf.Type.Elem(), fd.Message(), visited) {
+					return false
+				}
+			}
+		case fd.Message() != nil:
+			if !hasAllOpenStructFields(sf.Type, fd.Message(), visited) {
+				return false
+			}
+		}
+	}
+	return md.Fields().Len() == 0 || pbFieldCount > 0
 }

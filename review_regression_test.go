@@ -287,3 +287,165 @@ func TestReviewProtoFixedMaps(t *testing.T) {
 		t.Fatalf("map got %#v", blind)
 	}
 }
+
+type opaqueChildTestMsg struct {
+	dyn *dynamicpb.Message
+}
+
+func (m *opaqueChildTestMsg) ProtoReflect() protoreflect.Message {
+	return m.dyn.ProtoReflect()
+}
+
+type openRootWithOpaqueChildMsg struct {
+	Child *opaqueChildTestMsg `protobuf:"bytes,1,opt,name=child,proto3"`
+	dyn   *dynamicpb.Message
+}
+
+func (m *openRootWithOpaqueChildMsg) ProtoReflect() protoreflect.Message {
+	return m.dyn.ProtoReflect()
+}
+
+func TestProtoReflectWrongWireTypeSeenDepthExtensionsAndOpaqueChild(t *testing.T) {
+	// 1 & 2. Schema with scalar, repeated, and self-recursive sub-message
+	recFD, err := protodesc.NewFile(&descriptorpb.FileDescriptorProto{
+		Name:   proto.String("rec_edge.proto"),
+		Syntax: proto.String("proto3"),
+		MessageType: []*descriptorpb.DescriptorProto{{
+			Name: proto.String("Node"),
+			Field: []*descriptorpb.FieldDescriptorProto{
+				{Name: proto.String("id"), Number: proto.Int32(1), Type: descriptorpb.FieldDescriptorProto_TYPE_UINT32.Enum()},
+				{Name: proto.String("tags"), Number: proto.Int32(2), Label: descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum(), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum()},
+				{Name: proto.String("next"), Number: proto.Int32(3), Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum(), TypeName: proto.String(".Node")},
+			},
+		}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeMD := recFD.Messages().Get(0)
+	idFD := nodeMD.Fields().ByName("id")
+	tagsFD := nodeMD.Fields().ByName("tags")
+
+	// 1. Wrong-wire-type field occurrence must NOT mark field as seen on target reuse
+	reused := dynamicpb.NewMessage(nodeMD)
+	reused.Set(idFD, protoreflect.ValueOfUint32(99))
+	reused.Mutable(tagsFD).List().Append(protoreflect.ValueOfString("stale"))
+
+	enc := wire.NewEncoder(64)
+	enc.WriteString(1, "wrong-wire-type-for-id")
+	enc.WriteUint(2, 123) // wrong wire type for repeated tags BEFORE valid array
+	enc.WriteStringArr(2, []string{"fresh"})
+	if err := ob.Unmarshal(enc.Bytes(), reused); err != nil {
+		t.Fatalf("Unmarshal with mismatched wire types failed: %v", err)
+	}
+	if gotID := reused.Get(idFD).Uint(); gotID != 0 {
+		t.Fatalf("stale scalar retained after wrong-wire-type skip: got %d, want 0", gotID)
+	}
+	gotList := reused.Get(tagsFD).List()
+	if gotList.Len() != 1 || gotList.Get(0).String() != "fresh" {
+		t.Fatalf("stale list merged after wrong-wire-type skip: len=%d", gotList.Len())
+	}
+
+	// 2. At depth == 32, a repeated field arriving with a scalar wire type (WireUint) must be skipped cleanly
+	leafEnc := wire.NewEncoder(16)
+	leafEnc.WriteUint(2, 7) // field #2 (tags list) sent as scalar WireUint at depth 32
+	deepPkt := leafEnc.Bytes()
+	for range ob.MaxNestingDepth {
+		wrap := wire.NewEncoder(len(deepPkt) + 8)
+		wrap.BeginSubMsg(3)
+		wrap.WriteRaw(deepPkt)
+		wrap.EndSubMsg()
+		deepPkt = wrap.Bytes()
+	}
+	if _, err := ob.DecodeBlind(deepPkt); err != nil {
+		t.Fatalf("DecodeBlind rejected depth-32 scalar skip: %v", err)
+	}
+	deepOut := dynamicpb.NewMessage(nodeMD)
+	if err := ob.Unmarshal(deepPkt, deepOut); err != nil {
+		t.Fatalf("protoreflect Unmarshal spuriously rejected depth-32 scalar on list field: %v", err)
+	}
+
+	// 3. Populated Proto2 extensions must error on Marshal (no silent drop) and clear on Unmarshal reuse
+	extFD, err := protodesc.NewFile(&descriptorpb.FileDescriptorProto{
+		Name:   proto.String("ext_edge.proto"),
+		Syntax: proto.String("proto2"),
+		MessageType: []*descriptorpb.DescriptorProto{{
+			Name: proto.String("ExtBase"),
+			Field: []*descriptorpb.FieldDescriptorProto{
+				{Name: proto.String("id"), Number: proto.Int32(1), Label: descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(), Type: descriptorpb.FieldDescriptorProto_TYPE_UINT32.Enum()},
+			},
+			ExtensionRange: []*descriptorpb.DescriptorProto_ExtensionRange{
+				{Start: proto.Int32(100), End: proto.Int32(200)},
+			},
+		}},
+		Extension: []*descriptorpb.FieldDescriptorProto{{
+			Name:     proto.String("ext_num"),
+			Number:   proto.Int32(100),
+			Label:    descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
+			Type:     descriptorpb.FieldDescriptorProto_TYPE_UINT32.Enum(),
+			Extendee: proto.String(".ExtBase"),
+		}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extMD := extFD.Messages().Get(0)
+	extType := dynamicpb.NewExtensionType(extFD.Extensions().Get(0))
+	extField := extType.TypeDescriptor()
+	extMsg := dynamicpb.NewMessage(extMD)
+	extMsg.Set(extField, protoreflect.ValueOfUint32(42))
+	if _, err := ob.Marshal(extMsg); err == nil {
+		t.Fatal("Marshal silently dropped populated Proto2 extension field instead of returning an error")
+	}
+	if err := ob.Unmarshal(nil, extMsg); err != nil {
+		t.Fatalf("Unmarshal onto reused message with extension failed: %v", err)
+	}
+	if extMsg.Has(extField) {
+		t.Fatal("Unmarshal onto reused message failed to clear stale Proto2 extension")
+	}
+
+	// 4. Open root struct containing an API_OPAQUE child struct (no protobuf tags on child) must route to protoreflect
+	opqFD, err := protodesc.NewFile(&descriptorpb.FileDescriptorProto{
+		Name:   proto.String("opq_child.proto"),
+		Syntax: proto.String("proto3"),
+		MessageType: []*descriptorpb.DescriptorProto{
+			{
+				Name: proto.String("Child"),
+				Field: []*descriptorpb.FieldDescriptorProto{
+					{Name: proto.String("val"), Number: proto.Int32(1), Type: descriptorpb.FieldDescriptorProto_TYPE_UINT32.Enum()},
+				},
+			},
+			{
+				Name: proto.String("Root"),
+				Field: []*descriptorpb.FieldDescriptorProto{
+					{Name: proto.String("child"), Number: proto.Int32(1), Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum(), TypeName: proto.String(".Child")},
+				},
+			},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	childMD := opqFD.Messages().ByName("Child")
+	rootMD := opqFD.Messages().ByName("Root")
+	childDyn := dynamicpb.NewMessage(childMD)
+	childDyn.Set(childMD.Fields().ByName("val"), protoreflect.ValueOfUint32(777))
+	rootDyn := dynamicpb.NewMessage(rootMD)
+	rootDyn.Set(rootMD.Fields().ByName("child"), protoreflect.ValueOfMessage(childDyn))
+
+	mixedRoot := &openRootWithOpaqueChildMsg{
+		Child: &opaqueChildTestMsg{dyn: childDyn},
+		dyn:   rootDyn,
+	}
+	opqPkt, err := ob.Marshal(mixedRoot)
+	if err != nil {
+		t.Fatalf("Marshal mixedRoot failed: %v", err)
+	}
+	subBytes, ok := wire.ReadSubMsg(opqPkt, 1)
+	if !ok {
+		t.Fatal("missing child submsg in encoded mixedRoot")
+	}
+	if gotVal, ok := wire.ReadUint(subBytes, 1); !ok || gotVal != 777 {
+		t.Fatalf("API_OPAQUE child data lost on Marshal: got (%d, %v), want (777, true)", gotVal, ok)
+	}
+}
