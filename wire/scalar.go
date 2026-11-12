@@ -118,8 +118,8 @@ func DecodeStr(b []byte, zeroCopy bool) string {
 
 // ReadUint reads a uint64 field with 0 heap allocations.
 func ReadUint(packet []byte, fieldNum uint16) (uint64, bool) {
-	s, wt, ok := LocateField(packet, fieldNum)
-	if !ok || wt != WireUint {
+	s, _, ok := locateFieldMask(packet, fieldNum, 1<<WireUint)
+	if !ok {
 		return 0, false
 	}
 	v, n := DecodeVarint(s)
@@ -128,8 +128,8 @@ func ReadUint(packet []byte, fieldNum uint16) (uint64, bool) {
 
 // ReadInt reads a ZigZag-encoded signed int64 field with 0 heap allocations.
 func ReadInt(packet []byte, fieldNum uint16) (int64, bool) {
-	s, wt, ok := LocateField(packet, fieldNum)
-	if !ok || wt != WireSint {
+	s, _, ok := locateFieldMask(packet, fieldNum, 1<<WireSint)
+	if !ok {
 		return 0, false
 	}
 	u, n := DecodeVarint(s)
@@ -141,8 +141,8 @@ func ReadInt(packet []byte, fieldNum uint16) (int64, bool) {
 
 // ReadBool reads a boolean field directly from the 4-bit wire type (0 value bytes).
 func ReadBool(packet []byte, fieldNum uint16) (bool, bool) {
-	_, wt, ok := LocateField(packet, fieldNum)
-	if !ok || (wt != WireBoolTrue && wt != WireBoolFalse) {
+	_, wt, ok := locateFieldMask(packet, fieldNum, (1<<WireBoolFalse)|(1<<WireBoolTrue))
+	if !ok {
 		return false, false
 	}
 	return wt == WireBoolTrue, true
@@ -150,8 +150,8 @@ func ReadBool(packet []byte, fieldNum uint16) (bool, bool) {
 
 // ReadFloat32 reads a float32 field with 0 heap allocations.
 func ReadFloat32(packet []byte, fieldNum uint16) (float32, bool) {
-	s, wt, ok := LocateField(packet, fieldNum)
-	if !ok || wt != WireFloat32 || len(s) < 4 {
+	s, _, ok := locateFieldMask(packet, fieldNum, 1<<WireFloat32)
+	if !ok || len(s) < 4 {
 		return 0, false
 	}
 	return math.Float32frombits(binary.LittleEndian.Uint32(s[:4])), true
@@ -159,8 +159,8 @@ func ReadFloat32(packet []byte, fieldNum uint16) (float32, bool) {
 
 // ReadFloat64 reads a float64 field with 0 heap allocations.
 func ReadFloat64(packet []byte, fieldNum uint16) (float64, bool) {
-	s, wt, ok := LocateField(packet, fieldNum)
-	if !ok || wt != WireFloat64 || len(s) < 8 {
+	s, _, ok := locateFieldMask(packet, fieldNum, 1<<WireFloat64)
+	if !ok || len(s) < 8 {
 		return 0, false
 	}
 	return math.Float64frombits(binary.LittleEndian.Uint64(s[:8])), true
@@ -168,8 +168,8 @@ func ReadFloat64(packet []byte, fieldNum uint16) (float64, bool) {
 
 // ReadStringBytes returns the raw UTF-8 byte slice of a string field.
 func ReadStringBytes(packet []byte, fieldNum uint16) ([]byte, bool) {
-	s, wt, ok := LocateField(packet, fieldNum)
-	if !ok || wt != WireString || len(s) == 0 {
+	s, _, ok := locateFieldMask(packet, fieldNum, 1<<WireString)
+	if !ok || len(s) == 0 {
 		return nil, false
 	}
 	b0 := s[0]
@@ -207,8 +207,8 @@ func ReadStringZeroCopy(packet []byte, fieldNum uint16) (string, bool) {
 
 // ReadBytes returns the raw byte slice of a WireBytes field.
 func ReadBytes(packet []byte, fieldNum uint16) ([]byte, bool) {
-	s, wt, ok := LocateField(packet, fieldNum)
-	if !ok || wt != WireBytes {
+	s, _, ok := locateFieldMask(packet, fieldNum, 1<<WireBytes)
+	if !ok {
 		return nil, false
 	}
 	bLen, bn := DecodeVarint(s)
@@ -220,8 +220,8 @@ func ReadBytes(packet []byte, fieldNum uint16) ([]byte, bool) {
 
 // ReadFixed32 reads a 4-byte little-endian uint32 field (WireFixed32) with 0 heap allocations.
 func ReadFixed32(packet []byte, fieldNum uint16) (uint32, bool) {
-	s, wt, ok := LocateField(packet, fieldNum)
-	if !ok || wt != WireFixed32 || len(s) < 4 {
+	s, _, ok := locateFieldMask(packet, fieldNum, 1<<WireFixed32)
+	if !ok || len(s) < 4 {
 		return 0, false
 	}
 	return binary.LittleEndian.Uint32(s[:4]), true
@@ -229,8 +229,8 @@ func ReadFixed32(packet []byte, fieldNum uint16) (uint32, bool) {
 
 // ReadFixed64 reads an 8-byte little-endian uint64 field (WireFixed64) with 0 heap allocations.
 func ReadFixed64(packet []byte, fieldNum uint16) (uint64, bool) {
-	s, wt, ok := LocateField(packet, fieldNum)
-	if !ok || wt != WireFixed64 || len(s) < 8 {
+	s, _, ok := locateFieldMask(packet, fieldNum, 1<<WireFixed64)
+	if !ok || len(s) < 8 {
 		return 0, false
 	}
 	return binary.LittleEndian.Uint64(s[:8]), true
@@ -238,8 +238,8 @@ func ReadFixed64(packet []byte, fieldNum uint16) (uint64, bool) {
 
 // ReadSfixed32 reads a 4-byte little-endian signed int32 field (WireSfixed32) with 0 heap allocations.
 func ReadSfixed32(packet []byte, fieldNum uint16) (int32, bool) {
-	s, wt, ok := LocateField(packet, fieldNum)
-	if !ok || wt != WireSfixed32 || len(s) < 4 {
+	s, _, ok := locateFieldMask(packet, fieldNum, 1<<WireSfixed32)
+	if !ok || len(s) < 4 {
 		return 0, false
 	}
 	return int32(binary.LittleEndian.Uint32(s[:4])), true
@@ -247,8 +247,8 @@ func ReadSfixed32(packet []byte, fieldNum uint16) (int32, bool) {
 
 // ReadSfixed64 reads an 8-byte little-endian signed int64 field (WireSfixed64) with 0 heap allocations.
 func ReadSfixed64(packet []byte, fieldNum uint16) (int64, bool) {
-	s, wt, ok := LocateField(packet, fieldNum)
-	if !ok || wt != WireSfixed64 || len(s) < 8 {
+	s, _, ok := locateFieldMask(packet, fieldNum, 1<<WireSfixed64)
+	if !ok || len(s) < 8 {
 		return 0, false
 	}
 	return int64(binary.LittleEndian.Uint64(s[:8])), true

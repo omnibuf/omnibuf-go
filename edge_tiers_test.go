@@ -709,6 +709,54 @@ func TestEdge_KnownFieldWithWrongWireTypeSkippedConsistently(t *testing.T) {
 			if !bytes.Equal(got, baseWire) {
 				t.Fatalf("wrong-wire-type field altered decoded value:\n got  %x\n want %x", got, baseWire)
 			}
+			var op pb.OpaqueTestAllTypes
+			if err := op.Unmarshal(raw); err != nil {
+				t.Fatalf("OpaqueTestAllTypes.Unmarshal failed: %v", err)
+			}
+			if op.GetF1Uint32() != 11 ||
+				op.GetF3Sint32() != -2 ||
+				!op.GetF5Bool() ||
+				op.GetF6String() != "keep" ||
+				!bytes.Equal(op.GetF7Bytes(), []byte{1}) ||
+				op.GetF8SubMsg().GetId() != 1 ||
+				len(op.AppendF9StringArrInto(nil)) != 1 || op.AppendF9StringArrInto(nil)[0] != "a" || op.F9StringArrLen() != 1 ||
+				len(op.AppendF10Uint32ArrInto(nil)) != 1 || op.AppendF10Uint32ArrInto(nil)[0] != 1 || op.F10Uint32ArrLen() != 1 ||
+				op.F11SubMsgArrLen() != 1 || op.GetF11SubMsgArr(0).GetId() != 2 ||
+				op.GetF12MapStrUint()["k"] != 1 ||
+				op.GetF13Float32() != 1.5 ||
+				op.GetF14Float64() != 2.5 ||
+				op.GetF15Fixed32() != 3 ||
+				op.GetF16Fixed64() != 4 ||
+				op.GetF20OverflowStr() != "o" {
+				t.Fatalf("OpaqueTestAllTypes disagreed with schema-aware tiers on f%d_wt%d", a.field, a.wt)
+			}
+			if v, ok := LookupMapStringUint(raw, 12, "k"); !ok || v != 1 {
+				t.Fatalf("LookupMapStringUint failed on f%d_wt%d: (%d, %v)", a.field, a.wt, v, ok)
+			}
 		})
+	}
+}
+
+func TestEdge_ReadSubMsgArrElemValidatesRemainingPacket(t *testing.T) {
+	seg1, err := MarshalDeterministic(&TestAllTypes{
+		F11SubMsgArr: []AllTypesSubMsg{{ID: 10, Label: "first"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Case 1: valid repeated submessage segment followed by truncated trailing field.
+	corruptTail := concat(seg1, []byte{0x55}) // field #2 WireString with missing length
+	if elem, ok := ReadSubMsgArrElem(corruptTail, 11, 0); ok || elem != nil {
+		t.Fatalf("ReadSubMsgArrElem accepted packet with corrupt trailing field: %x", elem)
+	}
+	if s, ok := ReadArrNestedString(corruptTail, 11, 0, 2); ok || s != "" {
+		t.Fatalf("ReadArrNestedString accepted packet with corrupt trailing field: %q", s)
+	}
+
+	// Case 2: valid first WireArray segment followed by a second WireArray segment with corrupt element framing.
+	badSeg2Body := []byte{WireSubMsg, 0x03, 0x13, 0x21} // count=1, elem ByteLen=9 (> remaining 1 byte)
+	corruptSeg2 := concat(seg1, appendTag(nil, 11, WireArray), AppendVarint(nil, uint64(len(badSeg2Body))), badSeg2Body)
+	if elem, ok := ReadSubMsgArrElem(corruptSeg2, 11, 0); ok || elem != nil {
+		t.Fatalf("ReadSubMsgArrElem accepted packet with corrupt second concatenated segment: %x", elem)
 	}
 }

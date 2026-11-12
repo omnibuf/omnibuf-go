@@ -243,6 +243,10 @@ func SkipValue(b []byte, pos int, wireType uint8) (int, error) {
 // To support raw message concatenation (append(msgA, msgB...)) with Protobuf "last write wins"
 // semantics, it scans all field headers in the message and returns the last matching occurrence.
 func LocateField(packet []byte, targetField uint16) (valSlice []byte, wireType uint8, ok bool) {
+	return locateFieldMask(packet, targetField, 0xFFFF)
+}
+
+func locateFieldMask(packet []byte, targetField uint16, expMask uint16) (valSlice []byte, wireType uint8, ok bool) {
 	pos := 0
 	n := len(packet)
 	for pos < n {
@@ -274,7 +278,7 @@ func LocateField(packet []byte, targetField uint16) (valSlice []byte, wireType u
 		if fnum == 0 && wt != WireSubMsg {
 			return nil, 0, false
 		}
-		if fnum == uint32(targetField) {
+		if fnum == uint32(targetField) && (expMask&(uint16(1)<<wt)) != 0 {
 			valSlice = packet[pos:]
 			wireType = wt
 			ok = true
@@ -377,10 +381,7 @@ func nextContainerField(packet []byte, pos int, targetField uint16, expWT uint8,
 		if fnum == 0 && wt != WireSubMsg {
 			return nil, 0, false, false
 		}
-		if fnum == uint32(targetField) {
-			if wt != expWT {
-				return nil, 0, false, false
-			}
+		if fnum == uint32(targetField) && wt == expWT {
 			bLen, bn := DecodeVarint(packet[pos:])
 			if bn == 0 || bLen < minLen || bLen > uint64(n-(pos+bn)) {
 				return nil, 0, false, false
@@ -389,10 +390,18 @@ func nextContainerField(packet []byte, pos int, targetField uint16, expWT uint8,
 			return packet[pos : pos+int(bLen)], pos + int(bLen), true, true
 		}
 
-		var err error
-		pos, err = SkipValue(packet, pos, wt)
-		if err != nil {
-			return nil, 0, false, false
+		if wt == WireArray || wt == WireMap || wt == WireExtended {
+			var err error
+			pos, err = SkipValue(packet, pos, wt)
+			if err != nil {
+				return nil, 0, false, false
+			}
+		} else {
+			var ok bool
+			pos, ok = fastSkipValue(packet, pos, wt)
+			if !ok {
+				return nil, 0, false, false
+			}
 		}
 	}
 	return nil, n, false, true

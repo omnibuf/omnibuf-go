@@ -94,10 +94,7 @@ func ReadSubMsg(packet []byte, fieldNum uint16) ([]byte, bool) {
 		if fnum == 0 && wt != WireSubMsg {
 			return nil, false
 		}
-		if fnum == uint32(fieldNum) {
-			if wt != WireSubMsg {
-				return nil, false
-			}
+		if fnum == uint32(fieldNum) && wt == WireSubMsg {
 			valSlice = packet[pos:]
 			count++
 		}
@@ -260,14 +257,23 @@ func ReadSubMsgArrElem(packet []byte, fieldNum uint16, index int) ([]byte, bool)
 		return nil, false
 	}
 	remIdx := index
+	var foundElem []byte
+	found := false
 	for pos := 0; ; {
 		body, nextPos, matched, valid := nextContainerField(packet, pos, fieldNum, WireArray, 0)
-		if !valid || !matched {
+		if !valid {
 			return nil, false
 		}
+		if !matched {
+			return foundElem, found
+		}
 		pos = nextPos
-		if elem, ok := ReadElem(body, remIdx); ok {
-			return elem, true
+		if !found {
+			if elem, ok := ReadElem(body, remIdx); ok {
+				foundElem = elem
+				found = true
+				continue
+			}
 		}
 		c, ok := CountSubMsgArrElems(body)
 		if !ok {
