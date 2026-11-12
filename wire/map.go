@@ -36,7 +36,8 @@ func ParseMapHeader(body []byte) (keyWT, valWT uint8, count, pos int, ok bool) {
 		return 0, 0, 0, 0, false
 	}
 	c, n := DecodeVarint(body[2:])
-	if n == 0 || c > uint64(len(body)-(2+n))/2 {
+	remaining := len(body) - (2 + n)
+	if n == 0 || (c == 0 && remaining != 0) || c > uint64(remaining)/2 {
 		return 0, 0, 0, 0, false
 	}
 	return keyWT, valWT, int(c), 2 + n, true

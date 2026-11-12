@@ -35,7 +35,7 @@ func ParseArrayHeader(body []byte) (elem uint8, count, pos int, ok bool) {
 		if remaining%width != 0 || c != uint64(remaining/width) {
 			return 0, 0, 0, false
 		}
-	} else if c > uint64(remaining) {
+	} else if (c == 0 && remaining != 0) || c > uint64(remaining) {
 		return 0, 0, 0, false
 	}
 	return elem, int(c), pos, true

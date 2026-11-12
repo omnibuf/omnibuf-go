@@ -760,3 +760,23 @@ func TestEdge_ReadSubMsgArrElemValidatesRemainingPacket(t *testing.T) {
 		t.Fatalf("ReadSubMsgArrElem accepted packet with corrupt second concatenated segment: %x", elem)
 	}
 }
+
+func TestEdge_EmptyArrayAndMapRejectTrailingBytes(t *testing.T) {
+	if _, _, _, ok := ParseArrayHeader([]byte{WireString, 0x01, 0xaa}); ok {
+		t.Fatal("ParseArrayHeader accepted empty variable-width array with trailing byte")
+	}
+	if _, _, _, _, ok := ParseMapHeader([]byte{WireString, WireUint, 0x01, 0xaa}); ok {
+		t.Fatal("ParseMapHeader accepted empty map with trailing byte")
+	}
+	badEmptyArrPkt := concat(appendTag(nil, 99, WireArray), AppendVarint(nil, 3), []byte{WireString, 0x01, 0xaa}, []byte{0x21, 0x0b})
+	if _, _, ok := LocateField(badEmptyArrPkt, 1); ok {
+		t.Fatal("LocateField skipped over empty WireArray with trailing byte")
+	}
+	requireAllTiersReject(t, badEmptyArrPkt)
+
+	badEmptyMapPkt := concat(appendTag(nil, 99, WireMap), AppendVarint(nil, 4), []byte{WireString, WireUint, 0x01, 0xaa}, []byte{0x21, 0x0b})
+	if _, _, ok := LocateField(badEmptyMapPkt, 1); ok {
+		t.Fatal("LocateField skipped over empty WireMap with trailing byte")
+	}
+	requireAllTiersReject(t, badEmptyMapPkt)
+}
