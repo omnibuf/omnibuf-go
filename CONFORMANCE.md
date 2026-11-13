@@ -52,7 +52,7 @@ Clean `EOF` on the 4-byte length read signals that all test cases have completed
 | Field # | Name | OmniBuf Wire Type | Go / Proto Type | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `1` | `test_name` | `WireString` (`10`) | `string` | Unique test vector identifier |
-| `2` | `message_type` | `WireString` (`10`) | `string` | Fully qualified message name (`omnibuf.bench.PeerUpdate`, `omnibuf.conformance.TestAllTypes`, `omnibuf.conformance.Proto3EdgeCases`, or `omnibuf.Blind`) |
+| `2` | `message_type` | `WireString` (`10`) | `string` | Fully qualified message name (`omnibuf.bench.PeerUpdate`, `omnibuf.conformance.TestAllTypes`, `omnibuf.conformance.TreeNode`, or `omnibuf.conformance.NestedCluster`; `TIER_BLIND` passes the vector schema label) |
 | `3` | `tier` | `WireUint` (`0`) | `uint32` | Target `TestTier` (`1..4`) |
 | `4` | `requested_output_format` | `WireUint` (`0`) | `uint32` | `1` (`WireFormatOmniBuf`) or `2` (`WireFormatJSON`) |
 | `5` | `omnibuf_payload` | `WireBytes` (`11`) | `[]byte` | Input wire packet to decode |
@@ -137,8 +137,8 @@ Exactly one result branch should be populated per response:
 
 Every implementation must enforce the following checks before allocating buffers or returning decoded values:
 
-1. **Prefix-Varint 9-Byte Marker Validation:** A 9-byte Prefix-Varint starts with `0x00` (`TZCNT == 8`). Any first byte with low 4 bits `0000` and non-zero upper 4 bits (`b & 0x0f == 0 && b != 0`) is reserved and must fail with a parse error.
+1. **Prefix-Varint 9-Byte Marker Validation:** A 9-byte Prefix-Varint starts with `0x00` (`TZCNT == 8`). Any first byte with low 3 bits `000` and non-zero upper 5 bits (`b & 0x07 == 0 && b != 0`) is reserved and must fail with a parse error.
 2. **Container Bounds Checking Before Allocation:** `WireString`, `WireBytes`, `WireSubMsg`, `WireArray`, `WireMap`, and `WireExtended` carry a `ByteLen` Prefix-Varint. Decoders must verify `pos + byteLen <= len(buf)` before allocating slices or arrays. Element counts inside `WireArray` and `WireMap` must never pre-allocate more capacity than the remaining bytes in the container can physically represent.
-3. **Recursion Depth Limit:** Nested sub-messages, nested containers inside unknown fields, and `Field #0` recursive schema references must enforce a maximum recursion depth (default `MaxDepth = 64` in Go / `32` in JS) and reject deeper nesting with a parse error.
+3. **Recursion Depth Limit:** Nested sub-messages, nested containers (`WireArray` and `WireMap`), unknown fields, and `Field #0` recursive schema references must enforce a maximum container recursion depth (`MaxDepth = 32` across Go and JS) and reject deeper nesting with a parse error.
 4. **Strict UTF-8 on `WireString`:** Every `WireString` field (including map keys/values of type `WireString`, string array elements, and `Field #0` field names) must be valid UTF-8. Invalid UTF-8 byte sequences must be rejected during decoding.
 5. **Known Unknown Extensions (`WireExtended`):** Unknown `ExtType` IDs inside `WireExtended` (`15`) must be skipped cleanly using `ByteLen`; truncated `WireExtended` payloads or unknown element wire types (`> 15`) inside `WireArray` / `WireMap` headers must be rejected.

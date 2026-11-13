@@ -44,8 +44,8 @@ type BenchReport struct {
 
 type parsedMetric struct {
 	nsPerOp     float64
-	bytesPerOp  int64
-	allocsPerOp int64
+	bytesPerOp  float64
+	allocsPerOp float64
 }
 
 func main() {
@@ -115,17 +115,17 @@ func parseBenchFile(path string) (goos, goarch, cpu string, metrics map[string]p
 			case "ns/op":
 				m.nsPerOp, _ = strconv.ParseFloat(fields[i], 64)
 			case "B/op":
-				m.bytesPerOp, _ = strconv.ParseInt(fields[i], 10, 64)
+				m.bytesPerOp, _ = strconv.ParseFloat(fields[i], 64)
 			case "allocs/op":
-				m.allocsPerOp, _ = strconv.ParseInt(fields[i], 10, 64)
+				m.allocsPerOp, _ = strconv.ParseFloat(fields[i], 64)
 			}
 		}
 		if m.nsPerOp > 0 {
 			prev := metrics[benchName]
 			n := counts[benchName]
 			prev.nsPerOp = (prev.nsPerOp*float64(n) + m.nsPerOp) / float64(n+1)
-			prev.bytesPerOp = m.bytesPerOp
-			prev.allocsPerOp = m.allocsPerOp
+			prev.bytesPerOp = (prev.bytesPerOp*float64(n) + m.bytesPerOp) / float64(n+1)
+			prev.allocsPerOp = (prev.allocsPerOp*float64(n) + m.allocsPerOp) / float64(n+1)
 			metrics[benchName] = prev
 			counts[benchName] = n + 1
 		}
@@ -166,8 +166,8 @@ func buildRows(metrics map[string]parsedMetric, specs []rowSpec) []BenchRow {
 			Name:        s.label,
 			NsPerOp:     ns,
 			OpsPerSec:   ops,
-			BytesPerOp:  m.bytesPerOp,
-			AllocsPerOp: m.allocsPerOp,
+			BytesPerOp:  int64(math.Round(m.bytesPerOp)),
+			AllocsPerOp: int64(math.Round(m.allocsPerOp)),
 			WireBytes:   s.wireBytes,
 			Highlight:   s.highlight,
 			Baseline:    s.baseline,
@@ -222,7 +222,7 @@ func buildReport(goos, goarch, cpu string, metrics map[string]parsedMetric) Benc
 
 	return BenchReport{
 		Language: "go",
-		Runtime:  "Go 1.27.1",
+		Runtime:  "Go " + strings.TrimPrefix(runtime.Version(), "go"),
 		Platform: goos,
 		Arch:     goarch,
 		CPU:      cpu,
