@@ -922,7 +922,7 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 			g.P("			bLen := int(bLen64)")
 			g.P("			", mv, " |= 1 << ", bit)
 			g.P("			if zeroCopy {")
-			g.P("				x.", f.GoName, " = data[pos : pos+bLen]")
+			g.P("				x.", f.GoName, " = data[pos : pos+bLen : pos+bLen]")
 			g.P("			} else {")
 			// Always copy into a fresh slice: reusing x.Field's backing array
 			// could scribble over a packet buffer aliased by an earlier
@@ -1046,7 +1046,7 @@ func generateOpaqueMessage(g *protogen.GeneratedFile, msg *protogen.Message) {
 	g.P("	return nil")
 	g.P("}")
 	g.P()
-	g.P("func (x *", name, ") RawBytes() []byte { return x.raw }")
+	g.P("func (x *", name, ") RawBytes() []byte { return x.raw[:len(x.raw):len(x.raw)] }")
 	g.P()
 
 	for _, f := range msg.Fields {
@@ -1355,11 +1355,10 @@ func generateOpaqueMessage(g *protogen.GeneratedFile, msg *protogen.Message) {
 	maxFnum := uint16(msg.Fields[len(msg.Fields)-1].Desc.Number())
 	g.P("// MarshalAppend re-serializes ", name, " using zero-decode wire splicing for unmodified fields.")
 	g.P("func (x *", name, ") MarshalAppend(dst []byte) []byte {")
-	g.P("	dst = dst[:0]")
 	g.P("	if x.dirty == 0 {")
-	g.P("		return append(dst, x.raw...)")
+	g.P("		return wire.CopyPacket(dst, x.raw)")
 	g.P("	}")
-	g.P("	return wire.SpliceFields(dst, x.raw, x.dirty, ", maxFnum, ", func(b []byte, fnum uint16) []byte {")
+	g.P("	return wire.SpliceFields(dst[:0], x.raw, x.dirty, ", maxFnum, ", func(b []byte, fnum uint16) []byte {")
 	g.P("		switch fnum {")
 	for _, f := range msg.Fields {
 		fnum := uint16(f.Desc.Number())

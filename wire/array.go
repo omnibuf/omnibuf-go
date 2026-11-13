@@ -238,12 +238,13 @@ func AppendBytesArrBody(dst [][]byte, body []byte, zeroCopy bool) ([][]byte, boo
 			return nil, false
 		}
 		p += n
-		v := body[p : p+int(l)]
+		end := p + int(l)
+		v := body[p:end:end]
 		if !zeroCopy {
 			v = append([]byte{}, v...)
 		}
 		dst[start+i] = v
-		p += int(l)
+		p = end
 	}
 	return dst, p == len(body)
 }

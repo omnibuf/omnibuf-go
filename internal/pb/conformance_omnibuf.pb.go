@@ -152,7 +152,7 @@ func (x *OpaqueAllTypesSubMsg) Unmarshal(b []byte) error {
 	return nil
 }
 
-func (x *OpaqueAllTypesSubMsg) RawBytes() []byte { return x.raw }
+func (x *OpaqueAllTypesSubMsg) RawBytes() []byte { return x.raw[:len(x.raw):len(x.raw)] }
 
 func (x OpaqueAllTypesSubMsg) GetId() uint32 {
 	if (x.dirty & (uint64(1) << 1)) != 0 {
@@ -192,11 +192,10 @@ func (x *OpaqueAllTypesSubMsg) SetScore(v int64) { x.f_score = v; x.dirty |= (ui
 
 // MarshalAppend re-serializes OpaqueAllTypesSubMsg using zero-decode wire splicing for unmodified fields.
 func (x *OpaqueAllTypesSubMsg) MarshalAppend(dst []byte) []byte {
-	dst = dst[:0]
 	if x.dirty == 0 {
-		return append(dst, x.raw...)
+		return wire.CopyPacket(dst, x.raw)
 	}
-	return wire.SpliceFields(dst, x.raw, x.dirty, 4, func(b []byte, fnum uint16) []byte {
+	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 4, func(b []byte, fnum uint16) []byte {
 		switch fnum {
 		case 1:
 			b = append(b, 0x21)
@@ -468,7 +467,7 @@ func (x *TestAllTypes) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merg
 			bLen := int(bLen64)
 			seenMask |= 1 << 6
 			if zeroCopy {
-				x.F7Bytes = data[pos : pos+bLen]
+				x.F7Bytes = data[pos : pos+bLen : pos+bLen]
 			} else {
 				x.F7Bytes = append([]byte(nil), data[pos:pos+bLen]...)
 			}
@@ -769,7 +768,7 @@ func (x *OpaqueTestAllTypes) Unmarshal(b []byte) error {
 	return nil
 }
 
-func (x *OpaqueTestAllTypes) RawBytes() []byte { return x.raw }
+func (x *OpaqueTestAllTypes) RawBytes() []byte { return x.raw[:len(x.raw):len(x.raw)] }
 
 func (x OpaqueTestAllTypes) GetF1Uint32() uint32 {
 	if (x.dirty & (uint64(1) << 1)) != 0 {
@@ -988,11 +987,10 @@ func (x *OpaqueTestAllTypes) SetF20OverflowStr(v string) {
 
 // MarshalAppend re-serializes OpaqueTestAllTypes using zero-decode wire splicing for unmodified fields.
 func (x *OpaqueTestAllTypes) MarshalAppend(dst []byte) []byte {
-	dst = dst[:0]
 	if x.dirty == 0 {
-		return append(dst, x.raw...)
+		return wire.CopyPacket(dst, x.raw)
 	}
-	return wire.SpliceFields(dst, x.raw, x.dirty, 20, func(b []byte, fnum uint16) []byte {
+	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 20, func(b []byte, fnum uint16) []byte {
 		switch fnum {
 		case 1:
 			b = append(b, 0x21)

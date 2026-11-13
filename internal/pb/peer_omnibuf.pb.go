@@ -191,7 +191,7 @@ func (x *OpaqueLocation) Unmarshal(b []byte) error {
 	return nil
 }
 
-func (x *OpaqueLocation) RawBytes() []byte { return x.raw }
+func (x *OpaqueLocation) RawBytes() []byte { return x.raw[:len(x.raw):len(x.raw)] }
 
 func (x OpaqueLocation) GetRegion() string {
 	if (x.dirty & (uint64(1) << 1)) != 0 {
@@ -249,11 +249,10 @@ func (x *OpaqueLocation) SetLongitude(v float32) { x.f_longitude = v; x.dirty |=
 
 // MarshalAppend re-serializes OpaqueLocation using zero-decode wire splicing for unmodified fields.
 func (x *OpaqueLocation) MarshalAppend(dst []byte) []byte {
-	dst = dst[:0]
 	if x.dirty == 0 {
-		return append(dst, x.raw...)
+		return wire.CopyPacket(dst, x.raw)
 	}
-	return wire.SpliceFields(dst, x.raw, x.dirty, 6, func(b []byte, fnum uint16) []byte {
+	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 6, func(b []byte, fnum uint16) []byte {
 		switch fnum {
 		case 1:
 			b = append(b, 0x35)
@@ -423,7 +422,7 @@ func (x *OpaqueNeighbor) Unmarshal(b []byte) error {
 	return nil
 }
 
-func (x *OpaqueNeighbor) RawBytes() []byte { return x.raw }
+func (x *OpaqueNeighbor) RawBytes() []byte { return x.raw[:len(x.raw):len(x.raw)] }
 
 func (x OpaqueNeighbor) GetPeerAsn() uint32 {
 	if (x.dirty & (uint64(1) << 1)) != 0 {
@@ -463,11 +462,10 @@ func (x *OpaqueNeighbor) SetEstablished(v bool) { x.f_established = v; x.dirty |
 
 // MarshalAppend re-serializes OpaqueNeighbor using zero-decode wire splicing for unmodified fields.
 func (x *OpaqueNeighbor) MarshalAppend(dst []byte) []byte {
-	dst = dst[:0]
 	if x.dirty == 0 {
-		return append(dst, x.raw...)
+		return wire.CopyPacket(dst, x.raw)
 	}
-	return wire.SpliceFields(dst, x.raw, x.dirty, 4, func(b []byte, fnum uint16) []byte {
+	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 4, func(b []byte, fnum uint16) []byte {
 		switch fnum {
 		case 1:
 			b = append(b, 0x21)
@@ -908,7 +906,7 @@ func (x *OpaquePeerUpdate) Unmarshal(b []byte) error {
 	return nil
 }
 
-func (x *OpaquePeerUpdate) RawBytes() []byte { return x.raw }
+func (x *OpaquePeerUpdate) RawBytes() []byte { return x.raw[:len(x.raw):len(x.raw)] }
 
 func (x OpaquePeerUpdate) GetAsn() uint32 {
 	if (x.dirty & (uint64(1) << 1)) != 0 {
@@ -1039,11 +1037,10 @@ func (x *OpaquePeerUpdate) SetSequence(v uint64) { x.f_sequence = v; x.dirty |= 
 
 // MarshalAppend re-serializes OpaquePeerUpdate using zero-decode wire splicing for unmodified fields.
 func (x *OpaquePeerUpdate) MarshalAppend(dst []byte) []byte {
-	dst = dst[:0]
 	if x.dirty == 0 {
-		return append(dst, x.raw...)
+		return wire.CopyPacket(dst, x.raw)
 	}
-	return wire.SpliceFields(dst, x.raw, x.dirty, 11, func(b []byte, fnum uint16) []byte {
+	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 11, func(b []byte, fnum uint16) []byte {
 		switch fnum {
 		case 1:
 			b = append(b, 0x21)

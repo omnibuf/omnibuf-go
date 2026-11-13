@@ -218,7 +218,8 @@ func ReadSubMsg(packet []byte, fieldNum uint16) ([]byte, bool) {
 	if sn == 0 || subLen > uint64(len(valSlice)-sn) {
 		return nil, false
 	}
-	return valSlice[sn : sn+int(subLen)], true
+	end := sn + int(subLen)
+	return valSlice[sn:end:end], true
 }
 
 //go:noinline
@@ -250,10 +251,11 @@ func ReadElem(body []byte, index int) ([]byte, bool) {
 			return nil, false
 		}
 		p += n
+		end := p + int(l)
 		if i == index {
-			elem = body[p : p+int(l)]
+			elem = body[p:end:end]
 		}
-		p += int(l)
+		p = end
 	}
 	// Reject arrays whose declared count does not consume the body exactly.
 	if p != len(body) {

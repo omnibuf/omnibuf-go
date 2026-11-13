@@ -432,7 +432,8 @@ func readLenSlice(data []byte, pos int, minLen uint64) (body []byte, nextPos int
 	if bLen < minLen || bLen > uint64(len(data)-pos) {
 		return nil, 0, fmt.Errorf("omnibuf: invalid byteLen %d at %d", bLen, pos)
 	}
-	return data[pos : pos+int(bLen)], pos + int(bLen), nil
+	end := pos + int(bLen)
+	return data[pos:end:end], end, nil
 }
 
 // readStrSlice is readLenSlice for WireString payloads: it additionally

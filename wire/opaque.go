@@ -9,6 +9,22 @@ import (
 // Opaque API Runtime Support: Zero-Decode Wire Splicing
 // ============================================================================
 
+// CopyPacket writes raw into dst[:0], allocating a detached slice when dst's
+// backing array overlaps raw so neither raw nor the returned slice aliases the other.
+func CopyPacket(dst, raw []byte) []byte {
+	n := len(raw)
+	if n > 0 && cap(dst) > 0 {
+		dstStart := uintptr(unsafe.Pointer(unsafe.SliceData(dst)))
+		dstEnd := dstStart + uintptr(cap(dst))
+		rawStart := uintptr(unsafe.Pointer(unsafe.SliceData(raw)))
+		rawEnd := rawStart + uintptr(n)
+		if dstStart < rawEnd && rawStart < dstEnd {
+			return append([]byte(nil), raw...)
+		}
+	}
+	return append(dst[:0], raw...)
+}
+
 // SpliceFields splices unmodified contiguous byte ranges from raw and invokes appendDirty
 // only for fields whose bit is set in dirtyMask, avoiding any decoding of untouched fields.
 func SpliceFields(dst, raw []byte, dirtyMask uint64, maxField uint16, appendDirty func(dst []byte, fnum uint16) []byte) []byte {

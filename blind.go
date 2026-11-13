@@ -352,9 +352,9 @@ func decodeBlindWithSchema(data []byte, inherited *blindSchema, depth int) (map[
 			localSchema = mergeSchemaMeta(localSchema, meta)
 			scan = next
 		} else {
-			next, err := skipValue(data, scan, wt)
-			if err != nil {
-				return nil, err
+			next, ok := fastSkipValue(data, scan, wt)
+			if !ok {
+				return nil, fmt.Errorf("omnibuf: invalid field payload at %d", scan)
 			}
 			scan = next
 		}

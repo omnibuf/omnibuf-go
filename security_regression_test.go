@@ -334,3 +334,135 @@ func TestWireEncoderStackGrowthBeyond64(t *testing.T) {
 		t.Fatalf("expected inner uint 777, got %d (ok=%v)", v, ok)
 	}
 }
+
+func TestZeroCopyBytesCapacityClippingAndOpaqueCleanAlias(t *testing.T) {
+	// 1. Struct-tagged UnmarshalZeroCopy must clip []byte slice capacity so append() cannot corrupt packet.
+	type bytesMsg struct {
+		Raw     []byte            `omnibuf:"1"`
+		RawArr  [][]byte          `omnibuf:"2"`
+		StrArr  [][]byte          `omnibuf:"3,wire=string"`
+		RawMap  map[string][]byte `omnibuf:"4"`
+		Trailer string            `omnibuf:"5"`
+	}
+	src := bytesMsg{
+		Raw:     []byte("abcd"),
+		RawArr:  [][]byte{[]byte("ef")},
+		StrArr:  [][]byte{[]byte("gh")},
+		RawMap:  map[string][]byte{"k": []byte("ij")},
+		Trailer: "UNTOUCHED",
+	}
+	pkt, err := ob.Marshal(&src)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+	origCopy := append([]byte(nil), pkt...)
+
+	var dst bytesMsg
+	if err := ob.UnmarshalZeroCopy(pkt, &dst); err != nil {
+		t.Fatalf("UnmarshalZeroCopy failed: %v", err)
+	}
+	_ = append(dst.Raw, 'X', 'Y', 'Z')
+	_ = append(dst.RawArr[0], 'X', 'Y', 'Z')
+	_ = append(dst.StrArr[0], 'X', 'Y', 'Z')
+	_ = append(dst.RawMap["k"], 'X', 'Y', 'Z')
+	if !bytes.Equal(pkt, origCopy) {
+		t.Fatalf("append on zero-copy struct slices mutated source packet:\ngot  %x\nwant %x", pkt, origCopy)
+	}
+
+	// 2. Generated UnmarshalOmniBuf(pkt, true) and Opaque.RawBytes() must clip []byte capacities.
+	pbSrc := &pb.TestAllTypes{
+		F7Bytes:     []byte("hello"),
+		F6String:    "world",
+		F9StringArr: []string{"short", string(bytes.Repeat([]byte("a"), 200))},
+		F8SubMsg:    &pb.AllTypesSubMsg{Id: 42, Label: "sub"},
+		F11SubMsgArr: []*pb.AllTypesSubMsg{
+			{Id: 1, Label: "first"},
+			{Id: 2, Label: "second"},
+		},
+	}
+	pbPkt := pbSrc.MarshalOmniBufAppend(nil)
+	pbOrig := append([]byte(nil), pbPkt...)
+
+	var pbDec pb.TestAllTypes
+	if err := pbDec.UnmarshalOmniBuf(pbPkt, true); err != nil {
+		t.Fatalf("UnmarshalOmniBuf(zeroCopy) failed: %v", err)
+	}
+	_ = append(pbDec.F7Bytes, '!', '!', '!')
+	if !bytes.Equal(pbPkt, pbOrig) {
+		t.Fatal("append on generated zero-copy F7Bytes mutated source packet")
+	}
+
+	// 3. Low-level wire slice readers must clip capacity.
+	if b, ok := wire.ReadBytes(pbPkt, 7); !ok {
+		t.Fatal("ReadBytes failed")
+	} else {
+		_ = append(b, '!')
+	}
+	if sb, ok := wire.ReadStringBytes(pbPkt, 6); !ok {
+		t.Fatal("ReadStringBytes short failed")
+	} else {
+		_ = append(sb, '!')
+	}
+	// Long string (> 127B, 2-byte varint length) + bytes array
+	enc := wire.NewEncoder(300)
+	enc.WriteString(1, string(bytes.Repeat([]byte("z"), 150)))
+	wirePkt := append([]byte(nil), enc.Finish()...)
+	wirePkt = wire.AppendVarint(wirePkt, (2<<4)|uint64(wire.WireArray))
+	wirePkt = wire.EncodeBytesArr(wirePkt, [][]byte{[]byte("elem0"), []byte("elem1")})
+	wirePkt = wire.AppendVarint(wirePkt, (3<<4)|uint64(wire.WireUint))
+	wirePkt = wire.AppendVarint(wirePkt, 999)
+	wireOrig := append([]byte(nil), wirePkt...)
+	if sbLong, ok := wire.ReadStringBytes(wirePkt, 1); !ok {
+		t.Fatal("ReadStringBytes long failed")
+	} else {
+		_ = append(sbLong, '!')
+	}
+	arrSlices := wire.AppendBytesArr(nil, wirePkt, 2, true)
+	if len(arrSlices) != 2 {
+		t.Fatalf("AppendBytesArr got %d elems", len(arrSlices))
+	}
+	_ = append(arrSlices[0], '!')
+	if !bytes.Equal(wirePkt, wireOrig) {
+		t.Fatal("append on wire.ReadStringBytes / AppendBytesArr mutated source packet")
+	}
+
+	if sub, ok := wire.ReadSubMsg(pbPkt, 8); !ok {
+		t.Fatal("ReadSubMsg failed")
+	} else {
+		_ = append(sub, '!')
+	}
+	if elem0, ok := wire.ReadSubMsgArrElem(pbPkt, 11, 0); !ok {
+		t.Fatal("ReadSubMsgArrElem failed")
+	} else {
+		_ = append(elem0, '!')
+	}
+	if !bytes.Equal(pbPkt, pbOrig) {
+		t.Fatal("append on wire.ReadSubMsg / ReadSubMsgArrElem mutated source packet")
+	}
+
+	// 4. Opaque.Unmarshal clips RawBytes() capacity AND clean Opaque.MarshalAppend detaches overlapping dst.
+	backing := make([]byte, 16+len(pbOrig)+32)
+	copy(backing[16:], pbOrig)
+	copy(backing[16+len(pbOrig):], "SENTINEL")
+
+	var op pb.OpaqueTestAllTypes
+	if err := op.Unmarshal(backing[16 : 16+len(pbOrig)]); err != nil {
+		t.Fatalf("Opaque.Unmarshal failed: %v", err)
+	}
+	_ = append(op.RawBytes(), 'X', 'Y')
+	if string(backing[16+len(pbOrig):16+len(pbOrig)+8]) != "SENTINEL" {
+		t.Fatal("append on Opaque.RawBytes() overwrote trailing bytes in backing buffer")
+	}
+
+	aliasedOut := op.MarshalAppend(backing[:0])
+	if !bytes.Equal(aliasedOut, pbOrig) {
+		t.Fatal("Opaque.MarshalAppend(aliased) returned wrong bytes")
+	}
+	if !bytes.Equal(op.RawBytes(), pbOrig) || op.GetF6String() != "world" {
+		t.Fatalf("clean Opaque.MarshalAppend(aliased) overwrote op.raw in place: F6String=%q", op.GetF6String())
+	}
+	aliasedOut[0] ^= 0xff
+	if !bytes.Equal(op.RawBytes(), pbOrig) {
+		t.Fatal("mutating Opaque.MarshalAppend output mutated op.raw")
+	}
+}

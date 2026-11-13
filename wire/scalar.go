@@ -167,7 +167,7 @@ func ReadFloat64(packet []byte, fieldNum uint16) (float64, bool) {
 }
 
 // ReadStringBytes returns the raw UTF-8 byte slice of a string field.
-func ReadStringBytes(packet []byte, fieldNum uint16) ([]byte, bool) {
+func readStringSlice(packet []byte, fieldNum uint16) ([]byte, bool) {
 	s, _, ok := locateFieldMask(packet, fieldNum, 1<<WireString)
 	if !ok || len(s) == 0 {
 		return nil, false
@@ -187,9 +187,17 @@ func ReadStringBytes(packet []byte, fieldNum uint16) ([]byte, bool) {
 	return s[sn : sn+int(sLen)], true
 }
 
+func ReadStringBytes(packet []byte, fieldNum uint16) ([]byte, bool) {
+	b, ok := readStringSlice(packet, fieldNum)
+	if !ok {
+		return nil, false
+	}
+	return b[:len(b):len(b)], true
+}
+
 // ReadString reads a string field, allocating a safe Go string copy.
 func ReadString(packet []byte, fieldNum uint16) (string, bool) {
-	b, ok := ReadStringBytes(packet, fieldNum)
+	b, ok := readStringSlice(packet, fieldNum)
 	if !ok {
 		return "", false
 	}
@@ -198,7 +206,7 @@ func ReadString(packet []byte, fieldNum uint16) (string, bool) {
 
 // ReadStringZeroCopy reads a string field with zero allocations using unsafe.String.
 func ReadStringZeroCopy(packet []byte, fieldNum uint16) (string, bool) {
-	b, ok := ReadStringBytes(packet, fieldNum)
+	b, ok := readStringSlice(packet, fieldNum)
 	if !ok || len(b) == 0 {
 		return "", ok
 	}
@@ -215,7 +223,8 @@ func ReadBytes(packet []byte, fieldNum uint16) ([]byte, bool) {
 	if bn == 0 || bLen > uint64(len(s)-bn) {
 		return nil, false
 	}
-	return s[bn : bn+int(bLen)], true
+	end := bn + int(bLen)
+	return s[bn:end:end], true
 }
 
 // ReadFixed32 reads a 4-byte little-endian uint32 field (WireFixed32) with 0 heap allocations.

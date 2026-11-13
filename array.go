@@ -92,12 +92,13 @@ func appendLenDelimArrBody[T any](dst []T, body []byte, elem uint8, conv func([]
 			return nil, false
 		}
 		p += n
-		b := body[p : p+int(l)]
+		end := p + int(l)
+		b := body[p:end:end]
 		if elem == wireString && !wire.ValidUTF8(b) {
 			return nil, false
 		}
 		dst[start+i] = conv(b)
-		p += int(l)
+		p = end
 	}
 	return dst, p == len(body)
 }
