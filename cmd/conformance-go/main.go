@@ -7,7 +7,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -75,35 +74,41 @@ func handleRequest(req *conformance.ConformanceRequest) (resp *conformance.Confo
 }
 
 func handleBlind(req *conformance.ConformanceRequest) *conformance.ConformanceResponse {
-	m, err := omnibuf.DecodeBlind(req.OmniBufPayload)
-	if err != nil {
-		return &conformance.ConformanceResponse{
-			ParseError: err.Error(),
-		}
-	}
 	if conformance.WireFormat(req.RequestedOutputFormat) == conformance.WireFormatJSON {
-		jb, err := json.Marshal(m)
+		js, err := omnibuf.DecodeBlindJSON(req.OmniBufPayload)
 		if err != nil {
-			// Handle NaN/Inf maps gracefully when JSON isn't representable
+			if errors.Is(err, omnibuf.ErrNonFiniteFloat) {
+				return &conformance.ConformanceResponse{
+					JSONPayload: "{}",
+				}
+			}
 			return &conformance.ConformanceResponse{
-				JSONPayload: "{}",
+				ParseError: err.Error(),
 			}
 		}
 		return &conformance.ConformanceResponse{
-			JSONPayload: string(jb),
+			JSONPayload: js,
+		}
+	}
+	if _, err := omnibuf.DecodeBlind(req.OmniBufPayload); err != nil {
+		return &conformance.ConformanceResponse{
+			ParseError: err.Error(),
 		}
 	}
 	return &conformance.ConformanceResponse{}
 }
 
 func handlePluginTier(req *conformance.ConformanceRequest) *conformance.ConformanceResponse {
-	if req.TestOpaqueSplice || req.TestOpaqueSpliceShrink {
-		if err := checkSpliceAliasedPrefix(req.OmniBufPayload); err != nil {
-			return &conformance.ConformanceResponse{RuntimeError: err.Error()}
-		}
-	}
 	switch req.MessageType {
 	case "omnibuf.bench.PeerUpdate":
+		if req.TestOpaqueSplice || req.TestOpaqueSpliceShrink {
+			var probe pb.OpaquePeerUpdate
+			_ = probe.Unmarshal(req.OmniBufPayload)
+			probe.SetSequence(probe.GetSequence() + 1)
+			if _, err := probe.TryMarshalAppend(nil); err != nil {
+				return &conformance.ConformanceResponse{ParseError: err.Error()}
+			}
+		}
 		// Pre-populate msg to verify struct reuse clears all unseen fields and nil sub-message pointers.
 		msg := pb.PeerUpdate{
 			Asn:       999999,
@@ -120,9 +125,18 @@ func handlePluginTier(req *conformance.ConformanceRequest) *conformance.Conforma
 				ParseError: err.Error(),
 			}
 		}
+		if req.TestOpaqueSplice || req.TestOpaqueSpliceShrink {
+			if err := checkSpliceAliasedPrefix(req.OmniBufPayload); err != nil {
+				return &conformance.ConformanceResponse{RuntimeError: err.Error()}
+			}
+		}
 		// Exercise lazy Opaque view getters to verify zero-panic and value conformance
 		var op pb.OpaquePeerUpdate
 		_ = op.Unmarshal(req.OmniBufPayload)
+		wantLoc := &pb.Location{}
+		if msg.Location != nil {
+			wantLoc = msg.Location
+		}
 		if op.GetAsn() != msg.Asn ||
 			op.GetRouterId() != msg.RouterId ||
 			op.GetActive() != msg.Active ||
@@ -131,7 +145,9 @@ func handlePluginTier(req *conformance.ConformanceRequest) *conformance.Conforma
 			math.Float64bits(op.GetCpuLoad()) != math.Float64bits(msg.CpuLoad) ||
 			op.TagsLen() != len(msg.Tags) ||
 			op.PrefixesLen() != len(msg.Prefixes) ||
-			op.GetLocation().GetCity() != msg.GetLocation().GetCity() ||
+			op.GetLocation().GetCity() != wantLoc.City ||
+			math.Float32bits(op.GetLocation().GetLatitude()) != math.Float32bits(wantLoc.Latitude) ||
+			math.Float32bits(op.GetLocation().GetLongitude()) != math.Float32bits(wantLoc.Longitude) ||
 			op.NeighborsLen() != len(msg.Neighbors) ||
 			op.GetSequence() != msg.Sequence {
 			return &conformance.ConformanceResponse{
@@ -157,8 +173,12 @@ func handlePluginTier(req *conformance.ConformanceRequest) *conformance.Conforma
 				Longitude:  13.405,
 			})
 			op.SetSequence(op.GetSequence() + 1)
+			out, err := op.TryMarshalAppend(nil)
+			if err != nil {
+				return &conformance.ConformanceResponse{SerializeError: err.Error()}
+			}
 			return &conformance.ConformanceResponse{
-				OmniBufPayload: op.MarshalAppend(nil),
+				OmniBufPayload: out,
 			}
 		}
 		if req.TestOpaqueSpliceShrink {
@@ -179,8 +199,12 @@ func handlePluginTier(req *conformance.ConformanceRequest) *conformance.Conforma
 				Longitude:  2.0,
 			})
 			op.SetSequence(2)
+			out, err := op.TryMarshalAppend(nil)
+			if err != nil {
+				return &conformance.ConformanceResponse{SerializeError: err.Error()}
+			}
 			return &conformance.ConformanceResponse{
-				OmniBufPayload: op.MarshalAppend(nil),
+				OmniBufPayload: out,
 			}
 		}
 
@@ -197,6 +221,14 @@ func handlePluginTier(req *conformance.ConformanceRequest) *conformance.Conforma
 		}
 
 	case "omnibuf.conformance.TestAllTypes":
+		if req.TestOpaqueSplice || req.TestOpaqueSpliceShrink {
+			var probe pb.OpaqueTestAllTypes
+			_ = probe.Unmarshal(req.OmniBufPayload)
+			probe.SetF1Uint32(probe.GetF1Uint32() + 1)
+			if _, err := probe.TryMarshalAppend(nil); err != nil {
+				return &conformance.ConformanceResponse{ParseError: err.Error()}
+			}
+		}
 		// Pre-populate msg to verify struct reuse clears all unseen fields and resets absent F8SubMsg to nil.
 		msg := pb.TestAllTypes{
 			F1Uint32:       999999,
@@ -213,6 +245,11 @@ func handlePluginTier(req *conformance.ConformanceRequest) *conformance.Conforma
 		if err := msg.UnmarshalOmniBuf(req.OmniBufPayload, false); err != nil {
 			return &conformance.ConformanceResponse{
 				ParseError: err.Error(),
+			}
+		}
+		if req.TestOpaqueSplice || req.TestOpaqueSpliceShrink {
+			if err := checkSpliceAliasedPrefix(req.OmniBufPayload); err != nil {
+				return &conformance.ConformanceResponse{RuntimeError: err.Error()}
 			}
 		}
 		var op pb.OpaqueTestAllTypes
@@ -276,8 +313,12 @@ func handlePluginTier(req *conformance.ConformanceRequest) *conformance.Conforma
 			op.SetF15Fixed32(0xdeadbeef)
 			op.SetF16Fixed64(0xcafebabedeadbeef)
 			op.SetF20OverflowStr(strings.Repeat("overflow20-", 20))
+			out, err := op.TryMarshalAppend(nil)
+			if err != nil {
+				return &conformance.ConformanceResponse{SerializeError: err.Error()}
+			}
 			return &conformance.ConformanceResponse{
-				OmniBufPayload: op.MarshalAppend(nil),
+				OmniBufPayload: out,
 			}
 		}
 		if req.TestOpaqueSpliceShrink {
@@ -300,8 +341,12 @@ func handlePluginTier(req *conformance.ConformanceRequest) *conformance.Conforma
 			op.SetF15Fixed32(7)
 			op.SetF16Fixed64(9)
 			op.SetF20OverflowStr("z")
+			out, err := op.TryMarshalAppend(nil)
+			if err != nil {
+				return &conformance.ConformanceResponse{SerializeError: err.Error()}
+			}
 			return &conformance.ConformanceResponse{
-				OmniBufPayload: op.MarshalAppend(nil),
+				OmniBufPayload: out,
 			}
 		}
 

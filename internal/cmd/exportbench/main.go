@@ -217,7 +217,31 @@ func buildReport(goos, goarch, cpu string, metrics map[string]parsedMetric) Benc
 		{benchKey: "BenchmarkProtobufOfficial_ReadModifyWrite", label: "Protobuf"},
 		{benchKey: "BenchmarkCapnProto_ReadModifyWrite", label: "Cap'n Proto"},
 		{benchKey: "BenchmarkMsgpack_ReadModifyWrite", label: "MessagePack"},
+		{benchKey: "BenchmarkJSONv2_ReadModifyWrite", label: "JSON (encoding/json/v2)"},
 		{benchKey: "BenchmarkJSON_ReadModifyWrite", label: "JSON (encoding/json)"},
+	}
+
+	encodeNestedShiftSpecs := []rowSpec{
+		{benchKey: "BenchmarkLargeNested_OmniBuf_Generated", label: "OmniBuf (Generated)", wireBytes: 39256, highlight: true, baseline: true},
+		{benchKey: "BenchmarkLargeNested_OmniBuf_StructTags", label: "OmniBuf (Go Struct Tags)", wireBytes: 39256, highlight: true},
+		{benchKey: "BenchmarkLargeNested_Avro", label: "Avro (Raw Binary)", wireBytes: 39196},
+		{benchKey: "BenchmarkLargeNested_FlatBuffers", label: "FlatBuffers", wireBytes: 39488},
+		{benchKey: "BenchmarkLargeNested_Protobuf_Official", label: "Protobuf", wireBytes: 39227},
+		{benchKey: "BenchmarkLargeNested_CapnProto", label: "Cap'n Proto", wireBytes: 39448},
+		{benchKey: "BenchmarkLargeNested_JSON", label: "JSON (encoding/json)", wireBytes: 39681},
+		{benchKey: "BenchmarkLargeNested_Msgpack", label: "MessagePack", wireBytes: 39538},
+		{benchKey: "BenchmarkLargeNested_JSONv2", label: "JSON (encoding/json/v2)", wireBytes: 39681},
+	}
+
+	mutateEmbeddedGrowSpecs := []rowSpec{
+		{benchKey: "BenchmarkEmbeddedSubMsgGrow_OmniBuf_OpaqueSplice", label: "OmniBuf (Opaque Splice)", highlight: true, baseline: true},
+		{benchKey: "BenchmarkEmbeddedSubMsgGrow_FlatBuffers", label: "FlatBuffers"},
+		{benchKey: "BenchmarkEmbeddedSubMsgGrow_Avro", label: "Avro (Raw Binary)"},
+		{benchKey: "BenchmarkEmbeddedSubMsgGrow_Protobuf_Official", label: "Protobuf"},
+		{benchKey: "BenchmarkEmbeddedSubMsgGrow_CapnProto", label: "Cap'n Proto"},
+		{benchKey: "BenchmarkEmbeddedSubMsgGrow_Msgpack", label: "MessagePack"},
+		{benchKey: "BenchmarkEmbeddedSubMsgGrow_JSONv2", label: "JSON (encoding/json/v2)"},
+		{benchKey: "BenchmarkEmbeddedSubMsgGrow_JSON", label: "JSON (encoding/json)"},
 	}
 
 	return BenchReport{
@@ -230,27 +254,39 @@ func buildReport(goos, goarch, cpu string, metrics map[string]parsedMetric) Benc
 		Categories: []BenchCategory{
 			{
 				ID:      "encode",
-				Title:   "Full Message Encode Speed (PeerUpdate)",
+				Title:   "Full Message Encode Speed",
 				Unit:    "ns",
 				Results: buildRows(metrics, encodeSpecs),
 			},
 			{
 				ID:      "decode",
-				Title:   "Full Message Decode Speed (PeerUpdate)",
+				Title:   "Full Message Decode Speed",
 				Unit:    "ns",
 				Results: buildRows(metrics, decodeSpecs),
 			},
 			{
 				ID:      "lookup_city",
-				Title:   "Read a Single Nested Field (peer.location.city)",
+				Title:   "Read a Single Nested Field",
 				Unit:    "ns",
 				Results: buildRows(metrics, lookupSpecs),
 			},
 			{
 				ID:      "mutate_sequence",
-				Title:   "Selective Single-Field Mutation (peer.sequence)",
+				Title:   "Selective Single-Field Mutation",
 				Unit:    "ns",
 				Results: buildRows(metrics, mutateSpecs),
+			},
+			{
+				ID:      "encode_nested_shift",
+				Title:   "Large Embedded Message Encode",
+				Unit:    "ns",
+				Results: buildRows(metrics, encodeNestedShiftSpecs),
+			},
+			{
+				ID:      "mutate_embedded_grow",
+				Title:   "Embedded Message Growth",
+				Unit:    "ns",
+				Results: buildRows(metrics, mutateEmbeddedGrowSpecs),
 			},
 		},
 	}

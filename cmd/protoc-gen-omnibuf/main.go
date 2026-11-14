@@ -1351,112 +1351,130 @@ func generateOpaqueMessage(g *protogen.GeneratedFile, msg *protogen.Message) {
 		g.P()
 	}
 
-	// Generate MarshalAppend on Opaque struct with full zero-decode splice support across all field types!
+	// Generate MarshalAppend, TryMarshalAppend, and Marshal on Opaque struct with zero-decode splice support.
 	maxFnum := uint16(msg.Fields[len(msg.Fields)-1].Desc.Number())
-	g.P("// MarshalAppend re-serializes ", name, " using zero-decode wire splicing for unmodified fields.")
-	g.P("func (x *", name, ") MarshalAppend(dst []byte) []byte {")
-	g.P("	if x.dirty == 0 {")
-	g.P("		return wire.CopyPacket(dst, x.raw)")
-	g.P("	}")
-	g.P("	return wire.SpliceFields(dst[:0], x.raw, x.dirty, ", maxFnum, ", func(b []byte, fnum uint16) []byte {")
-	g.P("		switch fnum {")
+	g.P("func (x *", name, ") appendDirtyField(b []byte, fnum uint16) []byte {")
+	g.P("	switch fnum {")
 	for _, f := range msg.Fields {
 		fnum := uint16(f.Desc.Number())
 		privName := "f_" + f.Desc.TextName()
-		g.P("		case ", fnum, ":")
+		g.P("	case ", fnum, ":")
 		if f.Desc.Kind() == protoreflect.BoolKind && !f.Desc.IsList() {
-			g.P("			if x.", privName, " { return wire.AppendVarint(b, ", (uint64(fnum)<<4)|uint64(wire.WireBoolTrue), ") }")
-			g.P("			return wire.AppendVarint(b, ", (uint64(fnum)<<4)|uint64(wire.WireBoolFalse), ")")
+			g.P("		if x.", privName, " { return wire.AppendVarint(b, ", (uint64(fnum)<<4)|uint64(wire.WireBoolTrue), ") }")
+			g.P("		return wire.AppendVarint(b, ", (uint64(fnum)<<4)|uint64(wire.WireBoolFalse), ")")
 			continue
 		}
 		if f.Desc.Kind() == protoreflect.MessageKind && !f.Desc.IsList() && !f.Desc.IsMap() {
-			g.P("			if x.", privName, " == nil { return b }")
+			g.P("		if x.", privName, " == nil { return b }")
 		}
 
 		rawTag := (uint64(fnum) << 4) | uint64(wireTypeForField(f))
 		emitConstTag(g, "b", rawTag)
 
 		if f.Desc.IsMap() {
-			g.P("			return wire.EncodeMapStringUint(b, x.", privName, ", true)")
+			g.P("		return wire.EncodeMapStringUint(b, x.", privName, ", true)")
 			continue
 		}
 		if f.Desc.IsList() {
 			switch f.Desc.Kind() {
 			case protoreflect.StringKind:
-				g.P("			return wire.EncodeStringArr(b, x.", privName, ")")
+				g.P("		return wire.EncodeStringArr(b, x.", privName, ")")
 			case protoreflect.BytesKind:
-				g.P("			return wire.EncodeBytesArr(b, x.", privName, ")")
+				g.P("		return wire.EncodeBytesArr(b, x.", privName, ")")
 			case protoreflect.BoolKind:
-				g.P("			return wire.EncodeBoolArr(b, x.", privName, ")")
+				g.P("		return wire.EncodeBoolArr(b, x.", privName, ")")
 			case protoreflect.Uint32Kind, protoreflect.Uint64Kind:
-				g.P("			return wire.EncodeUintArr(b, x.", privName, ")")
+				g.P("		return wire.EncodeUintArr(b, x.", privName, ")")
 			case protoreflect.Sint32Kind, protoreflect.Int32Kind, protoreflect.Sint64Kind, protoreflect.Int64Kind:
-				g.P("			return wire.EncodeSintArr(b, x.", privName, ")")
+				g.P("		return wire.EncodeSintArr(b, x.", privName, ")")
 			case protoreflect.Fixed32Kind:
-				g.P("			return wire.EncodeFixed32Arr(b, x.", privName, ", wire.WireFixed32)")
+				g.P("		return wire.EncodeFixed32Arr(b, x.", privName, ", wire.WireFixed32)")
 			case protoreflect.Fixed64Kind:
-				g.P("			return wire.EncodeFixed64Arr(b, x.", privName, ", wire.WireFixed64)")
+				g.P("		return wire.EncodeFixed64Arr(b, x.", privName, ", wire.WireFixed64)")
 			case protoreflect.Sfixed32Kind:
-				g.P("			return wire.EncodeFixed32Arr(b, x.", privName, ", wire.WireSfixed32)")
+				g.P("		return wire.EncodeFixed32Arr(b, x.", privName, ", wire.WireSfixed32)")
 			case protoreflect.Sfixed64Kind:
-				g.P("			return wire.EncodeFixed64Arr(b, x.", privName, ", wire.WireSfixed64)")
+				g.P("		return wire.EncodeFixed64Arr(b, x.", privName, ", wire.WireSfixed64)")
 			case protoreflect.FloatKind:
-				g.P("			return wire.EncodeFloat32Arr(b, x.", privName, ")")
+				g.P("		return wire.EncodeFloat32Arr(b, x.", privName, ")")
 			case protoreflect.DoubleKind:
-				g.P("			return wire.EncodeFloat64Arr(b, x.", privName, ")")
+				g.P("		return wire.EncodeFloat64Arr(b, x.", privName, ")")
 			case protoreflect.MessageKind:
-				g.P("			lenPos := len(b)")
-				g.P("			b = append(b, 0, 0, wire.WireSubMsg)")
-				g.P("			b = wire.AppendVarint(b, uint64(len(x.", privName, ")))")
-				g.P("			for _, elem := range x.", privName, " {")
-				g.P("				eLenPos := len(b)")
-				g.P("				b = append(b, 0, 0)")
-				g.P("				if elem != nil {")
-				g.P("					b = elem.MarshalOmniBufAppend(b)")
-				g.P("				}")
-				g.P("				b = wire.BackpatchContainerLen(b, eLenPos)")
+				g.P("		lenPos := len(b)")
+				g.P("		b = append(b, 0, 0, wire.WireSubMsg)")
+				g.P("		b = wire.AppendVarint(b, uint64(len(x.", privName, ")))")
+				g.P("		for _, elem := range x.", privName, " {")
+				g.P("			eLenPos := len(b)")
+				g.P("			b = append(b, 0, 0)")
+				g.P("			if elem != nil {")
+				g.P("				b = elem.MarshalOmniBufAppend(b)")
 				g.P("			}")
-				g.P("			return wire.BackpatchContainerLen(b, lenPos)")
+				g.P("			b = wire.BackpatchContainerLen(b, eLenPos)")
+				g.P("		}")
+				g.P("		return wire.BackpatchContainerLen(b, lenPos)")
 			}
 			continue
 		}
 
 		switch f.Desc.Kind() {
 		case protoreflect.Uint32Kind:
-			g.P("			return wire.AppendVarint(b, uint64(x.", privName, "))")
+			g.P("		return wire.AppendVarint(b, uint64(x.", privName, "))")
 		case protoreflect.Uint64Kind:
-			g.P("			return wire.AppendVarint(b, x.", privName, ")")
+			g.P("		return wire.AppendVarint(b, x.", privName, ")")
 		case protoreflect.Sint32Kind, protoreflect.Int32Kind:
-			g.P("			return wire.AppendVarint(b, wire.EncodeZigZag(int64(x.", privName, ")))")
+			g.P("		return wire.AppendVarint(b, wire.EncodeZigZag(int64(x.", privName, ")))")
 		case protoreflect.Sint64Kind, protoreflect.Int64Kind:
-			g.P("			return wire.AppendVarint(b, wire.EncodeZigZag(x.", privName, "))")
+			g.P("		return wire.AppendVarint(b, wire.EncodeZigZag(x.", privName, "))")
 		case protoreflect.Fixed32Kind, protoreflect.Sfixed32Kind:
-			g.P("			v := uint32(x.", privName, ")")
-			g.P("			return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))")
+			g.P("		v := uint32(x.", privName, ")")
+			g.P("		return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))")
 		case protoreflect.Fixed64Kind, protoreflect.Sfixed64Kind:
-			g.P("			v := uint64(x.", privName, ")")
-			g.P("			return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24), byte(v>>32), byte(v>>40), byte(v>>48), byte(v>>56))")
+			g.P("		v := uint64(x.", privName, ")")
+			g.P("		return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24), byte(v>>32), byte(v>>40), byte(v>>48), byte(v>>56))")
 		case protoreflect.FloatKind:
-			g.P("			v := math.Float32bits(x.", privName, ")")
-			g.P("			return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))")
+			g.P("		v := math.Float32bits(x.", privName, ")")
+			g.P("		return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))")
 		case protoreflect.DoubleKind:
-			g.P("			v := math.Float64bits(x.", privName, ")")
-			g.P("			return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24), byte(v>>32), byte(v>>40), byte(v>>48), byte(v>>56))")
+			g.P("		v := math.Float64bits(x.", privName, ")")
+			g.P("		return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24), byte(v>>32), byte(v>>40), byte(v>>48), byte(v>>56))")
 		case protoreflect.StringKind, protoreflect.BytesKind:
-			g.P("			b = wire.AppendVarint(b, uint64(len(x.", privName, ")))")
-			g.P("			return append(b, x.", privName, "...)")
+			g.P("		b = wire.AppendVarint(b, uint64(len(x.", privName, ")))")
+			g.P("		return append(b, x.", privName, "...)")
 		case protoreflect.MessageKind:
-			g.P("			lenPos := len(b)")
-			g.P("			b = append(b, 0, 0)")
-			g.P("			if x.", privName, " != nil {")
-			g.P("				b = x.", privName, ".MarshalOmniBufAppend(b)")
-			g.P("			}")
-			g.P("			return wire.BackpatchContainerLen(b, lenPos)")
+			g.P("		lenPos := len(b)")
+			g.P("		b = append(b, 0, 0)")
+			g.P("		if x.", privName, " != nil {")
+			g.P("			b = x.", privName, ".MarshalOmniBufAppend(b)")
+			g.P("		}")
+			g.P("		return wire.BackpatchContainerLen(b, lenPos)")
 		}
 	}
+	g.P("	}")
+	g.P("	return b")
+	g.P("}")
+	g.P()
+	g.P("// MarshalAppend re-serializes ", name, " using zero-decode wire splicing for unmodified fields.")
+	g.P("func (x *", name, ") MarshalAppend(dst []byte) []byte {")
+	g.P("	if x.dirty == 0 {")
+	g.P("		return wire.CopyPacket(dst, x.raw)")
+	g.P("	}")
+	g.P("	return wire.SpliceFields(dst[:0], x.raw, x.dirty, ", maxFnum, ", x.appendDirtyField)")
+	g.P("}")
+	g.P()
+	g.P("// TryMarshalAppend re-serializes ", name, " using zero-decode wire splicing and returns an error if x.raw is corrupt.")
+	g.P("func (x *", name, ") TryMarshalAppend(dst []byte) ([]byte, error) {")
+	g.P("	if x.dirty == 0 {")
+	g.P("		if err := wire.ValidatePacket(x.raw); err != nil {")
+	g.P("			return nil, err")
 	g.P("		}")
-	g.P("		return b")
-	g.P("	})")
+	g.P("		return wire.CopyPacket(dst, x.raw), nil")
+	g.P("	}")
+	g.P("	return wire.TrySpliceFields(dst[:0], x.raw, x.dirty, ", maxFnum, ", x.appendDirtyField)")
+	g.P("}")
+	g.P()
+	g.P("// Marshal re-serializes ", name, " into a newly allocated packet, returning an error if x.raw is corrupt.")
+	g.P("func (x *", name, ") Marshal() ([]byte, error) {")
+	g.P("	return x.TryMarshalAppend(nil)")
 	g.P("}")
 	g.P()
 }

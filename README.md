@@ -122,7 +122,7 @@ func main() {
 
 ## Cross-Language Conformance Runner
 
-`omnibuf-go` hosts the canonical 584-case cross-language conformance runner (`cmd/conformance-runner`) with the embedded test corpus (`internal/conformance/conformance_corpus.json`). Adapter framing, tier requirements, and splice mutation rules are documented in [`CONFORMANCE.md`](CONFORMANCE.md). Prebuilt `conformance-runner` binaries are attached to [GitHub Releases](https://github.com/omnibuf/omnibuf-go/releases), or install via Go:
+`omnibuf-go` hosts the canonical 758-case cross-language conformance runner (`cmd/conformance-runner`) with the embedded test corpus (`internal/conformance/conformance_corpus.json`, containing 58 valid vectors and 90 invalid wire cases). Adapter framing, tier requirements, and splice mutation rules are documented in [`CONFORMANCE.md`](CONFORMANCE.md). Prebuilt `conformance-runner` binaries are attached to [GitHub Releases](https://github.com/omnibuf/omnibuf-go/releases), or install via Go:
 
 ```bash
 go install github.com/omnibuf/omnibuf-go/cmd/conformance-runner@latest

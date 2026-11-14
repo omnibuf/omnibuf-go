@@ -402,11 +402,40 @@ func CountedArrLen(packet []byte, field uint16, elemType uint8) int {
 			return total
 		}
 		pos = next
-		e, c, _, ok := ParseArrayHeader(body)
-		if !ok || e != elemType {
+		e, c, p, ok := ParseArrayHeader(body)
+		if !ok || e != elemType || !validateCountedArrBody(body, e, c, p) {
 			return 0
 		}
 		total += c
+	}
+}
+
+func validateCountedArrBody(body []byte, elem uint8, c, p int) bool {
+	switch elem {
+	case WireString:
+		for range c {
+			l, n := DecodeVarint(body[p:])
+			if n == 0 || l > uint64(len(body)-p-n) {
+				return false
+			}
+			p += n
+			if !ValidUTF8(body[p : p+int(l)]) {
+				return false
+			}
+			p += int(l)
+		}
+		return p == len(body)
+	case WireBytes:
+		for range c {
+			l, n := DecodeVarint(body[p:])
+			if n == 0 || l > uint64(len(body)-p-n) {
+				return false
+			}
+			p += n + int(l)
+		}
+		return p == len(body)
+	default:
+		return validateArrayBodyWithDepth(body, p, elem, c, 1)
 	}
 }
 func readArrays[T any](dst []T, packet []byte, field uint16, decode func([]T, []byte) ([]T, bool)) ([]T, bool) {

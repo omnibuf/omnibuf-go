@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"unsafe"
 
 	capnp "capnproto.org/go/capnp/v3"
@@ -144,6 +145,29 @@ func SamplePeerUpdate() PeerUpdate {
 		},
 		Sequence: 9876543210,
 	}
+}
+
+// SampleLargeNestedPeerUpdate returns SamplePeerUpdate with >16 KiB strings inside
+// Location.Datacenter (20,480 B) and Neighbors[0].Router (18,432 B), forcing three
+// 2B-to-4B container length-header expansions during single-pass encoding.
+func SampleLargeNestedPeerUpdate() PeerUpdate {
+	p := SamplePeerUpdate()
+	p.Location.Datacenter = strings.Repeat("d", 20480)
+	p.Neighbors[0].Router = strings.Repeat("n", 18432)
+	return p
+}
+
+// SampleManyNeighborsPeerUpdate returns SamplePeerUpdate with 32 Neighbor entries
+// (repeating the 4 canonical neighbors 8x so ~1.3 KiB of trailing fields follow Location).
+func SampleManyNeighborsPeerUpdate() PeerUpdate {
+	p := SamplePeerUpdate()
+	base := p.Neighbors
+	neighs := make([]Neighbor, 0, 32)
+	for range 8 {
+		neighs = append(neighs, base...)
+	}
+	p.Neighbors = neighs
+	return p
 }
 
 // ============================================================================
@@ -861,8 +885,14 @@ func EncodePeerFlatBuffers(b *flatbuffers.Builder, p *PeerUpdate) []byte {
 	locOff := b.EndObject()
 
 	// 2. Serialize each Neighbor string & Neighbor table, then Neighbors vector
-	var neighOffs [16]flatbuffers.UOffsetT
 	nCount := len(p.Neighbors)
+	var neighOffsStack [64]flatbuffers.UOffsetT
+	var neighOffs []flatbuffers.UOffsetT
+	if nCount <= len(neighOffsStack) {
+		neighOffs = neighOffsStack[:nCount]
+	} else {
+		neighOffs = make([]flatbuffers.UOffsetT, nCount)
+	}
 	for i := nCount - 1; i >= 0; i-- {
 		nb := &p.Neighbors[i]
 		rtrOff := b.CreateString(nb.Router)
@@ -880,8 +910,14 @@ func EncodePeerFlatBuffers(b *flatbuffers.Builder, p *PeerUpdate) []byte {
 	neighborsVecOff := b.EndVector(nCount)
 
 	// 3. Serialize Tags strings and vector
-	var tagOffs [16]flatbuffers.UOffsetT
 	tCount := len(p.Tags)
+	var tagOffsStack [64]flatbuffers.UOffsetT
+	var tagOffs []flatbuffers.UOffsetT
+	if tCount <= len(tagOffsStack) {
+		tagOffs = tagOffsStack[:tCount]
+	} else {
+		tagOffs = make([]flatbuffers.UOffsetT, tCount)
+	}
 	for i := tCount - 1; i >= 0; i-- {
 		tagOffs[i] = b.CreateString(p.Tags[i])
 	}

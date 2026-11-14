@@ -190,31 +190,49 @@ func (x OpaqueAllTypesSubMsg) GetScore() int64 {
 }
 func (x *OpaqueAllTypesSubMsg) SetScore(v int64) { x.f_score = v; x.dirty |= (uint64(1) << 4) }
 
+func (x *OpaqueAllTypesSubMsg) appendDirtyField(b []byte, fnum uint16) []byte {
+	switch fnum {
+	case 1:
+		b = append(b, 0x21)
+		return wire.AppendVarint(b, uint64(x.f_id))
+	case 2:
+		b = append(b, 0x55)
+		b = wire.AppendVarint(b, uint64(len(x.f_label)))
+		return append(b, x.f_label...)
+	case 3:
+		if x.f_flag {
+			return wire.AppendVarint(b, 51)
+		}
+		return wire.AppendVarint(b, 50)
+	case 4:
+		b = append(b, 0x83)
+		return wire.AppendVarint(b, wire.EncodeZigZag(x.f_score))
+	}
+	return b
+}
+
 // MarshalAppend re-serializes OpaqueAllTypesSubMsg using zero-decode wire splicing for unmodified fields.
 func (x *OpaqueAllTypesSubMsg) MarshalAppend(dst []byte) []byte {
 	if x.dirty == 0 {
 		return wire.CopyPacket(dst, x.raw)
 	}
-	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 4, func(b []byte, fnum uint16) []byte {
-		switch fnum {
-		case 1:
-			b = append(b, 0x21)
-			return wire.AppendVarint(b, uint64(x.f_id))
-		case 2:
-			b = append(b, 0x55)
-			b = wire.AppendVarint(b, uint64(len(x.f_label)))
-			return append(b, x.f_label...)
-		case 3:
-			if x.f_flag {
-				return wire.AppendVarint(b, 51)
-			}
-			return wire.AppendVarint(b, 50)
-		case 4:
-			b = append(b, 0x83)
-			return wire.AppendVarint(b, wire.EncodeZigZag(x.f_score))
+	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 4, x.appendDirtyField)
+}
+
+// TryMarshalAppend re-serializes OpaqueAllTypesSubMsg using zero-decode wire splicing and returns an error if x.raw is corrupt.
+func (x *OpaqueAllTypesSubMsg) TryMarshalAppend(dst []byte) ([]byte, error) {
+	if x.dirty == 0 {
+		if err := wire.ValidatePacket(x.raw); err != nil {
+			return nil, err
 		}
-		return b
-	})
+		return wire.CopyPacket(dst, x.raw), nil
+	}
+	return wire.TrySpliceFields(dst[:0], x.raw, x.dirty, 4, x.appendDirtyField)
+}
+
+// Marshal re-serializes OpaqueAllTypesSubMsg into a newly allocated packet, returning an error if x.raw is corrupt.
+func (x *OpaqueAllTypesSubMsg) Marshal() ([]byte, error) {
+	return x.TryMarshalAppend(nil)
 }
 
 // MarshalOmniBufAppend encodes TestAllTypes in a single forward pass using generated field tags.
@@ -985,93 +1003,111 @@ func (x *OpaqueTestAllTypes) SetF20OverflowStr(v string) {
 	x.dirty |= (uint64(1) << 20)
 }
 
+func (x *OpaqueTestAllTypes) appendDirtyField(b []byte, fnum uint16) []byte {
+	switch fnum {
+	case 1:
+		b = append(b, 0x21)
+		return wire.AppendVarint(b, uint64(x.f_f1_uint32))
+	case 2:
+		b = append(b, 0x41)
+		return wire.AppendVarint(b, x.f_f2_uint64)
+	case 3:
+		b = append(b, 0x63)
+		return wire.AppendVarint(b, wire.EncodeZigZag(int64(x.f_f3_sint32)))
+	case 4:
+		b = append(b, 0x83)
+		return wire.AppendVarint(b, wire.EncodeZigZag(x.f_f4_sint64))
+	case 5:
+		if x.f_f5_bool {
+			return wire.AppendVarint(b, 83)
+		}
+		return wire.AppendVarint(b, 82)
+	case 6:
+		b = append(b, 0xd5)
+		b = wire.AppendVarint(b, uint64(len(x.f_f6_string)))
+		return append(b, x.f_f6_string...)
+	case 7:
+		b = append(b, 0xf7)
+		b = wire.AppendVarint(b, uint64(len(x.f_f7_bytes)))
+		return append(b, x.f_f7_bytes...)
+	case 8:
+		if x.f_f8_sub_msg == nil {
+			return b
+		}
+		b = append(b, 0x32, 0x02)
+		lenPos := len(b)
+		b = append(b, 0, 0)
+		if x.f_f8_sub_msg != nil {
+			b = x.f_f8_sub_msg.MarshalOmniBufAppend(b)
+		}
+		return wire.BackpatchContainerLen(b, lenPos)
+	case 9:
+		b = append(b, 0x76, 0x02)
+		return wire.EncodeStringArr(b, x.f_f9_string_arr)
+	case 10:
+		b = append(b, 0xb6, 0x02)
+		return wire.EncodeUintArr(b, x.f_f10_uint32_arr)
+	case 11:
+		b = append(b, 0xf6, 0x02)
+		lenPos := len(b)
+		b = append(b, 0, 0, wire.WireSubMsg)
+		b = wire.AppendVarint(b, uint64(len(x.f_f11_sub_msg_arr)))
+		for _, elem := range x.f_f11_sub_msg_arr {
+			eLenPos := len(b)
+			b = append(b, 0, 0)
+			if elem != nil {
+				b = elem.MarshalOmniBufAppend(b)
+			}
+			b = wire.BackpatchContainerLen(b, eLenPos)
+		}
+		return wire.BackpatchContainerLen(b, lenPos)
+	case 12:
+		b = append(b, 0x3a, 0x03)
+		return wire.EncodeMapStringUint(b, x.f_f12_map_str_uint, true)
+	case 13:
+		b = append(b, 0x62, 0x03)
+		v := math.Float32bits(x.f_f13_float32)
+		return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
+	case 14:
+		b = append(b, 0xa6, 0x03)
+		v := math.Float64bits(x.f_f14_float64)
+		return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24), byte(v>>32), byte(v>>40), byte(v>>48), byte(v>>56))
+	case 15:
+		b = append(b, 0xd2, 0x03)
+		v := uint32(x.f_f15_fixed32)
+		return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
+	case 16:
+		b = append(b, 0x16, 0x04)
+		v := uint64(x.f_f16_fixed64)
+		return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24), byte(v>>32), byte(v>>40), byte(v>>48), byte(v>>56))
+	case 20:
+		b = append(b, 0x2a, 0x05)
+		b = wire.AppendVarint(b, uint64(len(x.f_f20_overflow_str)))
+		return append(b, x.f_f20_overflow_str...)
+	}
+	return b
+}
+
 // MarshalAppend re-serializes OpaqueTestAllTypes using zero-decode wire splicing for unmodified fields.
 func (x *OpaqueTestAllTypes) MarshalAppend(dst []byte) []byte {
 	if x.dirty == 0 {
 		return wire.CopyPacket(dst, x.raw)
 	}
-	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 20, func(b []byte, fnum uint16) []byte {
-		switch fnum {
-		case 1:
-			b = append(b, 0x21)
-			return wire.AppendVarint(b, uint64(x.f_f1_uint32))
-		case 2:
-			b = append(b, 0x41)
-			return wire.AppendVarint(b, x.f_f2_uint64)
-		case 3:
-			b = append(b, 0x63)
-			return wire.AppendVarint(b, wire.EncodeZigZag(int64(x.f_f3_sint32)))
-		case 4:
-			b = append(b, 0x83)
-			return wire.AppendVarint(b, wire.EncodeZigZag(x.f_f4_sint64))
-		case 5:
-			if x.f_f5_bool {
-				return wire.AppendVarint(b, 83)
-			}
-			return wire.AppendVarint(b, 82)
-		case 6:
-			b = append(b, 0xd5)
-			b = wire.AppendVarint(b, uint64(len(x.f_f6_string)))
-			return append(b, x.f_f6_string...)
-		case 7:
-			b = append(b, 0xf7)
-			b = wire.AppendVarint(b, uint64(len(x.f_f7_bytes)))
-			return append(b, x.f_f7_bytes...)
-		case 8:
-			if x.f_f8_sub_msg == nil {
-				return b
-			}
-			b = append(b, 0x32, 0x02)
-			lenPos := len(b)
-			b = append(b, 0, 0)
-			if x.f_f8_sub_msg != nil {
-				b = x.f_f8_sub_msg.MarshalOmniBufAppend(b)
-			}
-			return wire.BackpatchContainerLen(b, lenPos)
-		case 9:
-			b = append(b, 0x76, 0x02)
-			return wire.EncodeStringArr(b, x.f_f9_string_arr)
-		case 10:
-			b = append(b, 0xb6, 0x02)
-			return wire.EncodeUintArr(b, x.f_f10_uint32_arr)
-		case 11:
-			b = append(b, 0xf6, 0x02)
-			lenPos := len(b)
-			b = append(b, 0, 0, wire.WireSubMsg)
-			b = wire.AppendVarint(b, uint64(len(x.f_f11_sub_msg_arr)))
-			for _, elem := range x.f_f11_sub_msg_arr {
-				eLenPos := len(b)
-				b = append(b, 0, 0)
-				if elem != nil {
-					b = elem.MarshalOmniBufAppend(b)
-				}
-				b = wire.BackpatchContainerLen(b, eLenPos)
-			}
-			return wire.BackpatchContainerLen(b, lenPos)
-		case 12:
-			b = append(b, 0x3a, 0x03)
-			return wire.EncodeMapStringUint(b, x.f_f12_map_str_uint, true)
-		case 13:
-			b = append(b, 0x62, 0x03)
-			v := math.Float32bits(x.f_f13_float32)
-			return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
-		case 14:
-			b = append(b, 0xa6, 0x03)
-			v := math.Float64bits(x.f_f14_float64)
-			return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24), byte(v>>32), byte(v>>40), byte(v>>48), byte(v>>56))
-		case 15:
-			b = append(b, 0xd2, 0x03)
-			v := uint32(x.f_f15_fixed32)
-			return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
-		case 16:
-			b = append(b, 0x16, 0x04)
-			v := uint64(x.f_f16_fixed64)
-			return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24), byte(v>>32), byte(v>>40), byte(v>>48), byte(v>>56))
-		case 20:
-			b = append(b, 0x2a, 0x05)
-			b = wire.AppendVarint(b, uint64(len(x.f_f20_overflow_str)))
-			return append(b, x.f_f20_overflow_str...)
+	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 20, x.appendDirtyField)
+}
+
+// TryMarshalAppend re-serializes OpaqueTestAllTypes using zero-decode wire splicing and returns an error if x.raw is corrupt.
+func (x *OpaqueTestAllTypes) TryMarshalAppend(dst []byte) ([]byte, error) {
+	if x.dirty == 0 {
+		if err := wire.ValidatePacket(x.raw); err != nil {
+			return nil, err
 		}
-		return b
-	})
+		return wire.CopyPacket(dst, x.raw), nil
+	}
+	return wire.TrySpliceFields(dst[:0], x.raw, x.dirty, 20, x.appendDirtyField)
+}
+
+// Marshal re-serializes OpaqueTestAllTypes into a newly allocated packet, returning an error if x.raw is corrupt.
+func (x *OpaqueTestAllTypes) Marshal() ([]byte, error) {
+	return x.TryMarshalAppend(nil)
 }

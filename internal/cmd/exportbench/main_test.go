@@ -45,4 +45,28 @@ func TestParseBenchFileAveragesAllMetricsAndRuntimeVersion(t *testing.T) {
 	if got.AllocsPerOp != 4 {
 		t.Fatalf("AllocsPerOp = %d, want 4 (averaged across runs)", got.AllocsPerOp)
 	}
+
+	wantCategories := []struct {
+		id    string
+		title string
+	}{
+		{"encode", "Full Message Encode Speed"},
+		{"decode", "Full Message Decode Speed"},
+		{"lookup_city", "Read a Single Nested Field"},
+		{"mutate_sequence", "Selective Single-Field Mutation"},
+		{"encode_nested_shift", "Large Embedded Message Encode"},
+		{"mutate_embedded_grow", "Embedded Message Growth"},
+	}
+	if len(report.Categories) != len(wantCategories) {
+		t.Fatalf("len(Categories) = %d, want %d", len(report.Categories), len(wantCategories))
+	}
+	for i, want := range wantCategories {
+		cat := report.Categories[i]
+		if cat.ID != want.id || cat.Title != want.title {
+			t.Fatalf("Categories[%d] = (%q, %q), want (%q, %q)", i, cat.ID, cat.Title, want.id, want.title)
+		}
+		if strings.ContainsAny(cat.Title, "()") {
+			t.Fatalf("Categories[%d].Title %q should not contain parentheticals", i, cat.Title)
+		}
+	}
 }

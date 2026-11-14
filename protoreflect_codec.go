@@ -57,7 +57,10 @@ func (o MarshalOptions) marshalProtoReflectAppend(dst []byte, m protoreflect.Mes
 		dst = dst[:0]
 	}
 	if o.SelfDescribing {
-		meta := buildProtoReflectSchemaMeta(m.Descriptor(), 0, nil)
+		meta, cyclic := buildProtoReflectSchemaMeta(m.Descriptor(), 1, nil)
+		if cyclic {
+			meta = buildProtoReflectValueSchemaMeta(m, 1)
+		}
 		dst = appendField0SchemaMetaDeterministic(dst, meta, o.Deterministic)
 	}
 	bodyOpts := o
@@ -65,9 +68,12 @@ func (o MarshalOptions) marshalProtoReflectAppend(dst []byte, m protoreflect.Mes
 	return encodeProtoReflectMsg(dst, m, bodyOpts)
 }
 
-func buildProtoReflectSchemaMeta(md protoreflect.MessageDescriptor, depth int, active map[protoreflect.FullName]bool) *SchemaMeta {
-	if md == nil || depth > MaxNestingDepth || active[md.FullName()] {
-		return nil
+func buildProtoReflectSchemaMeta(md protoreflect.MessageDescriptor, schemaDepth int, active map[protoreflect.FullName]bool) (*SchemaMeta, bool) {
+	if md == nil || schemaDepth+1 > MaxNestingDepth {
+		return nil, false
+	}
+	if active[md.FullName()] {
+		return nil, true
 	}
 	if active == nil {
 		active = make(map[protoreflect.FullName]bool)
@@ -75,6 +81,7 @@ func buildProtoReflectSchemaMeta(md protoreflect.MessageDescriptor, depth int, a
 	active[md.FullName()] = true
 	defer delete(active, md.FullName())
 
+	cyclic := false
 	fields := md.Fields()
 	nFields := fields.Len()
 	meta := &SchemaMeta{
@@ -86,17 +93,65 @@ func buildProtoReflectSchemaMeta(md protoreflect.MessageDescriptor, depth int, a
 		fnum := uint32(fd.Number())
 		meta.Fields[fnum] = string(fd.Name())
 		var childMD protoreflect.MessageDescriptor
-		childDepth := depth + 1
 		if fd.IsMap() && fd.MapValue().Kind() == protoreflect.MessageKind {
 			childMD = fd.MapValue().Message()
-			childDepth = depth + 2
 		} else if !fd.IsMap() && fd.Kind() == protoreflect.MessageKind {
 			childMD = fd.Message()
-			if fd.IsList() {
-				childDepth = depth + 2
+		}
+		if childMD != nil && schemaDepth+3 <= MaxNestingDepth {
+			child, childCyclic := buildProtoReflectSchemaMeta(childMD, schemaDepth+2, active)
+			if childCyclic {
+				cyclic = true
+			}
+			if child != nil {
+				if meta.Children == nil {
+					meta.Children = make(map[uint32]*SchemaMeta)
+				}
+				meta.Children[fnum] = child
 			}
 		}
-		if child := buildProtoReflectSchemaMeta(childMD, childDepth, active); child != nil {
+	}
+	return meta, cyclic
+}
+
+func buildProtoReflectValueSchemaMeta(m protoreflect.Message, schemaDepth int) *SchemaMeta {
+	if m == nil || schemaDepth+1 > MaxNestingDepth {
+		return nil
+	}
+	md := m.Descriptor()
+	fields := md.Fields()
+	nFields := fields.Len()
+	meta := &SchemaMeta{
+		TypeName: string(md.Name()),
+		Fields:   make(map[uint32]string, nFields),
+	}
+	for i := range nFields {
+		fd := fields.Get(i)
+		fnum := uint32(fd.Number())
+		meta.Fields[fnum] = string(fd.Name())
+		if schemaDepth+3 > MaxNestingDepth {
+			continue
+		}
+		var child *SchemaMeta
+		if fd.IsMap() {
+			if fd.MapValue().Kind() == protoreflect.MessageKind && m.Has(fd) {
+				mp := m.Get(fd).Map()
+				mp.Range(func(_ protoreflect.MapKey, v protoreflect.Value) bool {
+					child = mergeSchemaMeta(child, buildProtoReflectValueSchemaMeta(v.Message(), schemaDepth+2))
+					return true
+				})
+			}
+		} else if fd.IsList() {
+			if fd.Kind() == protoreflect.MessageKind && m.Has(fd) {
+				list := m.Get(fd).List()
+				for j := 0; j < list.Len(); j++ {
+					child = mergeSchemaMeta(child, buildProtoReflectValueSchemaMeta(list.Get(j).Message(), schemaDepth+2))
+				}
+			}
+		} else if fd.Kind() == protoreflect.MessageKind && m.Has(fd) {
+			child = buildProtoReflectValueSchemaMeta(m.Get(fd).Message(), schemaDepth+2)
+		}
+		if child != nil {
 			if meta.Children == nil {
 				meta.Children = make(map[uint32]*SchemaMeta)
 			}

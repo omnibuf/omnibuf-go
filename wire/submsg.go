@@ -137,8 +137,13 @@ func ReadSubMsg(packet []byte, fieldNum uint16) ([]byte, bool) {
 			pos += tn
 		}
 
-		if fnum == 0 && wt != WireSubMsg {
-			return nil, false
+		if fnum == 0 {
+			nextPos, validF0 := ValidateField0At(packet, pos, wt, 0)
+			if !validF0 {
+				return nil, false
+			}
+			pos = nextPos
+			continue
 		}
 		if fnum == uint32(fieldNum) && wt == WireSubMsg {
 			valSlice = packet[pos:]
@@ -232,6 +237,9 @@ func mergeSubMsgSegments(packet []byte, fieldNum uint16) ([]byte, bool) {
 		}
 		if !matched {
 			return merged, true
+		}
+		if !ValidateMessage(body, 1) {
+			return nil, false
 		}
 		merged = append(merged, body...)
 		pos = nextPos

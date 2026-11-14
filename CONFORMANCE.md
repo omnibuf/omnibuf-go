@@ -13,7 +13,7 @@ go install github.com/omnibuf/omnibuf-go/cmd/conformance-runner@latest
 Pass the target adapter command and any adapter arguments:
 
 ```bash
-# Run all 4 tiers (584 test cases)
+# Run all 4 tiers (758 test cases across 58 valid vectors and 90 invalid wire cases)
 conformance-runner ./bin/conformance-go
 
 # Run against an interpreted adapter (such as Node.js or Python)
@@ -85,11 +85,11 @@ Exactly one result branch should be populated per response:
 
 ### `TIER_ANNOTATED_STRUCT` (`tier = 3`) & `TIER_PROTOBUF_TYPES` (`tier = 2`)
 1. Unmarshal `omnibuf_payload` into a pre-populated destination object (pre-populating fields verifies that unmarshaling resets absent fields and clears stale sub-message pointers).
-2. Return `parse_error` if decoding fails.
+2. Return `parse_error` if decoding fails. Every invalid wire case with `blind_only == false` must return a non-empty `parse_error`.
 3. Re-marshal the decoded message to OmniBuf bytes (with deterministic map key ordering and `SelfDescribing: req.SelfDescribing`) and return the bytes in `omnibuf_payload`.
 
 ### `TIER_PLUGIN` (`tier = 1`)
-1. Unmarshal `omnibuf_payload` into a pre-populated generated struct/object and verify that every lazy `Opaque<T>` getter returns the exact same field values as the eagerly decoded message.
+1. Unmarshal `omnibuf_payload` into a pre-populated generated struct/object and verify that every lazy `Opaque<T>` getter returns the exact same field values as the eagerly decoded message. Every invalid wire case with `blind_only == false` must return a non-empty `parse_error`, and structurally malformed splice inputs (`test_opaque_splice: true`) must fail with `parse_error` or `serialize_error` instead of returning truncated bytes.
 2. Verify that `SpliceFields` preserves an aliased prefix slice (`dst[:prefixLen]`) and never mutates the underlying source packet buffer.
 3. When `test_opaque_splice` (`OpaqueSpliceGrow`) is `true`, mutate the `Opaque` view with the exact grow values below and return `op.MarshalAppend(nil)` in `omnibuf_payload`:
    - **`omnibuf.bench.PeerUpdate` (Grow):**

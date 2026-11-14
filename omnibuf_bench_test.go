@@ -1,6 +1,7 @@
 package omnibuf_test
 
 import (
+	"strings"
 	"testing"
 
 	flatbuffers "github.com/google/flatbuffers/go"
@@ -234,6 +235,20 @@ func BenchmarkUnmarshal_Protobuf_ProtoWire_SafeAlloc(b *testing.B) {
 }
 
 func BenchmarkUnmarshal_Protobuf_Official(b *testing.B) {
+	orig := SamplePeerUpdate()
+	pbMsg := SamplePBPeerUpdate(&orig)
+	pkt, _ := MarshalProtoOfficial(pbMsg)
+	var out pb.PeerUpdate
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := UnmarshalProtoOfficial(pkt, &out); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkUnmarshal_Protobuf_Official_FreshAlloc(b *testing.B) {
 	orig := SamplePeerUpdate()
 	pbMsg := SamplePBPeerUpdate(&orig)
 	pkt, _ := MarshalProtoOfficial(pbMsg)
@@ -951,5 +966,329 @@ func BenchmarkVarint_Skip_16Mixed_Protobuf_Protowire(b *testing.B) {
 	}
 	if sink == 0 {
 		b.Fatal("unreachable")
+	}
+}
+
+// ============================================================================
+// BENCHMARKS: 5. Large Embedded Message Encode (>16 KiB Container Shifts)
+// ============================================================================
+
+func BenchmarkLargeNested_OmniBuf_Generated(b *testing.B) {
+	orig := SampleLargeNestedPeerUpdate()
+	pbMsg := SamplePBPeerUpdate(&orig)
+	buf := make([]byte, 0, 65536)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf = pbMsg.MarshalOmniBufAppend(buf[:0])
+		if len(buf) <= 38912 {
+			b.Fatal("short")
+		}
+	}
+}
+
+func BenchmarkLargeNested_OmniBuf_StructTags(b *testing.B) {
+	orig := SampleLargeNestedPeerUpdate()
+	buf := make([]byte, 0, 65536)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var err error
+		buf, err = MarshalAppend(buf, &orig)
+		if err != nil || len(buf) <= 38912 {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkLargeNested_Protobuf_Official(b *testing.B) {
+	orig := SampleLargeNestedPeerUpdate()
+	pbMsg := SamplePBPeerUpdate(&orig)
+	buf := make([]byte, 0, 65536)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var err error
+		buf, err = MarshalAppendProtoOfficial(buf, pbMsg)
+		if err != nil || len(buf) <= 38912 {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkLargeNested_VTProto(b *testing.B) {
+	orig := SampleLargeNestedPeerUpdate()
+	pbMsg := SamplePBPeerUpdate(&orig)
+	pkt, err := pbMsg.MarshalVT()
+	if err != nil {
+		b.Fatal(err)
+	}
+	buf := make([]byte, len(pkt)+64)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		n, err := pbMsg.MarshalToVT(buf)
+		if err != nil || n <= 38912 {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkLargeNested_FlatBuffers(b *testing.B) {
+	orig := SampleLargeNestedPeerUpdate()
+	builder := flatbuffers.NewBuilder(65536)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		pkt := EncodePeerFlatBuffers(builder, &orig)
+		if len(pkt) <= 38912 {
+			b.Fatal("short")
+		}
+	}
+}
+
+func BenchmarkLargeNested_CapnProto(b *testing.B) {
+	orig := SampleLargeNestedPeerUpdate()
+	scratch := make([]byte, 0, 65536)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		pkt, err := EncodePeerCapnp(scratch, &orig)
+		if err != nil || len(pkt) <= 38912 {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkLargeNested_Avro(b *testing.B) {
+	orig := SampleLargeNestedPeerUpdate()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		pkt, err := MarshalAvro(&orig)
+		if err != nil || len(pkt) <= 38912 {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkLargeNested_Msgpack(b *testing.B) {
+	orig := SampleLargeNestedPeerUpdate()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		pkt, err := MarshalMsgpack(&orig)
+		if err != nil || len(pkt) <= 38912 {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkLargeNested_JSON(b *testing.B) {
+	orig := SampleLargeNestedPeerUpdate()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		pkt, err := MarshalJSON(&orig)
+		if err != nil || len(pkt) <= 38912 {
+			b.Fatal(err)
+		}
+	}
+}
+
+// ============================================================================
+// BENCHMARKS: 6. Embedded Message Growth (32 Trailing Neighbors, Location -> >16 KiB)
+// ============================================================================
+
+func BenchmarkEmbeddedSubMsgGrow_OmniBuf_OpaqueSplice(b *testing.B) {
+	orig := SampleManyNeighborsPeerUpdate()
+	pbMsg := SamplePBPeerUpdate(&orig)
+	pkt := pbMsg.MarshalOmniBufAppend(nil)
+	grownDC := strings.Repeat("d", 20480)
+	outBuf := make([]byte, 0, 32768)
+	var msg pb.OpaquePeerUpdate
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = msg.Unmarshal(pkt)
+		loc := msg.GetLocation()
+		if loc.GetCity() == "Frankfurt" {
+			msg.SetLocation(&pb.Location{
+				Region:     loc.GetRegion(),
+				Datacenter: grownDC,
+				City:       loc.GetCity(),
+				Rack:       loc.GetRack(),
+				Latitude:   loc.GetLatitude(),
+				Longitude:  loc.GetLongitude(),
+			})
+		}
+		outBuf = msg.MarshalAppend(outBuf)
+		if len(outBuf) <= 20480 {
+			b.Fatal("short")
+		}
+	}
+}
+
+func BenchmarkEmbeddedSubMsgGrow_Protobuf_Official(b *testing.B) {
+	orig := SampleManyNeighborsPeerUpdate()
+	pbMsg := SamplePBPeerUpdate(&orig)
+	pkt, _ := MarshalProtoOfficial(pbMsg)
+	grownDC := strings.Repeat("d", 20480)
+	outBuf := make([]byte, 0, 32768)
+	var msg pb.PeerUpdate
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := UnmarshalProtoOfficial(pkt, &msg); err != nil {
+			b.Fatal(err)
+		}
+		if msg.GetLocation().GetCity() == "Frankfurt" {
+			msg.Location.Datacenter = grownDC
+		}
+		var err error
+		outBuf, err = MarshalAppendProtoOfficial(outBuf, &msg)
+		if err != nil || len(outBuf) <= 20480 {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkEmbeddedSubMsgGrow_VTProto(b *testing.B) {
+	orig := SampleManyNeighborsPeerUpdate()
+	pbMsg := SamplePBPeerUpdate(&orig)
+	pkt, _ := pbMsg.MarshalVT()
+	grownDC := strings.Repeat("d", 20480)
+	outBuf := make([]byte, 32768)
+	warm := pb.PeerUpdateFromVTPool()
+	_ = warm.UnmarshalVTUnsafe(pkt)
+	warm.ReturnToVTPool()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		msg := pb.PeerUpdateFromVTPool()
+		if err := msg.UnmarshalVTUnsafe(pkt); err != nil {
+			b.Fatal(err)
+		}
+		if msg.GetLocation().GetCity() == "Frankfurt" {
+			msg.Location.Datacenter = grownDC
+		}
+		n, err := msg.MarshalToVT(outBuf)
+		if err != nil || n <= 20480 {
+			b.Fatal(err)
+		}
+		msg.ReturnToVTPool()
+	}
+}
+
+func BenchmarkEmbeddedSubMsgGrow_FlatBuffers(b *testing.B) {
+	orig := SampleManyNeighborsPeerUpdate()
+	builder := flatbuffers.NewBuilder(32768)
+	pkt := append([]byte(nil), EncodePeerFlatBuffers(builder, &orig)...)
+	grownDC := strings.Repeat("d", 20480)
+	var msg PeerUpdate
+	msg.Tags = make([]string, 0, 8)
+	msg.Prefixes = make([]uint32, 0, 8)
+	msg.Neighbors = make([]Neighbor, 0, 32)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := DecodePeerFlatBuffersInto(pkt, &msg, true); err != nil {
+			b.Fatal(err)
+		}
+		if msg.Location.City == "Frankfurt" {
+			msg.Location.Datacenter = grownDC
+		}
+		out := EncodePeerFlatBuffers(builder, &msg)
+		if len(out) <= 20480 {
+			b.Fatal("short")
+		}
+	}
+}
+
+func BenchmarkEmbeddedSubMsgGrow_CapnProto(b *testing.B) {
+	orig := SampleManyNeighborsPeerUpdate()
+	pkt, _ := EncodePeerCapnp(nil, &orig)
+	grownDC := strings.Repeat("d", 20480)
+	scratch := make([]byte, 0, 32768)
+	var msg PeerUpdate
+	msg.Tags = make([]string, 0, 8)
+	msg.Prefixes = make([]uint32, 0, 8)
+	msg.Neighbors = make([]Neighbor, 0, 32)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := DecodePeerCapnpInto(pkt, &msg, true); err != nil {
+			b.Fatal(err)
+		}
+		if msg.Location.City == "Frankfurt" {
+			msg.Location.Datacenter = grownDC
+		}
+		out, err := EncodePeerCapnp(scratch, &msg)
+		if err != nil || len(out) <= 20480 {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkEmbeddedSubMsgGrow_Avro(b *testing.B) {
+	orig := SampleManyNeighborsPeerUpdate()
+	pkt, _ := MarshalAvro(&orig)
+	grownDC := strings.Repeat("d", 20480)
+	msg := SampleManyNeighborsPeerUpdate()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := UnmarshalAvro(pkt, &msg); err != nil {
+			b.Fatal(err)
+		}
+		if msg.Location.City == "Frankfurt" {
+			msg.Location.Datacenter = grownDC
+		}
+		out, err := MarshalAvro(&msg)
+		if err != nil || len(out) <= 20480 {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkEmbeddedSubMsgGrow_Msgpack(b *testing.B) {
+	orig := SampleManyNeighborsPeerUpdate()
+	pkt, _ := MarshalMsgpack(&orig)
+	grownDC := strings.Repeat("d", 20480)
+	msg := SampleManyNeighborsPeerUpdate()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := UnmarshalMsgpack(pkt, &msg); err != nil {
+			b.Fatal(err)
+		}
+		if msg.Location.City == "Frankfurt" {
+			msg.Location.Datacenter = grownDC
+		}
+		out, err := MarshalMsgpack(&msg)
+		if err != nil || len(out) <= 20480 {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkEmbeddedSubMsgGrow_JSON(b *testing.B) {
+	orig := SampleManyNeighborsPeerUpdate()
+	pkt, _ := MarshalJSON(&orig)
+	grownDC := strings.Repeat("d", 20480)
+	msg := SampleManyNeighborsPeerUpdate()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := UnmarshalJSON(pkt, &msg); err != nil {
+			b.Fatal(err)
+		}
+		if msg.Location.City == "Frankfurt" {
+			msg.Location.Datacenter = grownDC
+		}
+		out, err := MarshalJSON(&msg)
+		if err != nil || len(out) <= 20480 {
+			b.Fatal(err)
+		}
 	}
 }

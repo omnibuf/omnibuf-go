@@ -277,8 +277,13 @@ func locateFieldMask(packet []byte, targetField uint16, expMask uint16) (valSlic
 			pos += tn
 		}
 
-		if fnum == 0 && wt != WireSubMsg {
-			return nil, 0, false
+		if fnum == 0 {
+			nextPos, validF0 := ValidateField0At(packet, pos, wt, 0)
+			if !validF0 {
+				return nil, 0, false
+			}
+			pos = nextPos
+			continue
 		}
 		if fnum == uint32(targetField) && (expMask&(uint16(1)<<wt)) != 0 {
 			valSlice = packet[pos:]
@@ -380,8 +385,18 @@ func nextContainerField(packet []byte, pos int, targetField uint16, expWT uint8,
 			pos += tn
 		}
 
-		if fnum == 0 && wt != WireSubMsg {
-			return nil, 0, false, false
+		if fnum == 0 {
+			if wt != WireSubMsg {
+				return nil, 0, false, false
+			}
+			if targetField != 0 {
+				nextPos, validF0 := ValidateField0At(packet, pos, wt, 0)
+				if !validF0 {
+					return nil, 0, false, false
+				}
+				pos = nextPos
+				continue
+			}
 		}
 		if fnum == uint32(targetField) && wt == expWT {
 			bLen, bn := DecodeVarint(packet[pos:])
@@ -407,6 +422,274 @@ func nextContainerField(packet []byte, pos int, targetField uint16, expWT uint8,
 		}
 	}
 	return nil, n, false, true
+}
+
+// ValidatePacket validates all field tags, Field #0 SchemaMeta blocks, and container framing in packet.
+func ValidatePacket(packet []byte) error {
+	if !ValidateMessage(packet, 0) {
+		return fmt.Errorf("omnibuf: corrupt wire packet")
+	}
+	return nil
+}
+
+// ValidateMessage reports whether data is a structurally valid OmniBuf message at nesting depth.
+func ValidateMessage(data []byte, depth int) bool {
+	if depth > maxNestingDepth {
+		return false
+	}
+	pos := 0
+	n := len(data)
+	for pos < n {
+		tag, tn := DecodeVarint(data[pos:])
+		if tn == 0 || tag>>4 > 536870911 {
+			return false
+		}
+		pos += tn
+		fnum := tag >> 4
+		wt := uint8(tag & 0x0F)
+		if fnum == 0 {
+			nextPos, ok := ValidateField0At(data, pos, wt, depth)
+			if !ok {
+				return false
+			}
+			pos = nextPos
+			continue
+		}
+		nextPos, ok := validateValueWithDepth(data, pos, wt, depth)
+		if !ok {
+			return false
+		}
+		pos = nextPos
+	}
+	return true
+}
+
+// ValidateField0At validates a Field #0 SchemaMeta block starting at data[pos:] with wire type wt.
+func ValidateField0At(data []byte, pos int, wt uint8, depth int) (int, bool) {
+	if wt != WireSubMsg || pos < 0 || pos >= len(data) {
+		return 0, false
+	}
+	bLen, bn := DecodeVarint(data[pos:])
+	if bn == 0 || bLen > uint64(len(data)-(pos+bn)) {
+		return 0, false
+	}
+	start := pos + bn
+	end := start + int(bLen)
+	if !ValidateSchemaMeta(data[start:end], depth+1) {
+		return 0, false
+	}
+	return end, true
+}
+
+// ValidateSchemaMeta validates an omnibuf.v1.SchemaMeta body at nesting depth.
+func ValidateSchemaMeta(data []byte, depth int) bool {
+	if depth > maxNestingDepth {
+		return false
+	}
+	pos := 0
+	n := len(data)
+	for pos < n {
+		tag, tn := DecodeVarint(data[pos:])
+		if tn == 0 || tag>>4 > 536870911 {
+			return false
+		}
+		pos += tn
+		fnum := tag >> 4
+		wt := uint8(tag & 0x0F)
+		switch fnum {
+		case 1:
+			if wt != WireString {
+				return false
+			}
+			sLen, sn := DecodeVarint(data[pos:])
+			if sn == 0 || sLen > uint64(n-(pos+sn)) {
+				return false
+			}
+			pos += sn
+			if !ValidUTF8(data[pos : pos+int(sLen)]) {
+				return false
+			}
+			pos += int(sLen)
+		case 2:
+			if wt != WireMap || depth+1 > maxNestingDepth {
+				return false
+			}
+			bLen, bn := DecodeVarint(data[pos:])
+			if bn == 0 || bLen < 3 || bLen > uint64(n-(pos+bn)) {
+				return false
+			}
+			body := data[pos+bn : pos+bn+int(bLen)]
+			pos += bn + int(bLen)
+			keyWT, valWT, count, p, ok := ParseMapHeader(body)
+			if !ok || keyWT != WireUint || valWT != WireString {
+				return false
+			}
+			for range count {
+				k64, kn := DecodeVarint(body[p:])
+				if kn == 0 || k64 == 0 || k64 > 536870911 {
+					return false
+				}
+				p += kn
+				sLen, sn := DecodeVarint(body[p:])
+				if sn == 0 || sLen > uint64(len(body)-(p+sn)) {
+					return false
+				}
+				p += sn
+				if !ValidUTF8(body[p : p+int(sLen)]) {
+					return false
+				}
+				p += int(sLen)
+			}
+			if p != len(body) {
+				return false
+			}
+		case 3:
+			if wt != WireMap || depth+1 > maxNestingDepth {
+				return false
+			}
+			bLen, bn := DecodeVarint(data[pos:])
+			if bn == 0 || bLen < 3 || bLen > uint64(n-(pos+bn)) {
+				return false
+			}
+			body := data[pos+bn : pos+bn+int(bLen)]
+			pos += bn + int(bLen)
+			keyWT, valWT, count, p, ok := ParseMapHeader(body)
+			if !ok || keyWT != WireUint || valWT != WireSubMsg {
+				return false
+			}
+			for range count {
+				k64, kn := DecodeVarint(body[p:])
+				if kn == 0 || k64 == 0 || k64 > 536870911 {
+					return false
+				}
+				p += kn
+				cLen, cn := DecodeVarint(body[p:])
+				if cn == 0 || cLen > uint64(len(body)-(p+cn)) {
+					return false
+				}
+				p += cn
+				if !ValidateSchemaMeta(body[p:p+int(cLen)], depth+2) {
+					return false
+				}
+				p += int(cLen)
+			}
+			if p != len(body) {
+				return false
+			}
+		default:
+			if fnum == 0 {
+				return false
+			}
+			nextPos, ok := validateValueWithDepth(data, pos, wt, depth)
+			if !ok {
+				return false
+			}
+			pos = nextPos
+		}
+	}
+	return true
+}
+
+func validateValueWithDepth(b []byte, pos int, wt uint8, depth int) (int, bool) {
+	if depth > maxNestingDepth || pos < 0 || pos > len(b) {
+		return 0, false
+	}
+	if wt == WireSubMsg {
+		if pos >= len(b) {
+			return 0, false
+		}
+		bLen, bn := DecodeVarint(b[pos:])
+		if bn == 0 || bLen > uint64(len(b)-(pos+bn)) {
+			return 0, false
+		}
+		start := pos + bn
+		end := start + int(bLen)
+		if !ValidateMessage(b[start:end], depth+1) {
+			return 0, false
+		}
+		return end, true
+	}
+	if wt == WireArray || wt == WireMap || wt == WireExtended {
+		if pos >= len(b) {
+			return 0, false
+		}
+		length, ln := DecodeVarint(b[pos:])
+		if ln == 0 || length < 1 || length > uint64(len(b)-pos-ln) {
+			return 0, false
+		}
+		end := pos + ln + int(length)
+		body := b[pos+ln : end]
+		switch wt {
+		case WireArray:
+			if depth+1 > maxNestingDepth {
+				return 0, false
+			}
+			elemWT, count, p, ok := ParseArrayHeader(body)
+			if !ok || !validateArrayBodyWithDepth(body, p, elemWT, count, depth+1) {
+				return 0, false
+			}
+		case WireMap:
+			if depth+1 > maxNestingDepth {
+				return 0, false
+			}
+			keyWT, valWT, count, p, ok := ParseMapHeader(body)
+			if !ok {
+				return 0, false
+			}
+			for range count {
+				p, ok = validateEntryWithDepth(body, p, keyWT, depth+1)
+				if !ok {
+					return 0, false
+				}
+				p, ok = validateEntryWithDepth(body, p, valWT, depth+1)
+				if !ok {
+					return 0, false
+				}
+			}
+			if p != len(body) {
+				return 0, false
+			}
+		}
+		return end, true
+	}
+	return fastSkipValue(b, pos, wt)
+}
+
+func validateArrayBodyWithDepth(body []byte, p int, elemWT uint8, count, depth int) bool {
+	switch elemWT {
+	case WireBoolFalse:
+		if len(body)-p != count {
+			return false
+		}
+		for i := range count {
+			if body[p+i] > 1 {
+				return false
+			}
+		}
+		return true
+	case WireFixed32, WireSfixed32, WireFloat32:
+		return len(body)-p == count*4
+	case WireFixed64, WireSfixed64, WireFloat64:
+		return len(body)-p == count*8
+	}
+	for range count {
+		var ok bool
+		p, ok = validateEntryWithDepth(body, p, elemWT, depth)
+		if !ok {
+			return false
+		}
+	}
+	return p == len(body)
+}
+
+func validateEntryWithDepth(body []byte, p int, wt uint8, depth int) (int, bool) {
+	if wt == WireBoolFalse {
+		if p >= len(body) || body[p] > 1 {
+			return 0, false
+		}
+		return p + 1, true
+	}
+	return validateValueWithDepth(body, p, wt, depth)
 }
 
 // Encoder encodes OmniBuf messages into a reusable contiguous byte buffer in a single forward pass.

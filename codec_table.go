@@ -146,6 +146,7 @@ type structCodec struct {
 	metaOnce     sync.Once
 	schemaMeta   *SchemaMeta
 	field0Wire   []byte
+	cyclicSchema bool
 }
 
 type emptyInterface struct {
@@ -173,15 +174,18 @@ func getStructCodec(t reflect.Type) (*structCodec, error) {
 
 func (sc *structCodec) getField0Wire() []byte {
 	sc.metaOnce.Do(func() {
-		sc.schemaMeta = buildStructSchemaMeta(sc, 0, nil)
+		sc.schemaMeta, sc.cyclicSchema = buildStructSchemaMeta(sc, 1, nil)
 		sc.field0Wire = appendField0SchemaMetaDeterministic(nil, sc.schemaMeta, true)
 	})
 	return sc.field0Wire
 }
 
-func buildStructSchemaMeta(sc *structCodec, depth int, active map[reflect.Type]bool) *SchemaMeta {
-	if sc == nil || depth > MaxNestingDepth || active[sc.typ] {
-		return nil
+func buildStructSchemaMeta(sc *structCodec, schemaDepth int, active map[reflect.Type]bool) (*SchemaMeta, bool) {
+	if sc == nil || schemaDepth+1 > MaxNestingDepth {
+		return nil, false
+	}
+	if active[sc.typ] {
+		return nil, true
 	}
 	if active == nil {
 		active = make(map[reflect.Type]bool)
@@ -189,6 +193,7 @@ func buildStructSchemaMeta(sc *structCodec, depth int, active map[reflect.Type]b
 	active[sc.typ] = true
 	defer delete(active, sc.typ)
 
+	cyclic := false
 	meta := &SchemaMeta{
 		TypeName: sc.typ.Name(),
 		Fields:   make(map[uint32]string, len(sc.fields)),
@@ -197,17 +202,88 @@ func buildStructSchemaMeta(sc *structCodec, depth int, active map[reflect.Type]b
 		fc := &sc.fields[i]
 		fnum := uint32(fc.fieldNum)
 		meta.Fields[fnum] = fc.name
-		if fc.subCodec != nil {
-			childDepth := depth + 1
-			if fc.wireType == wireArray || fc.wireType == wireMap {
-				childDepth = depth + 2
+		if fc.subCodec != nil && schemaDepth+3 <= MaxNestingDepth {
+			child, childCyclic := buildStructSchemaMeta(fc.subCodec, schemaDepth+2, active)
+			if childCyclic {
+				cyclic = true
 			}
-			if child := buildStructSchemaMeta(fc.subCodec, childDepth, active); child != nil {
+			if child != nil {
 				if meta.Children == nil {
 					meta.Children = make(map[uint32]*SchemaMeta)
 				}
 				meta.Children[fnum] = child
 			}
+		}
+	}
+	return meta, cyclic
+}
+
+func buildStructValueSchemaMeta(sc *structCodec, ptr unsafe.Pointer, schemaDepth int) *SchemaMeta {
+	if sc == nil || ptr == nil || schemaDepth+1 > MaxNestingDepth {
+		return nil
+	}
+	meta := &SchemaMeta{
+		TypeName: sc.typ.Name(),
+		Fields:   make(map[uint32]string, len(sc.fields)),
+	}
+	for i := range sc.fields {
+		fc := &sc.fields[i]
+		fnum := uint32(fc.fieldNum)
+		meta.Fields[fnum] = fc.name
+		if fc.subCodec == nil || schemaDepth+3 > MaxNestingDepth {
+			continue
+		}
+		fPtr := unsafe.Add(ptr, fc.offset)
+		var child *SchemaMeta
+		switch fc.kind {
+		case kindStructVal:
+			if !fc.omitEmpty || !isFieldEmpty(fc, fPtr) {
+				child = buildStructValueSchemaMeta(fc.subCodec, fPtr, schemaDepth+2)
+			}
+		case kindStructPtr:
+			if subPtr := *(*unsafe.Pointer)(fPtr); subPtr != nil {
+				child = buildStructValueSchemaMeta(fc.subCodec, subPtr, schemaDepth+2)
+			}
+		case kindStructValSlice:
+			sh := (*unsafeSliceHeader)(fPtr)
+			for j := 0; j < sh.Len; j++ {
+				elemPtr := unsafe.Add(sh.Data, uintptr(j)*fc.elemSize)
+				child = mergeSchemaMeta(child, buildStructValueSchemaMeta(fc.subCodec, elemPtr, schemaDepth+2))
+			}
+		case kindStructPtrSlice:
+			sh := (*unsafeSliceHeader)(fPtr)
+			for j := 0; j < sh.Len; j++ {
+				elemPtr := *(*unsafe.Pointer)(unsafe.Add(sh.Data, uintptr(j)*unsafe.Sizeof(uintptr(0))))
+				if elemPtr != nil {
+					child = mergeSchemaMeta(child, buildStructValueSchemaMeta(fc.subCodec, elemPtr, schemaDepth+2))
+				}
+			}
+			if child == nil && sh.Len > 0 {
+				child, _ = buildStructSchemaMeta(fc.subCodec, schemaDepth+2, map[reflect.Type]bool{sc.typ: true})
+			}
+		case kindMap:
+			mv := reflect.NewAt(fc.sliceType, fPtr).Elem()
+			if !mv.IsNil() && mv.Len() > 0 {
+				iter := mv.MapRange()
+				for iter.Next() {
+					vv := iter.Value()
+					if vv.Kind() == reflect.Pointer {
+						if !vv.IsNil() {
+							child = mergeSchemaMeta(child, buildStructValueSchemaMeta(fc.subCodec, vv.UnsafePointer(), schemaDepth+2))
+						}
+					} else {
+						cp := reflect.New(vv.Type())
+						cp.Elem().Set(vv)
+						child = mergeSchemaMeta(child, buildStructValueSchemaMeta(fc.subCodec, cp.UnsafePointer(), schemaDepth+2))
+					}
+				}
+			}
+		}
+		if child != nil {
+			if meta.Children == nil {
+				meta.Children = make(map[uint32]*SchemaMeta)
+			}
+			meta.Children[fnum] = child
 		}
 	}
 	return meta
@@ -1076,7 +1152,13 @@ func marshalTableAppend(dst []byte, v any, opts MarshalOptions) ([]byte, error) 
 		dst = dst[:0]
 	}
 	if opts.SelfDescribing {
-		dst = append(dst, sc.getField0Wire()...)
+		f0 := sc.getField0Wire()
+		if sc.cyclicSchema {
+			meta := buildStructValueSchemaMeta(sc, ptr, 1)
+			dst = appendField0SchemaMetaDeterministic(dst, meta, opts.Deterministic)
+		} else {
+			dst = append(dst, f0...)
+		}
 	}
 	st := encState{deterministic: opts.Deterministic}
 	dst = sc.encodeStruct(dst, ptr, &st)
@@ -1117,9 +1199,9 @@ func isFieldEmpty(fc *fieldCodec, fPtr unsafe.Pointer) bool {
 	case kindUint64, kindUint64Sint, kindInt64, kindSint64, kindInt64Uint, kindFixed64, kindFixed32_64, kindSfixed32_64:
 		return *(*uint64)(fPtr) == 0
 	case kindFloat32:
-		return *(*float32)(fPtr) == 0
+		return *(*uint32)(fPtr) == 0
 	case kindFloat64:
-		return *(*float64)(fPtr) == 0
+		return *(*uint64)(fPtr) == 0
 	case kindBool:
 		return !*(*bool)(fPtr)
 	case kindString:

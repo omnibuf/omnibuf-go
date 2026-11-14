@@ -247,39 +247,57 @@ func (x OpaqueLocation) GetLongitude() float32 {
 }
 func (x *OpaqueLocation) SetLongitude(v float32) { x.f_longitude = v; x.dirty |= (uint64(1) << 6) }
 
+func (x *OpaqueLocation) appendDirtyField(b []byte, fnum uint16) []byte {
+	switch fnum {
+	case 1:
+		b = append(b, 0x35)
+		b = wire.AppendVarint(b, uint64(len(x.f_region)))
+		return append(b, x.f_region...)
+	case 2:
+		b = append(b, 0x55)
+		b = wire.AppendVarint(b, uint64(len(x.f_datacenter)))
+		return append(b, x.f_datacenter...)
+	case 3:
+		b = append(b, 0x75)
+		b = wire.AppendVarint(b, uint64(len(x.f_city)))
+		return append(b, x.f_city...)
+	case 4:
+		b = append(b, 0x81)
+		return wire.AppendVarint(b, uint64(x.f_rack))
+	case 5:
+		b = append(b, 0xb1)
+		v := math.Float32bits(x.f_latitude)
+		return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
+	case 6:
+		b = append(b, 0xd1)
+		v := math.Float32bits(x.f_longitude)
+		return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
+	}
+	return b
+}
+
 // MarshalAppend re-serializes OpaqueLocation using zero-decode wire splicing for unmodified fields.
 func (x *OpaqueLocation) MarshalAppend(dst []byte) []byte {
 	if x.dirty == 0 {
 		return wire.CopyPacket(dst, x.raw)
 	}
-	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 6, func(b []byte, fnum uint16) []byte {
-		switch fnum {
-		case 1:
-			b = append(b, 0x35)
-			b = wire.AppendVarint(b, uint64(len(x.f_region)))
-			return append(b, x.f_region...)
-		case 2:
-			b = append(b, 0x55)
-			b = wire.AppendVarint(b, uint64(len(x.f_datacenter)))
-			return append(b, x.f_datacenter...)
-		case 3:
-			b = append(b, 0x75)
-			b = wire.AppendVarint(b, uint64(len(x.f_city)))
-			return append(b, x.f_city...)
-		case 4:
-			b = append(b, 0x81)
-			return wire.AppendVarint(b, uint64(x.f_rack))
-		case 5:
-			b = append(b, 0xb1)
-			v := math.Float32bits(x.f_latitude)
-			return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
-		case 6:
-			b = append(b, 0xd1)
-			v := math.Float32bits(x.f_longitude)
-			return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
+	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 6, x.appendDirtyField)
+}
+
+// TryMarshalAppend re-serializes OpaqueLocation using zero-decode wire splicing and returns an error if x.raw is corrupt.
+func (x *OpaqueLocation) TryMarshalAppend(dst []byte) ([]byte, error) {
+	if x.dirty == 0 {
+		if err := wire.ValidatePacket(x.raw); err != nil {
+			return nil, err
 		}
-		return b
-	})
+		return wire.CopyPacket(dst, x.raw), nil
+	}
+	return wire.TrySpliceFields(dst[:0], x.raw, x.dirty, 6, x.appendDirtyField)
+}
+
+// Marshal re-serializes OpaqueLocation into a newly allocated packet, returning an error if x.raw is corrupt.
+func (x *OpaqueLocation) Marshal() ([]byte, error) {
+	return x.TryMarshalAppend(nil)
 }
 
 // MarshalOmniBufAppend encodes Neighbor in a single forward pass using generated field tags.
@@ -460,31 +478,49 @@ func (x OpaqueNeighbor) GetEstablished() bool {
 }
 func (x *OpaqueNeighbor) SetEstablished(v bool) { x.f_established = v; x.dirty |= (uint64(1) << 4) }
 
+func (x *OpaqueNeighbor) appendDirtyField(b []byte, fnum uint16) []byte {
+	switch fnum {
+	case 1:
+		b = append(b, 0x21)
+		return wire.AppendVarint(b, uint64(x.f_peer_asn))
+	case 2:
+		b = append(b, 0x55)
+		b = wire.AppendVarint(b, uint64(len(x.f_router)))
+		return append(b, x.f_router...)
+	case 3:
+		b = append(b, 0x61)
+		return wire.AppendVarint(b, uint64(x.f_latency_us))
+	case 4:
+		if x.f_established {
+			return wire.AppendVarint(b, 67)
+		}
+		return wire.AppendVarint(b, 66)
+	}
+	return b
+}
+
 // MarshalAppend re-serializes OpaqueNeighbor using zero-decode wire splicing for unmodified fields.
 func (x *OpaqueNeighbor) MarshalAppend(dst []byte) []byte {
 	if x.dirty == 0 {
 		return wire.CopyPacket(dst, x.raw)
 	}
-	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 4, func(b []byte, fnum uint16) []byte {
-		switch fnum {
-		case 1:
-			b = append(b, 0x21)
-			return wire.AppendVarint(b, uint64(x.f_peer_asn))
-		case 2:
-			b = append(b, 0x55)
-			b = wire.AppendVarint(b, uint64(len(x.f_router)))
-			return append(b, x.f_router...)
-		case 3:
-			b = append(b, 0x61)
-			return wire.AppendVarint(b, uint64(x.f_latency_us))
-		case 4:
-			if x.f_established {
-				return wire.AppendVarint(b, 67)
-			}
-			return wire.AppendVarint(b, 66)
+	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 4, x.appendDirtyField)
+}
+
+// TryMarshalAppend re-serializes OpaqueNeighbor using zero-decode wire splicing and returns an error if x.raw is corrupt.
+func (x *OpaqueNeighbor) TryMarshalAppend(dst []byte) ([]byte, error) {
+	if x.dirty == 0 {
+		if err := wire.ValidatePacket(x.raw); err != nil {
+			return nil, err
 		}
-		return b
-	})
+		return wire.CopyPacket(dst, x.raw), nil
+	}
+	return wire.TrySpliceFields(dst[:0], x.raw, x.dirty, 4, x.appendDirtyField)
+}
+
+// Marshal re-serializes OpaqueNeighbor into a newly allocated packet, returning an error if x.raw is corrupt.
+func (x *OpaqueNeighbor) Marshal() ([]byte, error) {
+	return x.TryMarshalAppend(nil)
 }
 
 // MarshalOmniBufAppend encodes PeerUpdate in a single forward pass using generated field tags.
@@ -1035,70 +1071,88 @@ func (x OpaquePeerUpdate) GetSequence() uint64 {
 }
 func (x *OpaquePeerUpdate) SetSequence(v uint64) { x.f_sequence = v; x.dirty |= (uint64(1) << 11) }
 
+func (x *OpaquePeerUpdate) appendDirtyField(b []byte, fnum uint16) []byte {
+	switch fnum {
+	case 1:
+		b = append(b, 0x21)
+		return wire.AppendVarint(b, uint64(x.f_asn))
+	case 2:
+		b = append(b, 0x55)
+		b = wire.AppendVarint(b, uint64(len(x.f_router_id)))
+		return append(b, x.f_router_id...)
+	case 3:
+		if x.f_active {
+			return wire.AppendVarint(b, 51)
+		}
+		return wire.AppendVarint(b, 50)
+	case 4:
+		b = append(b, 0x81)
+		return wire.AppendVarint(b, x.f_uptime_sec)
+	case 5:
+		b = append(b, 0xa3)
+		return wire.AppendVarint(b, wire.EncodeZigZag(int64(x.f_rssi_dbm)))
+	case 6:
+		b = append(b, 0xd3)
+		v := math.Float64bits(x.f_cpu_load)
+		return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24), byte(v>>32), byte(v>>40), byte(v>>48), byte(v>>56))
+	case 7:
+		b = append(b, 0xfb)
+		return wire.EncodeStringArr(b, x.f_tags)
+	case 8:
+		b = append(b, 0x36, 0x02)
+		return wire.EncodeUintArr(b, x.f_prefixes)
+	case 9:
+		if x.f_location == nil {
+			return b
+		}
+		b = append(b, 0x72, 0x02)
+		lenPos := len(b)
+		b = append(b, 0, 0)
+		if x.f_location != nil {
+			b = x.f_location.MarshalOmniBufAppend(b)
+		}
+		return wire.BackpatchContainerLen(b, lenPos)
+	case 10:
+		b = append(b, 0xb6, 0x02)
+		lenPos := len(b)
+		b = append(b, 0, 0, wire.WireSubMsg)
+		b = wire.AppendVarint(b, uint64(len(x.f_neighbors)))
+		for _, elem := range x.f_neighbors {
+			eLenPos := len(b)
+			b = append(b, 0, 0)
+			if elem != nil {
+				b = elem.MarshalOmniBufAppend(b)
+			}
+			b = wire.BackpatchContainerLen(b, eLenPos)
+		}
+		return wire.BackpatchContainerLen(b, lenPos)
+	case 11:
+		b = append(b, 0xc2, 0x02)
+		return wire.AppendVarint(b, x.f_sequence)
+	}
+	return b
+}
+
 // MarshalAppend re-serializes OpaquePeerUpdate using zero-decode wire splicing for unmodified fields.
 func (x *OpaquePeerUpdate) MarshalAppend(dst []byte) []byte {
 	if x.dirty == 0 {
 		return wire.CopyPacket(dst, x.raw)
 	}
-	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 11, func(b []byte, fnum uint16) []byte {
-		switch fnum {
-		case 1:
-			b = append(b, 0x21)
-			return wire.AppendVarint(b, uint64(x.f_asn))
-		case 2:
-			b = append(b, 0x55)
-			b = wire.AppendVarint(b, uint64(len(x.f_router_id)))
-			return append(b, x.f_router_id...)
-		case 3:
-			if x.f_active {
-				return wire.AppendVarint(b, 51)
-			}
-			return wire.AppendVarint(b, 50)
-		case 4:
-			b = append(b, 0x81)
-			return wire.AppendVarint(b, x.f_uptime_sec)
-		case 5:
-			b = append(b, 0xa3)
-			return wire.AppendVarint(b, wire.EncodeZigZag(int64(x.f_rssi_dbm)))
-		case 6:
-			b = append(b, 0xd3)
-			v := math.Float64bits(x.f_cpu_load)
-			return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24), byte(v>>32), byte(v>>40), byte(v>>48), byte(v>>56))
-		case 7:
-			b = append(b, 0xfb)
-			return wire.EncodeStringArr(b, x.f_tags)
-		case 8:
-			b = append(b, 0x36, 0x02)
-			return wire.EncodeUintArr(b, x.f_prefixes)
-		case 9:
-			if x.f_location == nil {
-				return b
-			}
-			b = append(b, 0x72, 0x02)
-			lenPos := len(b)
-			b = append(b, 0, 0)
-			if x.f_location != nil {
-				b = x.f_location.MarshalOmniBufAppend(b)
-			}
-			return wire.BackpatchContainerLen(b, lenPos)
-		case 10:
-			b = append(b, 0xb6, 0x02)
-			lenPos := len(b)
-			b = append(b, 0, 0, wire.WireSubMsg)
-			b = wire.AppendVarint(b, uint64(len(x.f_neighbors)))
-			for _, elem := range x.f_neighbors {
-				eLenPos := len(b)
-				b = append(b, 0, 0)
-				if elem != nil {
-					b = elem.MarshalOmniBufAppend(b)
-				}
-				b = wire.BackpatchContainerLen(b, eLenPos)
-			}
-			return wire.BackpatchContainerLen(b, lenPos)
-		case 11:
-			b = append(b, 0xc2, 0x02)
-			return wire.AppendVarint(b, x.f_sequence)
+	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 11, x.appendDirtyField)
+}
+
+// TryMarshalAppend re-serializes OpaquePeerUpdate using zero-decode wire splicing and returns an error if x.raw is corrupt.
+func (x *OpaquePeerUpdate) TryMarshalAppend(dst []byte) ([]byte, error) {
+	if x.dirty == 0 {
+		if err := wire.ValidatePacket(x.raw); err != nil {
+			return nil, err
 		}
-		return b
-	})
+		return wire.CopyPacket(dst, x.raw), nil
+	}
+	return wire.TrySpliceFields(dst[:0], x.raw, x.dirty, 11, x.appendDirtyField)
+}
+
+// Marshal re-serializes OpaquePeerUpdate into a newly allocated packet, returning an error if x.raw is corrupt.
+func (x *OpaquePeerUpdate) Marshal() ([]byte, error) {
+	return x.TryMarshalAppend(nil)
 }

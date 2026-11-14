@@ -2,11 +2,16 @@ package omnibuf
 
 import (
 	"encoding/binary"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
 	"reflect"
 )
+
+// ErrNonFiniteFloat is returned by DecodeBlindJSON when a packet contains NaN or +-Infinity.
+var ErrNonFiniteFloat = errors.New("omnibuf: non-finite float (NaN or Infinity) cannot be represented in JSON")
 
 // SchemaMeta is the optional inline schema header encoded as Field #0
 // (Tag = 0x19, wireSubMsg = 12) at byte 0 of an OmniBuf message (omnibuf.v1.SchemaMeta).
@@ -120,7 +125,7 @@ func ReadField0SchemaMeta(packet []byte) (*SchemaMeta, bool) {
 			return merged, merged != nil
 		}
 		pos = nextPos
-		m, err := decodeSchemaMeta(body, 0)
+		m, err := decodeSchemaMeta(body, 1)
 		if err != nil {
 			return nil, false
 		}
@@ -206,9 +211,7 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 			if !ok || keyWT != wireUint || valWT != wireSubMsg {
 				return nil, fmt.Errorf("omnibuf: invalid SchemaMeta children map header")
 			}
-			if meta.Children == nil {
-				meta.Children = make(map[uint32]*SchemaMeta, min(count, 4096))
-			}
+			mapChildren := make(map[uint32]*SchemaMeta, min(count, 4096))
 			for range count {
 				k64, kn := decodeVarint(body[p:])
 				if kn == 0 || k64 == 0 || k64 > maxProtobufFieldNumber {
@@ -219,15 +222,25 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 				if err != nil {
 					return nil, err
 				}
-				childMeta, err := decodeSchemaMeta(childBytes, depth+1)
+				childMeta, err := decodeSchemaMeta(childBytes, depth+2)
 				if err != nil {
 					return nil, err
 				}
-				meta.Children[uint32(k64)] = mergeSchemaMeta(meta.Children[uint32(k64)], childMeta)
+				// Duplicate keys within one WireMap replace the earlier entry (Spec section 6.6).
+				mapChildren[uint32(k64)] = childMeta
 				p = nextP
 			}
 			if p != len(body) {
 				return nil, fmt.Errorf("omnibuf: SchemaMeta children map trailing bytes (parsed %d, body %d)", p, len(body))
+			}
+			if len(mapChildren) > 0 {
+				if meta.Children == nil {
+					meta.Children = mapChildren
+				} else {
+					for k, childMeta := range mapChildren {
+						meta.Children[k] = mergeSchemaMeta(meta.Children[k], childMeta)
+					}
+				}
 			}
 		default:
 			if fnum == 0 {
@@ -291,8 +304,10 @@ type blindSchema struct {
 
 func (s *blindSchema) fieldName(field uint32) string {
 	for ; s != nil; s = s.parent {
-		if name, ok := s.local.Fields[field]; ok {
-			return name
+		if s.local != nil {
+			if name, ok := s.local.Fields[field]; ok {
+				return name
+			}
 		}
 	}
 	return ""
@@ -303,10 +318,72 @@ func (s *blindSchema) child(field uint32) *blindSchema {
 		return nil
 	}
 	parent := s.parent.child(field)
-	if child := s.local.Children[field]; child != nil {
-		return &blindSchema{local: child, parent: parent}
+	if s.local != nil {
+		if child := s.local.Children[field]; child != nil {
+			return &blindSchema{local: child, parent: parent}
+		}
 	}
 	return parent
+}
+
+// DecodeBlindJSON decodes packet without a compile-time schema and serializes
+// the resulting map to JSON. If any float32 or float64 value is NaN or +-Infinity,
+// DecodeBlindJSON returns ErrNonFiniteFloat.
+func DecodeBlindJSON(packet []byte) (string, error) {
+	m, err := DecodeBlind(packet)
+	if err != nil {
+		return "", err
+	}
+	if hasNonFiniteFloat(m) {
+		return "", ErrNonFiniteFloat
+	}
+	jb, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	return string(jb), nil
+}
+
+func hasNonFiniteFloat(v any) bool {
+	switch x := v.(type) {
+	case float32:
+		f := float64(x)
+		return math.IsNaN(f) || math.IsInf(f, 0)
+	case float64:
+		return math.IsNaN(x) || math.IsInf(x, 0)
+	case []float32:
+		for _, elem := range x {
+			f := float64(elem)
+			if math.IsNaN(f) || math.IsInf(f, 0) {
+				return true
+			}
+		}
+	case []float64:
+		for _, elem := range x {
+			if math.IsNaN(elem) || math.IsInf(elem, 0) {
+				return true
+			}
+		}
+	case map[string]any:
+		for _, mv := range x {
+			if hasNonFiniteFloat(mv) {
+				return true
+			}
+		}
+	case []map[string]any:
+		for _, mv := range x {
+			if hasNonFiniteFloat(mv) {
+				return true
+			}
+		}
+	case []any:
+		for _, elem := range x {
+			if hasNonFiniteFloat(elem) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // DecodeBlind decodes any OmniBuf packet without a compile-time schema.
@@ -367,11 +444,10 @@ func decodeBlindWithSchema(data []byte, inherited *blindSchema, depth int) (map[
 	out := make(map[string]any, 8)
 	subPackets := make(map[string][]byte)
 	subSchemas := make(map[string]*blindSchema)
-	// shapes records each field's wire shape (wire type plus array element
-	// type or map key/value types). Repeated occurrences of a field number
-	// (e.g. from concatenation) MUST agree; changing a field's value type is
-	// not a compatible change, so a mismatch is rejected instead of merged.
-	shapes := make(map[int]uint32, 8)
+	// shapes records each field's recursive wire shape (wire type plus nested
+	// array element types and map key/value types). Repeated occurrences of a
+	// field number MUST agree; changing a field's value type is rejected.
+	shapes := make(map[int]*blindShape, 8)
 	owners := make(map[string]int, 8)
 
 	for pos < n {
@@ -406,12 +482,16 @@ func decodeBlindWithSchema(data []byte, inherited *blindSchema, depth int) (map[
 		}
 		owners[name] = fieldNum
 
-		shape, err := blindFieldShape(data, pos, wt)
+		shape, err := parseBlindFieldShape(data, pos, wt, depth)
 		if err != nil {
 			return nil, err
 		}
-		if prev, ok := shapes[fieldNum]; ok && prev != shape {
-			return nil, fmt.Errorf("omnibuf: field #%d changes wire shape within one message (0x%x -> 0x%x)", fieldNum, prev, shape)
+		if prev, ok := shapes[fieldNum]; ok {
+			unified, compat := unifyBlindShapes(prev, shape)
+			if !compat {
+				return nil, fmt.Errorf("omnibuf: field #%d changes wire shape within one message", fieldNum)
+			}
+			shape = unified
 		}
 		shapes[fieldNum] = shape
 
@@ -455,6 +535,9 @@ func decodeBlindWithSchema(data []byte, inherited *blindSchema, depth int) (map[
 		case wireSubMsg:
 			subBytes, nextPos, err := readLenSlice(data, pos, 0)
 			if err != nil {
+				return nil, err
+			}
+			if err := validateMessageBytes(subBytes, depth+1); err != nil {
 				return nil, err
 			}
 			subPackets[name] = append(subPackets[name], subBytes...)
@@ -567,29 +650,134 @@ func decodeBlindWithSchema(data []byte, inherited *blindSchema, depth int) (map[
 	return out, nil
 }
 
-// blindFieldShape returns a comparable signature of a field's wire shape.
-// WireBoolFalse and WireBoolTrue share a shape since both encode a bool.
-func blindFieldShape(data []byte, pos int, wt uint8) (uint32, error) {
-	switch wt {
-	case wireBoolTrue:
-		return uint32(wireBoolFalse), nil
-	case wireArray, wireMap:
-		minLen := uint64(2)
-		if wt == wireMap {
-			minLen = 3
-		}
-		body, _, err := readLenSlice(data, pos, minLen)
-		if err != nil {
-			return 0, err
-		}
-		shape := uint32(wt) | uint32(body[0])<<8
-		if wt == wireMap {
-			shape |= uint32(body[1]) << 16
-		}
-		return shape, nil
-	default:
-		return uint32(wt), nil
+type blindShape struct {
+	wt     uint8
+	keyWT  uint8
+	anyMap bool
+	elem   *blindShape
+}
+
+func unifyBlindShapes(a, b *blindShape) (*blindShape, bool) {
+	if a == nil {
+		return b, true
 	}
+	if b == nil {
+		return a, true
+	}
+	if a.wt != b.wt {
+		return nil, false
+	}
+	if a.wt == wireMap {
+		if a.anyMap {
+			return b, true
+		}
+		if b.anyMap {
+			return a, true
+		}
+		if a.keyWT != b.keyWT {
+			return nil, false
+		}
+	}
+	if a.wt != wireArray && a.wt != wireMap {
+		return a, true
+	}
+	u, ok := unifyBlindShapes(a.elem, b.elem)
+	if !ok {
+		return nil, false
+	}
+	return &blindShape{wt: a.wt, keyWT: a.keyWT, elem: u}, true
+}
+
+func parseBlindFieldShape(data []byte, pos int, wt uint8, depth int) (*blindShape, error) {
+	if wt == wireBoolTrue {
+		wt = wireBoolFalse
+	}
+	if wt != wireArray && wt != wireMap {
+		return &blindShape{wt: wt}, nil
+	}
+	s, _, err := parseBlindContainerShape(data, pos, wt, depth)
+	return s, err
+}
+
+func parseBlindContainerShape(data []byte, pos int, wt uint8, depth int) (*blindShape, int, error) {
+	if depth+1 > MaxNestingDepth {
+		return nil, 0, fmt.Errorf("omnibuf: container nesting depth %d exceeds MaxNestingDepth (%d)", depth+1, MaxNestingDepth)
+	}
+	if wt == wireArray {
+		body, nextPos, err := readLenSlice(data, pos, 2)
+		if err != nil {
+			return nil, 0, err
+		}
+		elemWT, count, p, ok := parseArrayHeader(body)
+		if !ok {
+			return nil, 0, fmt.Errorf("omnibuf: invalid array header")
+		}
+		if elemWT != wireArray && elemWT != wireMap {
+			return &blindShape{wt: wireArray, elem: &blindShape{wt: elemWT}}, nextPos, nil
+		}
+		if count == 0 {
+			if elemWT == wireArray {
+				return &blindShape{wt: wireArray, elem: &blindShape{wt: wireArray}}, nextPos, nil
+			}
+			return &blindShape{wt: wireArray, elem: &blindShape{wt: wireMap, anyMap: true}}, nextPos, nil
+		}
+		var merged *blindShape
+		for range count {
+			elemShape, nextP, err := parseBlindContainerShape(body, p, elemWT, depth+1)
+			if err != nil {
+				return nil, 0, err
+			}
+			var compat bool
+			merged, compat = unifyBlindShapes(merged, elemShape)
+			if !compat {
+				return nil, 0, fmt.Errorf("omnibuf: inconsistent nested container element shapes in WireArray")
+			}
+			p = nextP
+		}
+		if p != len(body) {
+			return nil, 0, fmt.Errorf("omnibuf: array count/length mismatch")
+		}
+		return &blindShape{wt: wireArray, elem: merged}, nextPos, nil
+	}
+
+	body, nextPos, err := readLenSlice(data, pos, 3)
+	if err != nil {
+		return nil, 0, err
+	}
+	keyWT, valWT, count, p, ok := parseMapHeader(body)
+	if !ok {
+		return nil, 0, fmt.Errorf("omnibuf: invalid wireMap header at %d", pos)
+	}
+	if valWT != wireArray && valWT != wireMap {
+		return &blindShape{wt: wireMap, keyWT: keyWT, elem: &blindShape{wt: valWT}}, nextPos, nil
+	}
+	if count == 0 {
+		if valWT == wireArray {
+			return &blindShape{wt: wireMap, keyWT: keyWT, elem: &blindShape{wt: wireArray}}, nextPos, nil
+		}
+		return &blindShape{wt: wireMap, keyWT: keyWT, elem: &blindShape{wt: wireMap, anyMap: true}}, nextPos, nil
+	}
+	var merged *blindShape
+	for range count {
+		nextP, err := validateContainerEntry(body, p, keyWT, depth+1)
+		if err != nil {
+			return nil, 0, err
+		}
+		valShape, nextP2, err := parseBlindContainerShape(body, nextP, valWT, depth+1)
+		if err != nil {
+			return nil, 0, err
+		}
+		var compat bool
+		merged, compat = unifyBlindShapes(merged, valShape)
+		if !compat {
+			return nil, 0, fmt.Errorf("omnibuf: inconsistent nested container value shapes in WireMap")
+		}
+		p = nextP2
+	}
+	if p != len(body) {
+		return nil, 0, fmt.Errorf("omnibuf: wireMap trailing bytes (parsed %d, body %d)", p, len(body))
+	}
+	return &blindShape{wt: wireMap, keyWT: keyWT, elem: merged}, nextPos, nil
 }
 
 func decodeMapKeyBlind(body []byte, p int, keyWT uint8) (string, int, error) {

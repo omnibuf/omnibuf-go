@@ -210,6 +210,7 @@ type ConformanceVector struct {
 	Category      string         `json:"category"`
 	Description   string         `json:"description"`
 	Schema        string         `json:"schema"`
+	SkipBlind     bool           `json:"skip_blind,omitempty"`
 	WireHex       string         `json:"wire_hex"`
 	WireByteLen   int            `json:"wire_byte_len"`
 	PresentFields []uint32       `json:"present_fields"`
@@ -220,6 +221,8 @@ type InvalidWireCase struct {
 	Name        string `json:"name"`
 	Category    string `json:"category"`
 	Description string `json:"description"`
+	Schema      string `json:"schema,omitempty"`
+	BlindOnly   bool   `json:"blind_only,omitempty"`
 	WireHex     string `json:"wire_hex"`
 }
 
@@ -407,8 +410,8 @@ func RunSuiteWithOptions(opts RunOptions) (*Summary, error) {
 			return nil, fmt.Errorf("invalid hex in vector %s: %w", vec.Name, err)
 		}
 
-		// 1A. Schema-less Blind Inspection Tier (all valid vectors)
-		if tierEnabled(TestTierBlind) {
+		// 1A. Schema-less Blind Inspection Tier (all valid vectors unless SkipBlind is set)
+		if !vec.SkipBlind && tierEnabled(TestTierBlind) {
 			req := &ConformanceRequest{
 				TestName:              vec.Name + "/Blind",
 				MessageType:           vec.Schema,
@@ -540,6 +543,28 @@ func RunSuiteWithOptions(opts RunOptions) (*Summary, error) {
 						}
 					}
 				}
+			} else if vec.Schema == "TreeNode" && tier == TestTierAnnotatedStruct {
+				reqSD := &ConformanceRequest{
+					TestName:              vec.Name + "/" + tier.String() + "/SelfDescribing",
+					MessageType:           canonicalMessageType(vec.Schema),
+					Tier:                  uint32(tier),
+					RequestedOutputFormat: uint32(WireFormatOmniBuf),
+					OmniBufPayload:        rawWire,
+					SelfDescribing:        true,
+				}
+				respSD, err := sendReq(reqSD)
+				if err != nil {
+					_ = stdin.Close()
+					_ = cmd.Wait()
+					return nil, err
+				}
+				if respSD.ParseError != "" || respSD.SerializeError != "" || respSD.RuntimeError != "" {
+					recordResult(tier, vec.Name+"/SelfDescribing", fmt.Sprintf("error: parse=%q serialize=%q runtime=%q", respSD.ParseError, respSD.SerializeError, respSD.RuntimeError), respSD.Skipped)
+				} else if err := verifyTreeNodeSelfDescribing(rawWire, respSD.OmniBufPayload); err != nil {
+					recordResult(tier, vec.Name+"/SelfDescribing", err.Error(), respSD.Skipped)
+				} else {
+					recordResult(tier, vec.Name+"/SelfDescribing", "", respSD.Skipped)
+				}
 			} else if vec.Schema == "TestAllTypes" && tier == TestTierPlugin {
 				reqSplice := &ConformanceRequest{
 					TestName:              vec.Name + "/" + tier.String() + "/OpaqueSpliceGrow",
@@ -597,11 +622,17 @@ func RunSuiteWithOptions(opts RunOptions) (*Summary, error) {
 			return nil, fmt.Errorf("invalid hex in invalid_case %s: %w", ic.Name, err)
 		}
 
+		icSchema := ic.Schema
+		if icSchema == "" {
+			icSchema = "TestAllTypes"
+		}
+		icMsgType := canonicalMessageType(icSchema)
+
 		// 2A. Blind tier MUST reject every malformed wire case with ParseError != ""
 		if tierEnabled(TestTierBlind) {
 			req := &ConformanceRequest{
 				TestName:              "Invalid/" + ic.Name + "/Blind",
-				MessageType:           "omnibuf.conformance.TestAllTypes",
+				MessageType:           icMsgType,
 				Tier:                  uint32(TestTierBlind),
 				RequestedOutputFormat: uint32(WireFormatJSON),
 				OmniBufPayload:        rawWire,
@@ -612,21 +643,23 @@ func RunSuiteWithOptions(opts RunOptions) (*Summary, error) {
 				_ = cmd.Wait()
 				return nil, err
 			}
-			if resp.ParseError == "" {
+			if resp.RuntimeError != "" {
+				recordResult(TestTierBlind, "Invalid/"+ic.Name, fmt.Sprintf("unexpected runtime_error: %s", resp.RuntimeError), "")
+			} else if resp.ParseError == "" {
 				recordResult(TestTierBlind, "Invalid/"+ic.Name, "expected parse_error on malformed wire input, but succeeded", "")
 			} else {
 				recordResult(TestTierBlind, "Invalid/"+ic.Name, "", "")
 			}
 		}
 
-		// 2B. Schema-aware tiers (AnnotatedStruct, ProtobufTypes, Plugin) MUST never crash/panic on malformed bytes
-		for _, tier := range []TestTier{TestTierAnnotatedStruct, TestTierProtobufTypes, TestTierPlugin} {
+		// 2B. Schema-aware tiers: never crash/panic, and for all !BlindOnly cases MUST reject with ParseError != ""
+		for _, tier := range tiersForSchema(icSchema) {
 			if !tierEnabled(tier) {
 				continue
 			}
 			req := &ConformanceRequest{
 				TestName:              "Invalid/" + ic.Name + "/" + tier.String(),
-				MessageType:           "omnibuf.bench.PeerUpdate",
+				MessageType:           icMsgType,
 				Tier:                  uint32(tier),
 				RequestedOutputFormat: uint32(WireFormatOmniBuf),
 				OmniBufPayload:        rawWire,
@@ -639,8 +672,35 @@ func RunSuiteWithOptions(opts RunOptions) (*Summary, error) {
 			}
 			if resp.RuntimeError != "" {
 				recordResult(tier, "Invalid/"+ic.Name, fmt.Sprintf("unexpected runtime_error: %s", resp.RuntimeError), "")
+			} else if !ic.BlindOnly && resp.Skipped == "" && resp.ParseError == "" {
+				recordResult(tier, "Invalid/"+ic.Name, "expected parse_error on malformed wire input, but schema decoder succeeded", "")
 			} else {
 				recordResult(tier, "Invalid/"+ic.Name, "", resp.Skipped)
+			}
+
+			isNonField0UTF8 := ic.Category == "InvalidUTF8" && !strings.Contains(ic.Name, "field0")
+			if !ic.BlindOnly && !isNonField0UTF8 && tier == TestTierPlugin && (icSchema == "TestAllTypes" || icSchema == "PeerUpdate") {
+				reqSplice := &ConformanceRequest{
+					TestName:              "Invalid/" + ic.Name + "/" + tier.String() + "/OpaqueSplice",
+					MessageType:           icMsgType,
+					Tier:                  uint32(tier),
+					RequestedOutputFormat: uint32(WireFormatOmniBuf),
+					OmniBufPayload:        rawWire,
+					TestOpaqueSplice:      true,
+				}
+				respSplice, err := sendReq(reqSplice)
+				if err != nil {
+					_ = stdin.Close()
+					_ = cmd.Wait()
+					return nil, err
+				}
+				if respSplice.RuntimeError != "" {
+					recordResult(tier, "Invalid/"+ic.Name+"/OpaqueSplice", fmt.Sprintf("unexpected runtime_error: %s", respSplice.RuntimeError), "")
+				} else if respSplice.Skipped == "" && respSplice.ParseError == "" && respSplice.SerializeError == "" {
+					recordResult(tier, "Invalid/"+ic.Name+"/OpaqueSplice", "expected parse_error or serialize_error on malformed splice input, but succeeded", "")
+				} else {
+					recordResult(tier, "Invalid/"+ic.Name+"/OpaqueSplice", "", respSplice.Skipped)
+				}
 			}
 		}
 	}
@@ -873,7 +933,10 @@ func verifyRoundTripEquivalence(schema string, inputWire, outputWire []byte) err
 		if err := omnibuf.Unmarshal(outputWire, &got); err != nil {
 			return fmt.Errorf("runner decode output PeerUpdate: %w", err)
 		}
-		if !reflect.DeepEqual(want, got) {
+		if !reflect.DeepEqual(want, got) ||
+			mathFloat64Bits(want.CPULoad) != mathFloat64Bits(got.CPULoad) ||
+			mathFloat32Bits(want.Location.Latitude) != mathFloat32Bits(got.Location.Latitude) ||
+			mathFloat32Bits(want.Location.Longitude) != mathFloat32Bits(got.Location.Longitude) {
 			return fmt.Errorf("PeerUpdate round-trip mismatch:\ngot:  %+v\nwant: %+v", got, want)
 		}
 		return nil
@@ -961,6 +1024,46 @@ func mathFloat64Bits(f float64) uint64 {
 		return 0x7ff8000000000000
 	}
 	return math.Float64bits(f)
+}
+
+func verifyTreeNodeSelfDescribing(inputWire, outputWire []byte) error {
+	if err := verifyRoundTripEquivalence("TreeNode", inputWire, outputWire); err != nil {
+		return err
+	}
+	var want TreeNode
+	if err := omnibuf.Unmarshal(inputWire, &want); err != nil {
+		return fmt.Errorf("decode input TreeNode: %w", err)
+	}
+	meta, ok := omnibuf.ReadField0SchemaMeta(outputWire)
+	if !ok || meta.Fields[2] != "name" {
+		return errors.New("missing or invalid Field #0 SchemaMeta on self_describing TreeNode")
+	}
+	blindSD, err := omnibuf.DecodeBlind(outputWire)
+	if err != nil {
+		return fmt.Errorf("DecodeBlind on self_describing TreeNode failed: %w", err)
+	}
+	if gotName, _ := blindSD["name"].(string); gotName != want.Name {
+		return fmt.Errorf("root TreeNode blind name = %q, want %q", gotName, want.Name)
+	}
+	if want.Primary != nil {
+		primMap, ok := blindSD["primary"].(map[string]any)
+		if !ok {
+			return fmt.Errorf("missing named child primary in self_describing TreeNode blind output: %v", blindSD)
+		}
+		if primName, _ := primMap["name"].(string); primName != want.Primary.Name {
+			return fmt.Errorf("child primary blind name = %q, want %q", primName, want.Primary.Name)
+		}
+		if want.Primary.Primary != nil {
+			p2Map, ok := primMap["primary"].(map[string]any)
+			if !ok {
+				return fmt.Errorf("missing depth-3 child primary in self_describing TreeNode blind output")
+			}
+			if p2Name, _ := p2Map["name"].(string); p2Name != want.Primary.Primary.Name {
+				return fmt.Errorf("depth-3 child primary blind name = %q, want %q", p2Name, want.Primary.Primary.Name)
+			}
+		}
+	}
+	return nil
 }
 
 func jsonMapsEqual(a, b map[string]any) bool {

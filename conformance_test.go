@@ -62,6 +62,7 @@ type ConformanceVector struct {
 	Category      string         `json:"category"`
 	Description   string         `json:"description"`
 	Schema        string         `json:"schema"`
+	SkipBlind     bool           `json:"skip_blind,omitempty"`
 	WireHex       string         `json:"wire_hex"`
 	WireByteLen   int            `json:"wire_byte_len"`
 	PresentFields []uint32       `json:"present_fields"`
@@ -79,6 +80,8 @@ type InvalidWireCase struct {
 	Name        string `json:"name"`
 	Category    string `json:"category"`
 	Description string `json:"description"`
+	Schema      string `json:"schema,omitempty"`
+	BlindOnly   bool   `json:"blind_only,omitempty"`
 	WireHex     string `json:"wire_hex"`
 }
 
@@ -795,12 +798,21 @@ func TestProtobufStyleConformanceCorpus(t *testing.T) {
 	// ------------------------------------------------------------------------
 	vectors = append(vectors, buildEdgeCaseVectors(t)...)
 
+	// ------------------------------------------------------------------------
+	// Category N: Cold-Review Hardening Vectors (>16 KiB shifts, >127 elements,
+	// -0.0 in submessages, mismatched wire types, high ExtType, Field #0 scoping)
+	// ------------------------------------------------------------------------
+	vectors = append(vectors, buildReviewLearningVectors(t)...)
+
+	allInvalid := append(buildInvalidWireCases(), buildEdgeInvalidWireCases()...)
+	allInvalid = append(allInvalid, buildReviewInvalidWireCases()...)
+
 	// Verify or update golden corpus file at testdata/conformance_corpus.json
 	corpus := ConformanceCorpusFile{
 		Version:       "2.1.0",
 		Specification: "OmniBuf Wire Format v2.1 (TZCNT Prefix-Varints + 4-Bit Explicit WireTypes + Index-Free Concat-Compatible Stream)",
 		ValidVectors:  vectors,
-		InvalidCases:  append(buildInvalidWireCases(), buildEdgeInvalidWireCases()...),
+		InvalidCases:  allInvalid,
 	}
 	corpusBytes, err := json.MarshalIndent(corpus, "", "  ")
 	if err != nil {
@@ -2186,6 +2198,9 @@ func buildEdgeInvalidWireCases() []InvalidWireCase {
 	add := func(name, category, desc string, raw []byte) {
 		out = append(out, InvalidWireCase{Name: name, Category: category, Description: desc, WireHex: hex.EncodeToString(raw)})
 	}
+	addBlindOnly := func(name, category, desc string, raw []byte) {
+		out = append(out, InvalidWireCase{Name: name, Category: category, Description: desc, BlindOnly: true, WireHex: hex.EncodeToString(raw)})
+	}
 	rv := func(rb byte) []byte { return []byte{rb, 0, 0, 0, 0, 0, 0, 0, 0} }
 	cat := func(parts ...[]byte) []byte {
 		var b []byte
@@ -2226,7 +2241,7 @@ func buildEdgeInvalidWireCases() []InvalidWireCase {
 		cat(appendTag(nil, 9, WireArray), AppendVarint(nil, 4), []byte{WireString, 0x03, 0x03, 0xff}))
 	add("invalid_utf8_in_map_key", "InvalidUTF8", "Field #12 WireMap(WireString, WireUint) key containing 0xFF",
 		cat(appendTag(nil, 12, WireMap), AppendVarint(nil, 6), []byte{WireString, WireUint, 0x03, 0x03, 0xff, 0x03}))
-	add("invalid_utf8_in_map_value", "InvalidUTF8", "WireMap(WireUint, WireString) value containing 0xFF",
+	addBlindOnly("invalid_utf8_in_map_value", "InvalidUTF8", "WireMap(WireUint, WireString) value containing 0xFF",
 		cat(appendTag(nil, 13, WireMap), AppendVarint(nil, 6), []byte{WireUint, WireString, 0x03, 0x03, 0x03, 0xff}))
 	add("invalid_utf8_in_nested_submsg", "InvalidUTF8", "WireSubMsg Field #8 whose Field #2 string contains 0xFF",
 		cat(appendTag(nil, 8, WireSubMsg), AppendVarint(nil, 3), str(2, "\xff")))
@@ -2236,17 +2251,17 @@ func buildEdgeInvalidWireCases() []InvalidWireCase {
 		(&SchemaMeta{Fields: map[uint32]string{1: "\xff"}}).AppendField0(nil, true))
 
 	// Inconsistent wire shapes for one field number within one message.
-	add("shape_change_uint_then_string", "ShapeMismatch", "Field #1 appears as WireUint then as WireString in the same message",
+	addBlindOnly("shape_change_uint_then_string", "ShapeMismatch", "Field #1 appears as WireUint then as WireString in the same message",
 		cat(AppendVarint(appendTag(nil, 1, WireUint), 1), str(1, "x")))
-	add("shape_change_submsg_then_uint", "ShapeMismatch", "Field #3 appears as WireSubMsg then as WireUint",
+	addBlindOnly("shape_change_submsg_then_uint", "ShapeMismatch", "Field #3 appears as WireSubMsg then as WireUint",
 		cat(appendTag(nil, 3, WireSubMsg), AppendVarint(nil, 0), AppendVarint(appendTag(nil, 3, WireUint), 1)))
-	add("shape_change_array_element_type", "ShapeMismatch", "Field #10 appears as WireArray(WireUint) then WireArray(WireFixed64)",
+	addBlindOnly("shape_change_array_element_type", "ShapeMismatch", "Field #10 appears as WireArray(WireUint) then WireArray(WireFixed64)",
 		cat(appendTag(nil, 10, WireArray), AppendVarint(nil, 3), []byte{WireUint, 0x03, 0x03},
 			appendTag(nil, 10, WireArray), AppendVarint(nil, 10), []byte{WireFixed64, 0x03, 1, 0, 0, 0, 0, 0, 0, 0}))
-	add("shape_change_map_value_type", "ShapeMismatch", "Field #12 appears as WireMap(String,Uint) then WireMap(String,String)",
+	addBlindOnly("shape_change_map_value_type", "ShapeMismatch", "Field #12 appears as WireMap(String,Uint) then WireMap(String,String)",
 		cat(appendTag(nil, 12, WireMap), AppendVarint(nil, 6), []byte{WireString, WireUint, 0x03, 0x03, 'a', 0x03},
 			appendTag(nil, 12, WireMap), AppendVarint(nil, 7), []byte{WireString, WireString, 0x03, 0x03, 'a', 0x03, 'b'}))
-	add("field0_name_collision", "CorruptField0", "Field #0 names both field #1 and field #2 \"dup\" while both are present",
+	addBlindOnly("field0_name_collision", "CorruptField0", "Field #0 names both field #1 and field #2 \"dup\" while both are present",
 		cat((&SchemaMeta{Fields: map[uint32]string{1: "dup", 2: "dup"}}).AppendField0(nil, true),
 			AppendVarint(appendTag(nil, 1, WireUint), 1), AppendVarint(appendTag(nil, 2, WireUint), 2)))
 
@@ -2369,8 +2384,476 @@ func exerciseAllReadersNoPanic(raw []byte) {
 	}
 }
 
+func buildReviewLearningVectors(t *testing.T) []ConformanceVector {
+	t.Helper()
+	var out []ConformanceVector
+
+	// N1: Embedded submessage > 16 KiB triggering 2B -> 4B Prefix-Varint length shift
+	{
+		peerShift := SamplePeerUpdate()
+		peerShift.Location.Datacenter = strings.Repeat("d", 20480)
+		wireShift := EncodePeerOmniBufDirect(nil, &peerShift)
+		wireTable, err := Marshal(&peerShift)
+		if err != nil {
+			t.Fatalf("Marshal(peerShift) failed: %v", err)
+		}
+		wirePlugin := SamplePBPeerUpdate(&peerShift).MarshalOmniBufAppend(nil)
+		if !bytes.Equal(wireShift, wireTable) || !bytes.Equal(wireShift, wirePlugin) {
+			t.Fatalf("embedded_submsg_over_16kib_shift cross-engine mismatch")
+		}
+		blindShift, err := DecodeBlind(wireShift)
+		if err != nil {
+			t.Fatalf("DecodeBlind(wireShift) failed: %v", err)
+		}
+		out = append(out, ConformanceVector{
+			Name:          "embedded_submsg_over_16kib_shift",
+			Category:      "N_ReviewLearnings",
+			Description:   "PeerUpdate with 20 KiB Location.Datacenter forcing 2B to 4B submessage length expansion before trailing Neighbors and Sequence",
+			Schema:        "PeerUpdate",
+			WireHex:       hex.EncodeToString(wireShift),
+			WireByteLen:   len(wireShift),
+			PresentFields: inspectPresentFields(wireShift),
+			ExpectedBlind: blindShift,
+		})
+	}
+
+	// N2: Cascading nested submessage > 16 KiB forcing 6 enclosing container shifts
+	{
+		clusterShift := &NestedCluster{
+			ClusterName: "eu-fra-cascade-shift",
+			Racks: []NestedRack{
+				{
+					RackID: 1,
+					Zone:   "az-1",
+					Servers: []NestedServer{
+						{
+							ServerID: 10,
+							Hostname: "srv-10.az1",
+							NICs: []NestedNIC{
+								{IfIndex: 1, MAC: strings.Repeat("m", 18432), IPs: []uint32{0x0A000001, 0x0A000002}},
+								{IfIndex: 2, MAC: "00:aa:bb:cc:dd:ee", IPs: []uint32{0x0A000101}},
+							},
+						},
+						{
+							ServerID: 11,
+							Hostname: "srv-11.az1",
+							NICs: []NestedNIC{
+								{IfIndex: 1, MAC: "00:11:22:33:44:55", IPs: []uint32{0x0A000201}},
+							},
+						},
+					},
+				},
+				{
+					RackID: 2,
+					Zone:   "az-2",
+					Servers: []NestedServer{
+						{
+							ServerID: 20,
+							Hostname: "srv-20.az2",
+							NICs: []NestedNIC{
+								{IfIndex: 1, MAC: "00:66:77:88:99:aa", IPs: []uint32{0x0A010001}},
+							},
+						},
+					},
+				},
+			},
+			Epoch: 1700000099,
+		}
+		wireCascade, err := MarshalDeterministic(clusterShift)
+		if err != nil {
+			t.Fatalf("MarshalDeterministic(clusterShift) failed: %v", err)
+		}
+		var gotCascade NestedCluster
+		if err := Unmarshal(wireCascade, &gotCascade); err != nil || !reflect.DeepEqual(&gotCascade, clusterShift) {
+			t.Fatalf("Unmarshal(clusterShift) mismatch: %v", err)
+		}
+		blindCascade, err := DecodeBlind(wireCascade)
+		if err != nil {
+			t.Fatalf("DecodeBlind(wireCascade) failed: %v", err)
+		}
+		out = append(out, ConformanceVector{
+			Name:          "cascading_nested_submsg_over_16kib_shift",
+			Category:      "N_ReviewLearnings",
+			Description:   "NestedCluster with an 18 KiB inner NestedNIC.MAC forcing 6 cascading 2B to 4B container length shifts across sibling servers and racks",
+			Schema:        "NestedCluster",
+			WireHex:       hex.EncodeToString(wireCascade),
+			WireByteLen:   len(wireCascade),
+			PresentFields: inspectPresentFields(wireCascade),
+			ExpectedBlind: blindCascade,
+		})
+	}
+
+	// N3: Repeated submessage array with 150 elements (> 127 element count varint)
+	{
+		items := make([]AllTypesSubMsg, 150)
+		for i := range items {
+			items[i] = AllTypesSubMsg{
+				ID:    uint32(i + 1),
+				Label: fmt.Sprintf("item-%03d", i),
+				Flag:  i%2 == 0,
+				Score: int64(-10 * i),
+			}
+		}
+		out = append(out, verifyAllTypesAcrossEngines(t,
+			"repeated_submsg_over_127_elements", "N_ReviewLearnings",
+			"TestAllTypes with 150 AllTypesSubMsg elements exercising 2-byte Prefix-Varint element counts above 127",
+			&TestAllTypes{F1Uint32: 150, F11SubMsgArr: items}))
+	}
+
+	// N4: IEEE-754 negative zero (-0.0) inside nested submessage and root float64
+	{
+		peerNegZero := SamplePeerUpdate()
+		peerNegZero.CPULoad = math.Float64frombits(0x8000000000000000)
+		peerNegZero.Location.Latitude = math.Float32frombits(0x80000000)
+		peerNegZero.Location.Longitude = math.Float32frombits(0x80000000)
+		wireNZ := EncodePeerOmniBufDirect(nil, &peerNegZero)
+		wireNZTable, err := Marshal(&peerNegZero)
+		if err != nil {
+			t.Fatalf("Marshal(peerNegZero) failed: %v", err)
+		}
+		wireNZPlugin := SamplePBPeerUpdate(&peerNegZero).MarshalOmniBufAppend(nil)
+		if !bytes.Equal(wireNZ, wireNZTable) || !bytes.Equal(wireNZ, wireNZPlugin) {
+			t.Fatalf("float_neg_zero_in_submsg_and_repeated_submsg cross-engine mismatch")
+		}
+		blindNZ, err := DecodeBlind(wireNZ)
+		if err != nil {
+			t.Fatalf("DecodeBlind(wireNZ) failed: %v", err)
+		}
+		out = append(out, ConformanceVector{
+			Name:          "float_neg_zero_in_submsg_and_repeated_submsg",
+			Category:      "N_ReviewLearnings",
+			Description:   "PeerUpdate with -0.0 in CPULoad, Location.Latitude, and Location.Longitude verifying IEEE-754 sign-bit preservation in nested submessages",
+			Schema:        "PeerUpdate",
+			WireHex:       hex.EncodeToString(wireNZ),
+			WireByteLen:   len(wireNZ),
+			PresentFields: inspectPresentFields(wireNZ),
+			ExpectedBlind: blindNZ,
+		})
+	}
+
+	// N5: Known field with mismatched wire type skipped by schema decoders
+	{
+		var pktMismatch []byte
+		pktMismatch = appendTag(pktMismatch, 1, WireUint)
+		pktMismatch = AppendVarint(pktMismatch, 42)
+		pktMismatch = appendTag(pktMismatch, 1, WireString)
+		pktMismatch = AppendVarint(pktMismatch, uint64(len("ignored")))
+		pktMismatch = append(pktMismatch, "ignored"...)
+		pktMismatch = appendTag(pktMismatch, 6, WireString)
+		pktMismatch = AppendVarint(pktMismatch, uint64(len("kept")))
+		pktMismatch = append(pktMismatch, "kept"...)
+
+		var got TestAllTypes
+		if err := Unmarshal(pktMismatch, &got); err != nil || got.F1Uint32 != 42 || got.F6String != "kept" {
+			t.Fatalf("known_field_mismatched_wire_type_skipped failed: %+v, %v", got, err)
+		}
+		out = append(out, ConformanceVector{
+			Name:          "known_field_mismatched_wire_type_skipped",
+			Category:      "N_ReviewLearnings",
+			Description:   "TestAllTypes with F1Uint32=42 followed by Field #1 encoded as WireString (\"ignored\") and F6String=\"kept\"; schema decoders skip mismatched wire types",
+			Schema:        "TestAllTypes",
+			SkipBlind:     true,
+			WireHex:       hex.EncodeToString(pktMismatch),
+			WireByteLen:   len(pktMismatch),
+			PresentFields: inspectPresentFields(pktMismatch),
+		})
+	}
+
+	// N6: Unknown WireExtended fields with high ExtType codes 0x80 and 0xFF skipped cleanly
+	{
+		var pktHighExt []byte
+		pktHighExt = appendTag(pktHighExt, 1, WireUint)
+		pktHighExt = AppendVarint(pktHighExt, 77)
+		pktHighExt = appendTag(pktHighExt, 99, WireExtended)
+		pktHighExt = AppendVarint(pktHighExt, 5)
+		pktHighExt = append(pktHighExt, 0x80, 0xDE, 0xAD, 0xBE, 0xEF)
+		pktHighExt = appendTag(pktHighExt, 100, WireExtended)
+		pktHighExt = AppendVarint(pktHighExt, 3)
+		pktHighExt = append(pktHighExt, 0xFF, 0xCA, 0xFE)
+		pktHighExt = appendTag(pktHighExt, 6, WireString)
+		pktHighExt = AppendVarint(pktHighExt, uint64(len("after-ext")))
+		pktHighExt = append(pktHighExt, "after-ext"...)
+
+		var got TestAllTypes
+		if err := Unmarshal(pktHighExt, &got); err != nil || got.F1Uint32 != 77 || got.F6String != "after-ext" {
+			t.Fatalf("unknown_wire_extended_high_ext_type_0x80_0xff failed: %+v, %v", got, err)
+		}
+		out = append(out, ConformanceVector{
+			Name:          "unknown_wire_extended_high_ext_type_0x80_0xff",
+			Category:      "N_ReviewLearnings",
+			Description:   "TestAllTypes containing unknown WireExtended fields with high unsigned ExtType bytes 0x80 and 0xFF skipped by schema decoders",
+			Schema:        "TestAllTypes",
+			SkipBlind:     true,
+			WireHex:       hex.EncodeToString(pktHighExt),
+			WireByteLen:   len(pktHighExt),
+			PresentFields: inspectPresentFields(pktHighExt),
+		})
+	}
+
+	// N7: Inner Field #0 empty string clears inherited ancestor field name back to field_<N>
+	{
+		innerEnc := NewEncoder(64)
+		innerEnc.WriteRaw((&SchemaMeta{Fields: map[uint32]string{1: ""}}).AppendField0(nil, true))
+		innerEnc.WriteUint(1, 42)
+		innerEnc.WriteString(2, "hello")
+		innerBytes := append([]byte(nil), innerEnc.Finish()...)
+
+		outerEnc := NewEncoder(128)
+		outerEnc.WriteRaw((&SchemaMeta{
+			Fields: map[uint32]string{8: "sub"},
+			Children: map[uint32]*SchemaMeta{
+				8: {Fields: map[uint32]string{1: "inherited_id", 2: "kept_label"}},
+			},
+		}).AppendField0(nil, true))
+		outerEnc.BeginSubMsg(8)
+		outerEnc.WriteRaw(innerBytes)
+		outerEnc.EndSubMsg()
+		pktMask := append([]byte(nil), outerEnc.Finish()...)
+
+		blindMask, err := DecodeBlind(pktMask)
+		if err != nil {
+			t.Fatalf("DecodeBlind(pktMask) failed: %v", err)
+		}
+		subMap, _ := blindMask["sub"].(map[string]any)
+		if subMap["field_1"] != uint64(42) || subMap["kept_label"] != "hello" {
+			t.Fatalf("field0_empty_string_clears_inherited_name mismatch: %+v", blindMask)
+		}
+		out = append(out, ConformanceVector{
+			Name:          "field0_empty_string_clears_inherited_name",
+			Category:      "N_ReviewLearnings",
+			Description:   "Inner Field #0 setting fields[1]=\"\" clears inherited outer child name back to field_1 while keeping sibling inherited names",
+			Schema:        "TestAllTypes",
+			WireHex:       hex.EncodeToString(pktMask),
+			WireByteLen:   len(pktMask),
+			PresentFields: inspectPresentFields(pktMask),
+			ExpectedBlind: blindMask,
+		})
+	}
+
+	// Helper to encode a raw SchemaMeta body (without outer Field #0 tag/len)
+	encodeSchemaMetaBody := func(m *SchemaMeta) []byte {
+		full := m.AppendField0(nil, true)
+		_, tn := DecodeVarint(full)
+		_, ln := DecodeVarint(full[tn:])
+		return full[tn+ln:]
+	}
+
+	// N8: Duplicate child key inside a single SchemaMeta.children WireMap replaces prior entry
+	{
+		childOld := encodeSchemaMetaBody(&SchemaMeta{Fields: map[uint32]string{1: "old_id", 2: "old_label"}})
+		childNew := encodeSchemaMetaBody(&SchemaMeta{Fields: map[uint32]string{1: "new_id"}})
+
+		var f0Body []byte
+		f0Body = appendTag(f0Body, 2, WireMap)
+		var fieldsMap []byte
+		fieldsMap = append(fieldsMap, WireUint, WireString)
+		fieldsMap = AppendVarint(fieldsMap, 1)
+		fieldsMap = AppendVarint(fieldsMap, 8)
+		fieldsMap = AppendVarint(fieldsMap, 3)
+		fieldsMap = append(fieldsMap, "sub"...)
+		f0Body = AppendVarint(f0Body, uint64(len(fieldsMap)))
+		f0Body = append(f0Body, fieldsMap...)
+
+		f0Body = appendTag(f0Body, 3, WireMap)
+		var childMap []byte
+		childMap = append(childMap, WireUint, WireSubMsg)
+		childMap = AppendVarint(childMap, 2)
+		childMap = AppendVarint(childMap, 8)
+		childMap = AppendVarint(childMap, uint64(len(childOld)))
+		childMap = append(childMap, childOld...)
+		childMap = AppendVarint(childMap, 8)
+		childMap = AppendVarint(childMap, uint64(len(childNew)))
+		childMap = append(childMap, childNew...)
+		f0Body = AppendVarint(f0Body, uint64(len(childMap)))
+		f0Body = append(f0Body, childMap...)
+
+		enc := NewEncoder(128)
+		var rawF0 []byte
+		rawF0 = appendTag(rawF0, 0, WireSubMsg)
+		rawF0 = AppendVarint(rawF0, uint64(len(f0Body)))
+		rawF0 = append(rawF0, f0Body...)
+		enc.WriteRaw(rawF0)
+		enc.BeginSubMsg(8)
+		enc.WriteUint(1, 10)
+		enc.WriteString(2, "hi")
+		enc.EndSubMsg()
+		pktDupKey := append([]byte(nil), enc.Finish()...)
+
+		blindDup, err := DecodeBlind(pktDupKey)
+		if err != nil {
+			t.Fatalf("DecodeBlind(pktDupKey) failed: %v", err)
+		}
+		subMap, _ := blindDup["sub"].(map[string]any)
+		if subMap["new_id"] != uint64(10) || subMap["field_2"] != "hi" {
+			t.Fatalf("field0_children_single_map_dup_key_replaces mismatch: %+v", blindDup)
+		}
+		out = append(out, ConformanceVector{
+			Name:          "field0_children_single_map_dup_key_replaces",
+			Category:      "N_ReviewLearnings",
+			Description:   "Duplicate child key 8 inside a single SchemaMeta.children WireMap replaces the prior child entry rather than merging",
+			Schema:        "TestAllTypes",
+			WireHex:       hex.EncodeToString(pktDupKey),
+			WireByteLen:   len(pktDupKey),
+			PresentFields: inspectPresentFields(pktDupKey),
+			ExpectedBlind: blindDup,
+		})
+	}
+
+	// N9: Separate Field #0 blocks merge SchemaMeta.children[k] recursively
+	{
+		enc := NewEncoder(128)
+		enc.WriteRaw((&SchemaMeta{
+			Fields: map[uint32]string{8: "sub"},
+			Children: map[uint32]*SchemaMeta{
+				8: {Fields: map[uint32]string{1: "old_id", 2: "kept_label"}},
+			},
+		}).AppendField0(nil, true))
+		enc.WriteRaw((&SchemaMeta{
+			Children: map[uint32]*SchemaMeta{
+				8: {Fields: map[uint32]string{1: "new_id"}},
+			},
+		}).AppendField0(nil, true))
+		enc.BeginSubMsg(8)
+		enc.WriteUint(1, 10)
+		enc.WriteString(2, "hi")
+		enc.EndSubMsg()
+		pktTwoBlocks := append([]byte(nil), enc.Finish()...)
+
+		blindTwo, err := DecodeBlind(pktTwoBlocks)
+		if err != nil {
+			t.Fatalf("DecodeBlind(pktTwoBlocks) failed: %v", err)
+		}
+		subMap, _ := blindTwo["sub"].(map[string]any)
+		if subMap["new_id"] != uint64(10) || subMap["kept_label"] != "hi" {
+			t.Fatalf("field0_children_two_blocks_merge mismatch: %+v", blindTwo)
+		}
+		out = append(out, ConformanceVector{
+			Name:          "field0_children_two_blocks_merge",
+			Category:      "N_ReviewLearnings",
+			Description:   "Two separate Field #0 blocks merge SchemaMeta.children[8] recursively, overriding field 1 and preserving field 2",
+			Schema:        "TestAllTypes",
+			WireHex:       hex.EncodeToString(pktTwoBlocks),
+			WireByteLen:   len(pktTwoBlocks),
+			PresentFields: inspectPresentFields(pktTwoBlocks),
+			ExpectedBlind: blindTwo,
+		})
+	}
+
+	return out
+}
+
+func buildReviewInvalidWireCases() []InvalidWireCase {
+	cat := func(parts ...[]byte) []byte {
+		var b []byte
+		for _, p := range parts {
+			b = append(b, p...)
+		}
+		return b
+	}
+	arr := func(f uint16, body ...byte) []byte {
+		return cat(appendTag(nil, f, WireArray), AppendVarint(nil, uint64(len(body))), body)
+	}
+	mp := func(f uint16, body ...byte) []byte {
+		return cat(appendTag(nil, f, WireMap), AppendVarint(nil, uint64(len(body))), body)
+	}
+
+	// Build Field #0 with SchemaMeta.children nested 16 levels deep (container depth = 1 + 16*2 = 33 > 32)
+	var deepSchemaBody []byte
+	for i := 0; i < 16; i++ {
+		var mapBody []byte
+		mapBody = append(mapBody, WireUint, WireSubMsg)
+		mapBody = AppendVarint(mapBody, 1)
+		mapBody = AppendVarint(mapBody, 1)
+		mapBody = AppendVarint(mapBody, uint64(len(deepSchemaBody)))
+		mapBody = append(mapBody, deepSchemaBody...)
+		deepSchemaBody = cat(appendTag(nil, 3, WireMap), AppendVarint(nil, uint64(len(mapBody))), mapBody)
+	}
+	deepField0 := cat(appendTag(nil, 0, WireSubMsg), AppendVarint(nil, uint64(len(deepSchemaBody))), deepSchemaBody)
+
+	// Nested WireArray(WireArray(WireUint)) followed by WireArray(WireArray(WireString)) on Field #99
+	innerUintArr := arr(99, WireArray, 0x03, 0x07, WireUint, 0x03, 0x0f)
+	innerStrArr := arr(99, WireArray, 0x03, 0x09, WireString, 0x03, 0x03, 'a')
+
+	return []InvalidWireCase{
+		{
+			Name:        "bool_array_invalid_byte_0x02",
+			Category:    "CorruptWireArray",
+			Description: "Unknown Field #99 WireArray(WireBoolFalse) containing invalid boolean byte 0x02",
+			WireHex:     hex.EncodeToString(arr(99, WireBoolFalse, 0x05, 0x01, 0x02)),
+		},
+		{
+			Name:        "string_array_trailing_bytes",
+			Category:    "CorruptWireArray",
+			Description: "Known F9StringArr WireArray(WireString) with count=1 followed by trailing unparsed bytes inside ByteLen",
+			WireHex:     hex.EncodeToString(arr(9, WireString, 0x03, 0x05, 'o', 'k', 0x03, 'z')),
+		},
+		{
+			Name:        "uint32_array_trailing_bytes",
+			Category:    "CorruptWireArray",
+			Description: "Known F10Uint32Arr WireArray(WireUint) with count=2 followed by a trailing byte inside ByteLen",
+			WireHex:     hex.EncodeToString(arr(10, WireUint, 0x05, 0x03, 0x05, 0x07)),
+		},
+		{
+			Name:        "map_str_uint_trailing_bytes",
+			Category:    "CorruptWireMap",
+			Description: "Known F12MapStrUint WireMap(WireString, WireUint) with count=1 followed by a trailing byte inside ByteLen",
+			WireHex:     hex.EncodeToString(mp(12, WireString, WireUint, 0x03, 0x03, 'k', 0x03, 0x01)),
+		},
+		{
+			Name:        "fixed32_array_trailing_byte",
+			Category:    "CorruptWireArray",
+			Description: "WireArray(WireFixed32) with count=1 and 5 payload bytes inside ByteLen",
+			WireHex:     hex.EncodeToString(arr(99, WireFixed32, 0x03, 1, 2, 3, 4, 5)),
+		},
+		{
+			Name:        "bool_array_trailing_byte",
+			Category:    "CorruptWireArray",
+			Description: "WireArray(WireBoolFalse) with count=1 and 2 payload bytes inside ByteLen",
+			WireHex:     hex.EncodeToString(arr(99, WireBoolFalse, 0x03, 0x01, 0x00)),
+		},
+		{
+			Name:        "concat_split_corrupt_submsg",
+			Category:    "CorruptSubMsg",
+			Description: "Two F8SubMsg occurrences where occurrence 1 ends mid-varint [0x21, 0x02] and occurrence 2 begins [0x00]",
+			WireHex: hex.EncodeToString(cat(
+				appendTag(nil, 8, WireSubMsg), AppendVarint(nil, 2), []byte{0x21, 0x02},
+				appendTag(nil, 8, WireSubMsg), AppendVarint(nil, 1), []byte{0x00},
+			)),
+		},
+		{
+			Name:        "field0_wrong_wire_type_uint",
+			Category:    "CorruptField0",
+			Description: "Field #0 encoded with WireUint before a valid F1Uint32 field",
+			WireHex:     hex.EncodeToString(cat([]byte{0x01, 0x05}, AppendVarint(appendTag(nil, 1, WireUint), 42))),
+		},
+		{
+			Name:        "field0_corrupt_inner_varint",
+			Category:    "CorruptField0",
+			Description: "Field #0 WireSubMsg containing a truncated inner varint before a valid F1Uint32 field",
+			WireHex: hex.EncodeToString(cat(
+				appendTag(nil, 0, WireSubMsg), AppendVarint(nil, 2), []byte{0x21, 0x02},
+				AppendVarint(appendTag(nil, 1, WireUint), 42),
+			)),
+		},
+		{
+			Name:        "field0_children_depth_exceeded",
+			Category:    "MaliciousDepthBomb",
+			Description: "Field #0 SchemaMeta.children nested 16 levels deep exceeding MaxNestingDepth (1 + 16*2 = 33 > 32)",
+			WireHex:     hex.EncodeToString(deepField0),
+		},
+		{
+			Name:        "blind_nested_array_inner_elem_type_conflict",
+			Category:    "ShapeMismatch",
+			Description: "Field #99 appears as WireArray(WireArray(WireUint)) then WireArray(WireArray(WireString))",
+			BlindOnly:   true,
+			WireHex:     hex.EncodeToString(cat(innerUintArr, innerStrArr)),
+		},
+	}
+}
+
 func TestMalformedWireRejectionConformance(t *testing.T) {
 	cases := append(buildInvalidWireCases(), buildEdgeInvalidWireCases()...)
+	cases = append(cases, buildReviewInvalidWireCases()...)
 	for _, tc := range cases {
 		t.Run(tc.Name, func(t *testing.T) {
 			raw, err := hex.DecodeString(tc.WireHex)
@@ -2383,7 +2866,31 @@ func TestMalformedWireRejectionConformance(t *testing.T) {
 				t.Errorf("[%s] expected DecodeBlind to return error on malformed/malicious input %x", tc.Name, raw)
 			}
 
-			// 2. All Table-Driven, Plugin-Generated, Opaque, and O(1) readers must never panic
+			// 2. For all !BlindOnly cases, schema-aware decoders and Opaque splicing MUST also reject
+			if !tc.BlindOnly {
+				var allTypes TestAllTypes
+				if err := Unmarshal(raw, &allTypes); err == nil {
+					t.Errorf("[%s] expected Unmarshal(TestAllTypes) to return error on %x", tc.Name, raw)
+				}
+				var allTypesZC TestAllTypes
+				if err := UnmarshalZeroCopy(raw, &allTypesZC); err == nil {
+					t.Errorf("[%s] expected UnmarshalZeroCopy(TestAllTypes) to return error on %x", tc.Name, raw)
+				}
+				var pbAll pb.TestAllTypes
+				if err := pbAll.UnmarshalOmniBuf(raw, false); err == nil {
+					t.Errorf("[%s] expected pb.TestAllTypes.UnmarshalOmniBuf to return error on %x", tc.Name, raw)
+				}
+				if tc.Category != "InvalidUTF8" || strings.Contains(tc.Name, "field0") {
+					var opAll pb.OpaqueTestAllTypes
+					_ = opAll.Unmarshal(raw)
+					opAll.SetF1Uint32(1)
+					if _, err := opAll.TryMarshalAppend(nil); err == nil {
+						t.Errorf("[%s] expected pb.OpaqueTestAllTypes.TryMarshalAppend to return error on %x", tc.Name, raw)
+					}
+				}
+			}
+
+			// 3. All Table-Driven, Plugin-Generated, Opaque, and O(1) readers must never panic
 			exerciseAllReadersNoPanic(raw)
 		})
 	}

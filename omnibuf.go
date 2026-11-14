@@ -373,8 +373,18 @@ func nextContainerField(packet []byte, pos int, targetField uint16, expWT uint8,
 			pos += tn
 		}
 
-		if fnum == 0 && wt != wireSubMsg {
-			return nil, 0, false, false
+		if fnum == 0 {
+			if wt != wireSubMsg {
+				return nil, 0, false, false
+			}
+			if targetField != 0 {
+				var err error
+				pos, err = validateField0(packet, pos, wt, 0)
+				if err != nil {
+					return nil, 0, false, false
+				}
+				continue
+			}
 		}
 		if fnum == uint32(targetField) {
 			if wt != expWT {
