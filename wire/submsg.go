@@ -369,6 +369,7 @@ func ReadNestedString(packet []byte, subMsgField, targetField uint16) (string, b
 }
 
 // ReadNestedStringZeroCopy reads a nested string (e.g. peer.location.city) with 0 allocations.
+// Do not modify or pool packet while the returned string is in use.
 func ReadNestedStringZeroCopy(packet []byte, subMsgField, targetField uint16) (string, bool) {
 	b, ok := ReadNestedStringBytes(packet, subMsgField, targetField)
 	if !ok || len(b) == 0 {

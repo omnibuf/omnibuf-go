@@ -149,11 +149,6 @@ type structCodec struct {
 	cyclicSchema bool
 }
 
-type emptyInterface struct {
-	typ uintptr
-	ptr unsafe.Pointer
-}
-
 var codecCache sync.Map // map[reflect.Type]*structCodec
 
 func getStructCodec(t reflect.Type) (*structCodec, error) {
@@ -1145,7 +1140,7 @@ func marshalTableAppend(dst []byte, v any, opts MarshalOptions) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	ptr := (*emptyInterface)(unsafe.Pointer(&v)).ptr
+	ptr := rv.UnsafePointer()
 	if cap(dst) < 512 {
 		dst = make([]byte, 0, 512)
 	} else {
@@ -1649,7 +1644,8 @@ func Unmarshal(packet []byte, v any) error {
 }
 
 // UnmarshalZeroCopy decodes an OmniBuf packet into any struct pointer v using zero-copy
-// unsafe.String references into packet.
+// unsafe.String references into packet. The packet must not be modified or returned
+// to a buffer pool while any decoded string, map key, or byte slice remains in use.
 func UnmarshalZeroCopy(packet []byte, v any) error {
 	return unmarshalTable(packet, v, true)
 }
@@ -1669,7 +1665,7 @@ func unmarshalTable(packet []byte, v any, zeroCopy bool) error {
 	if err != nil {
 		return err
 	}
-	ptr := (*emptyInterface)(unsafe.Pointer(&v)).ptr
+	ptr := rv.UnsafePointer()
 	// Like proto.Unmarshal, decoding replaces the destination: fields absent
 	// from packet are reset (slice capacity is retained for reuse).
 	return sc.decodeStruct(packet, ptr, zeroCopy, 0, false)
@@ -1822,6 +1818,8 @@ func clearField(fc *fieldCodec, fPtr unsafe.Pointer) {
 		if !mv.IsNil() {
 			mv.Clear()
 		}
+	case reflect.String:
+		*(*string)(fPtr) = ""
 	case reflect.Pointer:
 		*(*unsafe.Pointer)(fPtr) = nil
 	case reflect.Struct:

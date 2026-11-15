@@ -466,3 +466,17 @@ func TestZeroCopyBytesCapacityClippingAndOpaqueCleanAlias(t *testing.T) {
 		t.Fatal("mutating Opaque.MarshalAppend output mutated op.raw")
 	}
 }
+
+func TestAbsentStringClearedOnReuse(t *testing.T) {
+	type message struct {
+		Text string `omnibuf:"1"`
+	}
+	value := message{Text: strings.Repeat("live", 1024)}
+	if err := ob.Unmarshal(nil, &value); err != nil {
+		t.Fatal(err)
+	}
+	if value.Text != "" {
+		t.Fatal("absent string was not cleared")
+	}
+	runtime.GC()
+}

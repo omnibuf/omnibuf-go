@@ -151,3 +151,14 @@ just fuzz 10s
 ## License
 
 Released under the [MIT License](./LICENSE).
+
+## Buffer ownership
+
+`Unmarshal` copies decoded strings and bytes. `UnmarshalZeroCopy` and the
+`Read*ZeroCopy` helpers borrow packet storage: do not modify the packet or return
+it to a buffer pool until every decoded string, map key, and byte slice is no
+longer used. Copying a Go string variable does not copy its backing storage.
+
+The table codec uses reflected field offsets and unsafe typed accesses. Its CI
+runs race detection; changes to pointer handling should also be checked with
+`go test -gcflags=all=-d=checkptr=2 ./...`.

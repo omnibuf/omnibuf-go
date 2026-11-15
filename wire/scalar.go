@@ -106,6 +106,7 @@ func ValidUTF8(b []byte) bool {
 }
 
 // DecodeStr converts b into a Go string (zero-copy via unsafe.String if zeroCopy is true).
+// With zeroCopy, b must remain immutable while the returned string is in use.
 func DecodeStr(b []byte, zeroCopy bool) string {
 	if len(b) == 0 {
 		return ""
@@ -205,6 +206,7 @@ func ReadString(packet []byte, fieldNum uint16) (string, bool) {
 }
 
 // ReadStringZeroCopy reads a string field with zero allocations using unsafe.String.
+// Do not modify or pool packet while the returned string is in use.
 func ReadStringZeroCopy(packet []byte, fieldNum uint16) (string, bool) {
 	b, ok := readStringSlice(packet, fieldNum)
 	if !ok || len(b) == 0 {
