@@ -2,11 +2,12 @@
 
 [![CI](https://github.com/omnibuf/omnibuf-go/actions/workflows/ci.yml/badge.svg)](https://github.com/omnibuf/omnibuf-go/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/omnibuf/omnibuf-go.svg)](https://pkg.go.dev/github.com/omnibuf/omnibuf-go)
+[![Wire Spec: v0.1](https://img.shields.io/badge/spec-v0.1-111111?style=flat&labelColor=111111&color=FF4F18)](https://omnibuf.com/spec)
 [![Website](https://img.shields.io/badge/website-omnibuf.com-111111?style=flat&labelColor=111111&color=D4FF33)](https://omnibuf.com/go)
 
 **[Website (omnibuf.com)](https://omnibuf.com)** · **[How It Works](https://omnibuf.com/how-it-works)** · **[Go Documentation](https://omnibuf.com/go)** · **[TypeScript / JS (`omnibuf-es`)](https://github.com/omnibuf/omnibuf-es)** · **[CLI (`omnibuf-cli`)](https://github.com/omnibuf/omnibuf-cli)** · **[Wire Format Specification](https://omnibuf.com/spec)**
 
-Go runtime library (`package omnibuf`) and `protoc-gen-omnibuf` compiler plugin for the **OmniBuf** binary wire format:
+Go runtime library (`package omnibuf`) and `protoc-gen-omnibuf` compiler plugin implementing **[OmniBuf Wire Specification v0.1](https://omnibuf.com/spec)**:
 
 1. **Keep `.proto` schemas and Go structs:** Existing `.proto` files, `protoc-gen-go` structs, and `dynamicpb` messages work without changes.
 2. **Single-pass encode & zero-loop varints:** Prefix-Varints (`TZCNT`) decode integers in a single load with no byte-by-byte continuation loop, and 2-byte length backpatching encodes messages in a single forward pass (~6x faster encode and ~6x faster zero-copy decode than `google.golang.org/protobuf`).
