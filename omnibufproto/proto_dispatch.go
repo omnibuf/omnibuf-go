@@ -1,4 +1,4 @@
-package omnibuf
+package omnibufproto
 
 import (
 	"reflect"
@@ -12,9 +12,6 @@ import (
 
 var reflectiveProtoTypes sync.Map
 
-// Open generated structs without descriptor-only features can retain the table
-// fast path. Oneofs, enums, explicit scalar presence and large field IDs require
-// descriptors. Walk child descriptors too, including recursive schemas.
 func needsProtoReflection(pm proto.Message) bool {
 	t := reflect.TypeOf(pm)
 	if cached, ok := reflectiveProtoTypes.Load(t); ok {
@@ -43,8 +40,6 @@ func needsProtoReflection(pm proto.Message) bool {
 	}
 	md := pm.ProtoReflect().Descriptor()
 	use := visit(md)
-	// Opaque generated APIs expose no protobuf-tagged fields to the table codec,
-	// including when an open root struct embeds an opaque child message struct.
 	if !use {
 		use = !hasAllOpenStructFields(t, md, make(map[reflect.Type]bool))
 	}

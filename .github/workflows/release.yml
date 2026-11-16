@@ -52,7 +52,7 @@ jobs:
               fi
               stage="dist/${name}-${VERSION}-${goos}-${goarch}"
               mkdir -p "$stage"
-              CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "$stage/$bin" "./cmd/$name"
+              (cd "cmd/$name" && CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "../../$stage/$bin" .)
               cp LICENSE README.md "$stage/"
               if [[ "$ext" == "zip" ]]; then
                 (cd dist && zip -qr "${name}-${goos}-${goarch}.zip" "$(basename "$stage")")

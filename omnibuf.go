@@ -12,8 +12,40 @@ import (
 	"sort"
 	"unsafe"
 
+	"github.com/omnibuf/omnibuf-go/internal/protohook"
 	"github.com/omnibuf/omnibuf-go/wire"
 )
+
+// MarshalOptions configures OmniBuf wire encoding.
+type MarshalOptions struct {
+	// Deterministic sorts wireMap keys in ascending order so identical messages
+	// always produce byte-for-byte identical wire output.
+	Deterministic bool
+
+	// SelfDescribing emits Field #0 (Tag = 0x19, wireSubMsg = 12, omnibuf.v1.SchemaMeta)
+	// at byte 0 of the root message with field names and nested children schemas.
+	SelfDescribing bool
+}
+
+// Marshal encodes v using the configured options.
+func (o MarshalOptions) Marshal(v any) ([]byte, error) {
+	return o.MarshalAppend(nil, v)
+}
+
+// MarshalAppend appends the OmniBuf encoding of v to dst[:0] using the configured options.
+func (o MarshalOptions) MarshalAppend(dst []byte, v any) ([]byte, error) {
+	if protohook.MarshalHook != nil {
+		if out, handled, err := protohook.MarshalHook(dst, v, o.Deterministic, o.SelfDescribing); handled {
+			return out, err
+		}
+	}
+	return marshalTableAppend(dst, v, o)
+}
+
+// MarshalDeterministic encodes v with deterministic wireMap key ordering.
+func MarshalDeterministic(v any) ([]byte, error) {
+	return MarshalOptions{Deterministic: true}.Marshal(v)
+}
 
 // Explicit 4-bit Wire Types (0..15) encoded in the low 4 bits of the field tag:
 // Tag = (FieldNumber << 4) | WireType

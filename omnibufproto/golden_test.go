@@ -1,4 +1,4 @@
-package omnibuf_test
+package omnibufproto_test
 
 import (
 	"bytes"
@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"testing"
 	"unicode/utf8"
+
+	_ "github.com/omnibuf/omnibuf-go/omnibufproto"
 
 	. "github.com/omnibuf/omnibuf-go"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -217,7 +219,7 @@ func assertOrUpdateGoldenFile(t *testing.T, path string, got []byte) {
 
 func writeOrVerifyFDSFormats(t *testing.T, baseName string, fds *descriptorpb.FileDescriptorSet) {
 	t.Helper()
-	goldenDir := filepath.Join("testdata", "golden")
+	goldenDir := filepath.Join("..", "testdata", "golden")
 
 	// 1. .fds.json
 	rawJSON, err := protojson.Marshal(fds)
@@ -272,7 +274,7 @@ func writeOrVerifyFDSFormats(t *testing.T, baseName string, fds *descriptorpb.Fi
 
 func verifyGoldenCase(t *testing.T, baseName string, md protoreflect.MessageDescriptor, inputJSON []byte) {
 	t.Helper()
-	goldenDir := filepath.Join("testdata", "golden")
+	goldenDir := filepath.Join("..", "testdata", "golden")
 
 	// 1. Input JSON golden file
 	assertOrUpdateGoldenFile(t, filepath.Join(goldenDir, baseName+".input.json"), inputJSON)

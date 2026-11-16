@@ -1,4 +1,4 @@
-package omnibuf_test
+package omnibufproto_test
 
 import (
 	"bytes"
@@ -13,11 +13,13 @@ import (
 	"strings"
 	"testing"
 
+	_ "github.com/omnibuf/omnibuf-go/omnibufproto"
+
 	"google.golang.org/protobuf/proto"
 
 	. "github.com/omnibuf/omnibuf-go"
 	"github.com/omnibuf/omnibuf-go/internal/conformance"
-	"github.com/omnibuf/omnibuf-go/internal/pb"
+	"github.com/omnibuf/omnibuf-go/omnibufproto/internal/pb"
 	. "github.com/omnibuf/omnibuf-go/wire"
 )
 
@@ -819,8 +821,8 @@ func TestProtobufStyleConformanceCorpus(t *testing.T) {
 		t.Fatalf("marshal conformance corpus JSON: %v", err)
 	}
 	corpusPaths := []string{
-		filepath.Join("testdata", "conformance_corpus.json"),
-		filepath.Join("internal", "conformance", "conformance_corpus.json"),
+		filepath.Join("..", "testdata", "conformance_corpus.json"),
+		filepath.Join("..", "internal", "conformance", "conformance_corpus.json"),
 	}
 	if *updateGolden {
 		for _, cp := range corpusPaths {
@@ -3035,7 +3037,11 @@ func TestConformanceRunnerAdapterHarness(t *testing.T) {
 	runnerBin := filepath.Join(tmpDir, "conformance-runner")
 	adapterBin := filepath.Join(tmpDir, "conformance-go")
 
-	if out, err := exec.Command("go", "build", "-o", runnerBin, "./cmd/conformance-runner").CombinedOutput(); err != nil {
+	if out, err := func() *exec.Cmd {
+		c := exec.Command("go", "build", "-o", runnerBin, "./cmd/conformance-runner")
+		c.Dir = ".."
+		return c
+	}().CombinedOutput(); err != nil {
 		t.Fatalf("build conformance-runner failed: %v\n%s", err, out)
 	}
 	if out, err := exec.Command("go", "build", "-o", adapterBin, "./cmd/conformance-go").CombinedOutput(); err != nil {

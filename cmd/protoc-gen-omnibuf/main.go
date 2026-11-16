@@ -66,7 +66,7 @@ func peerProtoRequest() *pluginpb.CodeGeneratorRequest {
 		Name:    proto.String("omnibuf/bench/peer.proto"),
 		Package: proto.String("omnibuf.bench"),
 		Options: &descriptorpb.FileOptions{
-			GoPackage: proto.String("github.com/omnibuf/omnibuf-go/internal/pb;pb"),
+			GoPackage: proto.String("github.com/omnibuf/omnibuf-go/omnibufproto/internal/pb;pb"),
 		},
 		MessageType: []*descriptorpb.DescriptorProto{
 			{
@@ -145,7 +145,7 @@ func conformanceProtoRequest() *pluginpb.CodeGeneratorRequest {
 		Name:    proto.String("omnibuf/conformance/conformance.proto"),
 		Package: proto.String("omnibuf.conformance"),
 		Options: &descriptorpb.FileOptions{
-			GoPackage: proto.String("github.com/omnibuf/omnibuf-go/internal/pb;pb"),
+			GoPackage: proto.String("github.com/omnibuf/omnibuf-go/omnibufproto/internal/pb;pb"),
 		},
 		MessageType: []*descriptorpb.DescriptorProto{
 			{

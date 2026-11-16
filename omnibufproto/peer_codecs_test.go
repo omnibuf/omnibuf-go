@@ -1,4 +1,4 @@
-package omnibuf_test
+package omnibufproto_test
 
 import (
 	"encoding/binary"
@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	_ "github.com/omnibuf/omnibuf-go/omnibufproto"
 
 	. "github.com/omnibuf/omnibuf-go"
 	. "github.com/omnibuf/omnibuf-go/wire"

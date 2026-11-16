@@ -7,19 +7,24 @@
 
 **[Website (omnibuf.com)](https://omnibuf.com)** · **[How It Works](https://omnibuf.com/how-it-works)** · **[Go Documentation](https://omnibuf.com/go)** · **[TypeScript / JS (`omnibuf-es`)](https://github.com/omnibuf/omnibuf-es)** · **[CLI (`omnibuf-cli`)](https://github.com/omnibuf/omnibuf-cli)** · **[Wire Format Specification](https://omnibuf.com/spec)**
 
-Go runtime library (`package omnibuf`) and `protoc-gen-omnibuf` compiler plugin implementing **[OmniBuf Wire Specification v0.1](https://omnibuf.com/spec)**:
+Go runtime library (`package omnibuf`), optional Protobuf bridge (`package omnibufproto`), and `protoc-gen-omnibuf` compiler plugin implementing **[OmniBuf Wire Specification v0.1](https://omnibuf.com/spec)**:
 
-1. **Keep `.proto` schemas and Go structs:** Existing `.proto` files, `protoc-gen-go` structs, and `dynamicpb` messages work without changes.
-2. **Single-pass encode & zero-loop varints:** Prefix-Varints (`TZCNT`) decode integers in a single load with no byte-by-byte continuation loop, and 2-byte length backpatching encodes messages in a single forward pass (~6x faster encode and ~6x faster zero-copy decode than `google.golang.org/protobuf`).
-3. **Inspect packets without a schema (`DecodeBlind`):** Explicit 4-bit wire types (`0..15`) replace Protobuf's overloaded `Wire Type 2`, and optional **Field `#0`** metadata attaches field names on the wire when needed.
-4. **Flat `[Tag][Value]` stream:** Containers carry outer byte lengths for single-step skipping (`LocateField`) and in-place field splicing (`SpliceFields`), and concatenating two packets (`append(msgA, msgB...)`) merges them just like Protobuf.
+1. **Zero-dependency core module (`github.com/omnibuf/omnibuf-go`):** Pure Go standard library with zero external dependencies for `omnibuf:"..."` struct tags, `DecodeBlind`, `wire`, and open `.pb.go` struct tags.
+2. **Optional Protobuf module (`github.com/omnibuf/omnibuf-go/omnibufproto`):** Separate submodule adding `protoreflect.Message`, `dynamicpb.Message`, `oneof`, `enum`, and Go Opaque API support only in projects that use `google.golang.org/protobuf`.
+3. **Single-pass encode & zero-loop varints:** Prefix-Varints (`TZCNT`) decode integers in a single load with no byte-by-byte continuation loop, and 2-byte length backpatching encodes messages in a single forward pass (~6x faster encode and ~6x faster zero-copy decode than `google.golang.org/protobuf`).
+4. **Inspect packets without a schema (`DecodeBlind`):** Explicit 4-bit wire types (`0..15`) replace Protobuf's overloaded `Wire Type 2`, and optional **Field `#0`** metadata attaches field names on the wire when needed.
+5. **Flat `[Tag][Value]` stream:** Containers carry outer byte lengths for single-step skipping (`LocateField`) and in-place field splicing (`SpliceFields`), and concatenating two packets (`append(msgA, msgB...)`) merges them just like Protobuf.
 
 ---
 
 ## Install
 
 ```bash
+# Zero-dependency core runtime (plain Go structs + DecodeBlind + wire)
 go get github.com/omnibuf/omnibuf-go
+
+# Optional Protocol Buffers bridge (proto.Message, dynamicpb, oneofs, enums)
+go get github.com/omnibuf/omnibuf-go/omnibufproto
 
 # Install the protoc-gen-omnibuf compiler plugin via Go or Homebrew:
 go install github.com/omnibuf/omnibuf-go/cmd/protoc-gen-omnibuf@latest
@@ -82,7 +87,7 @@ func main() {
 }
 ```
 
-### 2. Existing `.pb.go` Structs (`protoc-gen-go`)
+### 2. Existing `.pb.go` Structs & `dynamicpb` (`omnibufproto`)
 
 ```go
 package main
@@ -92,6 +97,7 @@ import (
 
 	"example.com/yourproject/pb"
 	"github.com/omnibuf/omnibuf-go"
+	"github.com/omnibuf/omnibuf-go/omnibufproto"
 )
 
 func main() {
@@ -101,13 +107,13 @@ func main() {
 		Active:   true,
 	}
 
-	wire, err := omnibuf.Marshal(msg)
+	wire, err := omnibufproto.Marshal(msg)
 	if err != nil {
 		panic(err)
 	}
 
 	var out pb.PeerUpdate
-	if err := omnibuf.Unmarshal(wire, &out); err != nil {
+	if err := omnibufproto.Unmarshal(wire, &out); err != nil {
 		panic(err)
 	}
 

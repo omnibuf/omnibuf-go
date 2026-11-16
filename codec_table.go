@@ -13,9 +13,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protoreflect"
-
+	"github.com/omnibuf/omnibuf-go/internal/protohook"
 	"github.com/omnibuf/omnibuf-go/wire"
 )
 
@@ -1126,11 +1124,10 @@ func MarshalAppend(dst []byte, v any) ([]byte, error) {
 }
 
 func marshalTableAppend(dst []byte, v any, opts MarshalOptions) ([]byte, error) {
-	if pm, ok := v.(proto.Message); ok && (reflect.ValueOf(pm).IsNil() || needsProtoReflection(pm)) {
-		return opts.marshalProtoReflectAppend(dst, pm.ProtoReflect())
-	}
-	if pr, ok := v.(protoreflect.Message); ok {
-		return opts.marshalProtoReflectAppend(dst, pr)
+	if protohook.MarshalHook != nil {
+		if out, handled, err := protohook.MarshalHook(dst, v, opts.Deterministic, opts.SelfDescribing); handled {
+			return out, err
+		}
 	}
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
@@ -1651,11 +1648,10 @@ func UnmarshalZeroCopy(packet []byte, v any) error {
 }
 
 func unmarshalTable(packet []byte, v any, zeroCopy bool) error {
-	if pm, ok := v.(proto.Message); ok && (reflect.ValueOf(pm).IsNil() || needsProtoReflection(pm)) {
-		return unmarshalProtoReflect(packet, pm.ProtoReflect())
-	}
-	if pr, ok := v.(protoreflect.Message); ok {
-		return unmarshalProtoReflect(packet, pr)
+	if protohook.UnmarshalHook != nil {
+		if handled, err := protohook.UnmarshalHook(packet, v); handled {
+			return err
+		}
 	}
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {

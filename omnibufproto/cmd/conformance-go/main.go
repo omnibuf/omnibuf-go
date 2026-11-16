@@ -16,7 +16,8 @@ import (
 
 	"github.com/omnibuf/omnibuf-go"
 	"github.com/omnibuf/omnibuf-go/internal/conformance"
-	"github.com/omnibuf/omnibuf-go/internal/pb"
+	_ "github.com/omnibuf/omnibuf-go/omnibufproto"
+	"github.com/omnibuf/omnibuf-go/omnibufproto/internal/pb"
 	"github.com/omnibuf/omnibuf-go/wire"
 )
 

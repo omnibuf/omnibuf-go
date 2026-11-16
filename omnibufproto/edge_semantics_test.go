@@ -1,4 +1,4 @@
-package omnibuf_test
+package omnibufproto_test
 
 import (
 	"bytes"
@@ -9,11 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	_ "github.com/omnibuf/omnibuf-go/omnibufproto"
+
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/dynamicpb"
 
 	. "github.com/omnibuf/omnibuf-go"
-	"github.com/omnibuf/omnibuf-go/internal/pb"
+	"github.com/omnibuf/omnibuf-go/omnibufproto/internal/pb"
 	. "github.com/omnibuf/omnibuf-go/wire"
 )
 

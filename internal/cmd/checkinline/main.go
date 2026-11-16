@@ -17,7 +17,7 @@ var required = []string{
 func main() {
 	// Ask the compiler, rather than trying to reproduce its evolving cost model.
 	// Explicitly enable normal optimizations even if GOFLAGS contains debug flags.
-	cmd := exec.Command("go", "build", "-pgo=off", "-gcflags=-m=2", ".", "./wire", "./internal/pb")
+	cmd := exec.Command("go", "build", "-pgo=off", "-gcflags=-m=2", ".", "./wire")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "checkinline: compiler failed: %v\n%s", err, output)
