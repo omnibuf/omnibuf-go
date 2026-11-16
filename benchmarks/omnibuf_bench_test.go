@@ -1,4 +1,4 @@
-package omnibuf_test
+package benchmarks_test
 
 import (
 	"strings"
@@ -6,7 +6,7 @@ import (
 
 	flatbuffers "github.com/google/flatbuffers/go"
 	. "github.com/omnibuf/omnibuf-go"
-	"github.com/omnibuf/omnibuf-go/internal/pb"
+	"github.com/omnibuf/omnibuf-go/benchmarks/pb"
 	. "github.com/omnibuf/omnibuf-go/wire"
 	"google.golang.org/protobuf/encoding/protowire"
 )

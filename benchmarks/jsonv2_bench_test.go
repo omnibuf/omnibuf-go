@@ -1,6 +1,6 @@
 //go:build go1.27 && goexperiment.jsonv2
 
-package omnibuf_test
+package benchmarks_test
 
 import (
 	jsonv2 "encoding/json/v2"

@@ -155,19 +155,6 @@ func TestPluginGeneratedPBCodecsAndOpaqueAPI(t *testing.T) {
 	if pbSpliced.Sequence != pbIn.Sequence+1 || pbSpliced.Location.City != "Frankfurt" {
 		t.Fatalf("plugin Opaque spliced packet mismatch: %#v", &pbSpliced)
 	}
-
-	// 4. Test vtprotobuf round-trip (MarshalVT / UnmarshalVT / UnmarshalVTUnsafe)
-	vtBytes, err := pbIn.MarshalVT()
-	if err != nil {
-		t.Fatalf("MarshalVT failed: %v", err)
-	}
-	var vtOut pb.PeerUpdate
-	if err := vtOut.UnmarshalVT(vtBytes); err != nil {
-		t.Fatalf("UnmarshalVT failed: %v", err)
-	}
-	if vtOut.Location.City != "Frankfurt" || vtOut.Neighbors[2].Router != pbIn.Neighbors[2].Router || vtOut.Sequence != pbIn.Sequence {
-		t.Fatalf("vtprotobuf round-trip mismatch: %#v", &vtOut)
-	}
 }
 
 func TestOpaqueSpliceFieldSizeGrowAndShrink(t *testing.T) {

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	flatbuffers "github.com/google/flatbuffers/go"
 	. "github.com/omnibuf/omnibuf-go"
 	"github.com/omnibuf/omnibuf-go/internal/pb"
 	. "github.com/omnibuf/omnibuf-go/wire"
@@ -183,25 +182,12 @@ func TestStressBenchmarkWorkloadsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MarshalProtoOfficial: %v", err)
 	}
-	fbBytes := append([]byte(nil), EncodePeerFlatBuffers(flatbuffers.NewBuilder(65536), &large)...)
-	capnpBytes, err := EncodePeerCapnp(nil, &large)
-	if err != nil {
-		t.Fatalf("EncodePeerCapnp: %v", err)
-	}
-	avroBytes, err := MarshalAvro(&large)
-	if err != nil {
-		t.Fatalf("MarshalAvro: %v", err)
-	}
-	mpBytes, err := MarshalMsgpack(&large)
-	if err != nil {
-		t.Fatalf("MarshalMsgpack: %v", err)
-	}
 	jsonBytes, err := MarshalJSON(&large)
 	if err != nil {
 		t.Fatalf("MarshalJSON: %v", err)
 	}
-	t.Logf("LargeNested wire sizes: OmniBuf=%d Protobuf=%d FlatBuffers=%d CapnProto=%d Avro=%d Msgpack=%d JSON=%d",
-		len(obGen), len(protoBytes), len(fbBytes), len(capnpBytes), len(avroBytes), len(mpBytes), len(jsonBytes))
+	t.Logf("LargeNested wire sizes: OmniBuf=%d Protobuf=%d JSON=%d",
+		len(obGen), len(protoBytes), len(jsonBytes))
 
 	many := SampleManyNeighborsPeerUpdate()
 	if len(many.Neighbors) != 32 {

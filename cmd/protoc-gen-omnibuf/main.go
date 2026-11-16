@@ -7,11 +7,6 @@ import (
 	"strings"
 
 	"github.com/omnibuf/omnibuf-go/wire"
-	_ "github.com/planetscale/vtprotobuf/features/marshal"
-	_ "github.com/planetscale/vtprotobuf/features/pool"
-	_ "github.com/planetscale/vtprotobuf/features/size"
-	_ "github.com/planetscale/vtprotobuf/features/unmarshal"
-	vtgenerator "github.com/planetscale/vtprotobuf/generator"
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -22,7 +17,6 @@ import (
 func main() {
 	selfGenOut := flag.String("self-gen", "", "Run protogen on omnibuf/bench/peer.proto descriptor and write generated file to path")
 	conformanceGenOut := flag.String("conformance-gen", "", "Run protogen on omnibuf/conformance/conformance.proto descriptor and write generated file to path")
-	vtGenOut := flag.String("vtproto-gen", "", "Run vtprotobuf generator on omnibuf/bench/peer.proto descriptor and write generated file to path")
 	flag.Parse()
 
 	if *selfGenOut != "" {
@@ -35,13 +29,6 @@ func main() {
 	if *conformanceGenOut != "" {
 		if err := runConformanceGen(*conformanceGenOut); err != nil {
 			fmt.Fprintf(os.Stderr, "protoc-gen-omnibuf: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	}
-	if *vtGenOut != "" {
-		if err := runVTProtoGen(*vtGenOut); err != nil {
-			fmt.Fprintf(os.Stderr, "vtproto-gen: %v\n", err)
 			os.Exit(1)
 		}
 		return
@@ -236,24 +223,6 @@ func runConformanceGen(outPath string) error {
 		}
 	}
 	return writePluginResponse(gen.Response(), outPath)
-}
-
-func runVTProtoGen(outPath string) error {
-	plugin, err := protogen.Options{}.New(peerProtoRequest())
-	if err != nil {
-		return err
-	}
-	cfg := vtgenerator.Config{
-		Poolable:        vtgenerator.NewObjectSet(),
-		PoolableExclude: vtgenerator.NewObjectSet(),
-	}
-	_ = cfg.Poolable.Set("github.com/omnibuf/omnibuf-go/internal/pb.*")
-	gen, err := vtgenerator.NewGenerator(plugin, []string{"marshal", "size", "unmarshal", "unmarshal_unsafe", "pool"}, &cfg)
-	if err != nil {
-		return err
-	}
-	gen.Generate()
-	return writePluginResponse(plugin.Response(), outPath)
 }
 
 func wireTypeForField(field *protogen.Field) uint8 {

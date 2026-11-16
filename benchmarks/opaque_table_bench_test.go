@@ -1,11 +1,11 @@
-package omnibuf_test
+package benchmarks_test
 
 import (
 	"testing"
 
 	flatbuffers "github.com/google/flatbuffers/go"
 	. "github.com/omnibuf/omnibuf-go"
-	"github.com/omnibuf/omnibuf-go/internal/pb"
+	"github.com/omnibuf/omnibuf-go/benchmarks/pb"
 	"google.golang.org/protobuf/proto"
 )
 

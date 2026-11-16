@@ -1,13 +1,11 @@
 package omnibuf_test
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"reflect"
 	"testing"
 
-	flatbuffers "github.com/google/flatbuffers/go"
 	. "github.com/omnibuf/omnibuf-go"
 	"github.com/omnibuf/omnibuf-go/internal/pb"
 	. "github.com/omnibuf/omnibuf-go/wire"
@@ -231,65 +229,7 @@ func TestAllCodecsRoundTripAndWireSize(t *testing.T) {
 		t.Fatalf("LookupProtoWireNeighborRouter = %q, %v", rtr, ok)
 	}
 
-	// 4. FlatBuffers
-	fbBuilder := flatbuffers.NewBuilder(512)
-	fbBytes := append([]byte(nil), EncodePeerFlatBuffers(fbBuilder, &orig)...)
-	var fbDec PeerUpdate
-	if err := DecodePeerFlatBuffersInto(fbBytes, &fbDec, false); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(orig, fbDec) {
-		t.Fatalf("FlatBuffers mismatch:\ngot:  %#v\nwant: %#v", fbDec, orig)
-	}
-	if city, ok := LookupFlatBuffersNestedCity(fbBytes, false); !ok || city != "Frankfurt" {
-		t.Fatalf("LookupFlatBuffersNestedCity = %q, %v", city, ok)
-	}
-	if rtr, ok := LookupFlatBuffersNeighborRouter(fbBytes, 2, false); !ok || rtr != orig.Neighbors[2].Router {
-		t.Fatalf("LookupFlatBuffersNeighborRouter = %q, %v", rtr, ok)
-	}
-
-	// 5. Cap'n Proto
-	capnpBytes, err := EncodePeerCapnp(nil, &orig)
-	if err != nil {
-		t.Fatalf("EncodePeerCapnp error: %v", err)
-	}
-	var capnpDec PeerUpdate
-	if err := DecodePeerCapnpInto(capnpBytes, &capnpDec, false); err != nil {
-		t.Fatalf("DecodePeerCapnpInto error: %v", err)
-	}
-	if !reflect.DeepEqual(orig, capnpDec) {
-		t.Fatalf("Cap'n Proto mismatch:\ngot:  %#v\nwant: %#v", capnpDec, orig)
-	}
-	if city, ok := LookupCapnpNestedCity(capnpBytes, false); !ok || city != "Frankfurt" {
-		t.Fatalf("LookupCapnpNestedCity = %q, %v", city, ok)
-	}
-	if city, ok := LookupCapnpInPlaceNestedCity(capnpBytes, false); !ok || city != "Frankfurt" {
-		t.Fatalf("LookupCapnpInPlaceNestedCity = %q, %v", city, ok)
-	}
-	if rtr, ok := LookupCapnpNeighborRouter(capnpBytes, 2, false); !ok || rtr != orig.Neighbors[2].Router {
-		t.Fatalf("LookupCapnpNeighborRouter = %q, %v", rtr, ok)
-	}
-	if rtr, ok := LookupCapnpInPlaceNeighborRouter(capnpBytes, 2, false); !ok || rtr != orig.Neighbors[2].Router {
-		t.Fatalf("LookupCapnpInPlaceNeighborRouter = %q, %v", rtr, ok)
-	}
-
-	// 6. MessagePack
-	mpBytes, err := MarshalMsgpack(&orig)
-	if err != nil {
-		t.Fatalf("MarshalMsgpack error: %v", err)
-	}
-	var mpDec PeerUpdate
-	if err := UnmarshalMsgpack(mpBytes, &mpDec); err != nil {
-		t.Fatalf("UnmarshalMsgpack error: %v", err)
-	}
-	if !reflect.DeepEqual(orig, mpDec) {
-		t.Fatalf("Msgpack mismatch:\ngot:  %#v\nwant: %#v", mpDec, orig)
-	}
-	if city, ok := LookupMsgpackNestedCity(mpBytes); !ok || city != "Frankfurt" {
-		t.Fatalf("LookupMsgpackNestedCity = %q, %v", city, ok)
-	}
-
-	// 7. JSON
+	// 4. JSON
 	jsonBytes, err := MarshalJSON(&orig)
 	if err != nil {
 		t.Fatalf("MarshalJSON error: %v", err)
@@ -302,69 +242,10 @@ func TestAllCodecsRoundTripAndWireSize(t *testing.T) {
 		t.Fatalf("JSON mismatch:\ngot:  %#v\nwant: %#v", jsonDec, orig)
 	}
 
-	// 8. Apache Avro (Binary & OCF)
-	avroBytes, err := MarshalAvro(&orig)
-	if err != nil {
-		t.Fatalf("MarshalAvro error: %v", err)
-	}
-	var avroDec PeerUpdate
-	if err := UnmarshalAvro(avroBytes, &avroDec); err != nil {
-		t.Fatalf("UnmarshalAvro error: %v", err)
-	}
-	if !reflect.DeepEqual(orig, avroDec) {
-		t.Fatalf("Avro mismatch:\ngot:  %#v\nwant: %#v", avroDec, orig)
-	}
-	if city, ok := LookupAvroNestedCity(avroBytes); !ok || city != "Frankfurt" {
-		t.Fatalf("LookupAvroNestedCity = %q, %v", city, ok)
-	}
-	avroOCFBytes, err := MarshalAvroOCF(&orig)
-	if err != nil {
-		t.Fatalf("MarshalAvroOCF error: %v", err)
-	}
-
 	t.Logf("\n=== WIRE SIZE COMPARISON (PeerUpdate Payload) ===")
-	t.Logf("  Avro (Raw Binary, No Field Tags):     %4d bytes", len(avroBytes))
 	t.Logf("  Protobuf (proto.Marshal / protowire): %4d bytes", len(pbOfficialBytes))
 	t.Logf("  OmniBuf (Shared-Schema):              %4d bytes (%+d B vs Protobuf)", len(omniBytes), len(omniBytes)-len(pbOfficialBytes))
 	t.Logf("  OmniBuf (Self-Describing Field #0):   %4d bytes (includes all field names inline)", len(omniSelfBytes))
-	t.Logf("  MessagePack (Self-Describing Map):    %4d bytes", len(mpBytes))
-	t.Logf("  FlatBuffers (VTables + Alignment):    %4d bytes", len(fbBytes))
-	t.Logf("  Cap'n Proto (64-bit Words + Ptrs):    %4d bytes", len(capnpBytes))
 	t.Logf("  Standard JSON (encoding/json):        %4d bytes", len(jsonBytes))
-	t.Logf("  Avro OCF (Self-Describing w/ Schema): %4d bytes", len(avroOCFBytes))
 	fmt.Printf("")
-}
-
-func TestFlatBuffersStringDecodersRejectInvalidUTF8(t *testing.T) {
-	cases := []struct {
-		name string
-		peer PeerUpdate
-	}{
-		{"router_id", PeerUpdate{RouterID: "\xff"}},
-		{"tag", PeerUpdate{Tags: []string{"ok", "\xff"}}},
-		{"location_region", PeerUpdate{Location: Location{Region: "\xff"}}},
-		{"location_datacenter", PeerUpdate{Location: Location{Datacenter: "\xff"}}},
-		{"location_city", PeerUpdate{Location: Location{City: "\xff"}}},
-		{"neighbor_router", PeerUpdate{Neighbors: []Neighbor{{Router: "\xff"}}}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			builder := flatbuffers.NewBuilder(128)
-			packet := append([]byte(nil), EncodePeerFlatBuffers(builder, &tc.peer)...)
-			var out PeerUpdate
-			if err := DecodePeerFlatBuffersInto(packet, &out, false); !errors.Is(err, errFlatBuffersInvalidUTF8) {
-				t.Fatalf("decode error = %v, want invalid UTF-8", err)
-			}
-			if tc.name == "location_city" {
-				if _, ok := LookupFlatBuffersNestedCity(packet, true); ok {
-					t.Fatal("city lookup accepted invalid UTF-8")
-				}
-			}
-			if tc.name == "neighbor_router" {
-				if _, ok := LookupFlatBuffersNeighborRouter(packet, 0, true); ok {
-					t.Fatal("router lookup accepted invalid UTF-8")
-				}
-			}
-		})
-	}
 }
