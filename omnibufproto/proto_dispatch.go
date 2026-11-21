@@ -29,7 +29,7 @@ func needsProtoReflection(pm proto.Message) bool {
 		}
 		for i := 0; i < md.Fields().Len(); i++ {
 			fd := md.Fields().Get(i)
-			if fd.Number() > 65535 || fd.ContainingOneof() != nil || fd.Kind() == protoreflect.EnumKind || (fd.HasPresence() && fd.Kind() != protoreflect.MessageKind) {
+			if fd.Number() > 65535 || fd.Cardinality() == protoreflect.Required || fd.ContainingOneof() != nil || fd.Kind() == protoreflect.EnumKind || (fd.HasPresence() && fd.Kind() != protoreflect.MessageKind) {
 				return true
 			}
 			if fd.Message() != nil && visit(fd.Message()) {

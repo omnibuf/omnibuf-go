@@ -27,6 +27,7 @@ func TestGeneratedWideTags(t *testing.T) {
 		&descriptorpb.FieldDescriptorProto{Name: proto.String("flag"), Number: proto.Int32(65535), Type: descriptorpb.FieldDescriptorProto_TYPE_BOOL.Enum()},
 		&descriptorpb.FieldDescriptorProto{Name: proto.String("numbers"), Number: proto.Int32(70), Type: descriptorpb.FieldDescriptorProto_TYPE_UINT32.Enum(), Label: descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum()},
 		&descriptorpb.FieldDescriptorProto{Name: proto.String("fixed_nums"), Number: proto.Int32(71), Type: descriptorpb.FieldDescriptorProto_TYPE_FIXED32.Enum(), Label: descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum()},
+		&descriptorpb.FieldDescriptorProto{Name: proto.String("blobs"), Number: proto.Int32(72), Type: descriptorpb.FieldDescriptorProto_TYPE_BYTES.Enum(), Label: descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum()},
 	)
 	req.ProtoFile[0].MessageType = []*descriptorpb.DescriptorProto{{Name: proto.String("Wide"), Field: fields}}
 	gen, err := protogen.Options{}.New(req)
@@ -48,22 +49,32 @@ func TestGeneratedWideTags(t *testing.T) {
 	for i := 1; i <= 66; i++ {
 		fmt.Fprintf(&structFields, "\tF_%d uint32 `omnibuf:\"%d\"`\n", i, i)
 	}
-	structFields.WriteString("\tFlag bool `omnibuf:\"65535\"`\n\tNumbers []uint32 `omnibuf:\"70\"`\n\tFixedNums []uint32 `omnibuf:\"71,wire=fixed32\"`\n")
+	structFields.WriteString("\tFlag bool `omnibuf:\"65535\"`\n\tNumbers []uint32 `omnibuf:\"70\"`\n\tFixedNums []uint32 `omnibuf:\"71,wire=fixed32\"`\n\tBlobs [][]byte `omnibuf:\"72\"`\n")
 	testSource := `package pb
 import("testing";"reflect";"github.com/omnibuf/omnibuf-go/wire")
 type Wide struct {
 ` + structFields.String() + `}
 func TestRoundTrip(t *testing.T){
  for _, flag:=range []bool{true,false}{
- in:=Wide{F_1: 11, F_66: 66, Flag: flag, Numbers: []uint32{1,2}, FixedNums: []uint32{7,8}};packet:=in.MarshalOmniBufAppend(nil)
+ in:=Wide{F_1: 11, F_66: 66, Flag: flag, Numbers: []uint32{1,2}, FixedNums: []uint32{7,8}, Blobs: [][]byte{[]byte("aa"), []byte("bb")}};packet:=in.MarshalOmniBufAppend(nil)
  got,ok:=wire.ReadBool(packet,65535);if !ok || got!=flag {t.Fatalf("boolean tag: %x",packet)}
  var out Wide;if err:=out.UnmarshalOmniBuf(append(packet,packet...),false);err!=nil{t.Fatal(err)}
- if out.F_1!=11 || out.F_66!=66 || out.Flag!=flag || !reflect.DeepEqual(out.Numbers,[]uint32{1,2,1,2}) || !reflect.DeepEqual(out.FixedNums,[]uint32{7,8,7,8}) {t.Fatalf("merge: %+v",out)}
+ if out.F_1!=11 || out.F_66!=66 || out.Flag!=flag || !reflect.DeepEqual(out.Numbers,[]uint32{1,2,1,2}) || !reflect.DeepEqual(out.FixedNums,[]uint32{7,8,7,8}) || len(out.Blobs)!=4 {t.Fatalf("merge: %+v",out)}
  if err:=out.UnmarshalOmniBuf(nil,false);err!=nil{t.Fatal(err)}
- if out.F_1!=0 || out.F_66!=0 || out.Flag || len(out.Numbers)!=0 || len(out.FixedNums)!=0 {t.Fatalf("clearUnseen >64 failed: %+v",out)}
+ if out.F_1!=0 || out.F_66!=0 || out.Flag || len(out.Numbers)!=0 || len(out.FixedNums)!=0 || len(out.Blobs)!=0 {t.Fatalf("clearUnseen >64 failed: %+v",out)}
  badArr := wire.AppendVarint(nil, (uint64(71)<<4)|uint64(wire.WireArray))
  badArr = wire.EncodeFloat32Arr(badArr, []float32{1.0})
  if err:=out.UnmarshalOmniBuf(badArr,false);err==nil{t.Fatal("accepted float32 array for fixed32 repeated field")}
+ // Reuse with existing Blobs and feed a corrupt bytes array that fails after writing element 0.
+ out.Blobs = [][]byte{[]byte("old1"), []byte("old2")}
+ origBacking := out.Blobs[:cap(out.Blobs)]
+ badBytes := wire.AppendVarint(nil, (uint64(72)<<4)|uint64(wire.WireArray))
+ badBody := []byte{wire.WireBytes, byte(2<<1)|1, byte(1<<1)|1, 'x', byte(50<<1)|1}
+ badBytes = wire.AppendVarint(badBytes, uint64(len(badBody)))
+ badBytes = append(badBytes, badBody...)
+ if err:=out.UnmarshalOmniBuf(badBytes,false);err==nil{t.Fatal("accepted corrupt bytes array")}
+ if len(out.Blobs)!=0 {t.Fatalf("expected Blobs len 0 after corrupt decode, got %d", len(out.Blobs))}
+ for i, b := range origBacking { if b != nil { t.Fatalf("stale bytes slice at slot %d after failed decode: %q", i, b) } }
  }
 }`
 	if err := os.WriteFile(testFile, []byte(testSource), 0600); err != nil {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"math"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -729,7 +730,7 @@ func TestOmniBufStructTags_ValidationErrors(t *testing.T) {
 		{
 			name: "overflow_field_num",
 			val: &struct {
-				A int `omnibuf:"70000"`
+				A int `omnibuf:"536870912"`
 			}{},
 			want: "invalid field number",
 		},
@@ -925,5 +926,201 @@ func TestOmniBufStructTags_CrossWidthEvolutionAndMalformedPackets(t *testing.T) 
 	var dst NarrowV1
 	if err := Unmarshal(pkt[:len(pkt)-1], &dst); err == nil {
 		t.Fatalf("expected error on truncated packet")
+	}
+}
+
+func TestAudit_StructValSlicePointerClearing(t *testing.T) {
+	type Item struct {
+		Name  string `omnibuf:"1"`
+		Extra *int   `omnibuf:"2"`
+	}
+	type Box struct {
+		Items []Item `omnibuf:"1"`
+	}
+
+	v1, v2, v3 := 10, 20, 30
+	full := Box{
+		Items: []Item{
+			{Name: "alpha", Extra: &v1},
+			{Name: "beta", Extra: &v2},
+			{Name: "gamma", Extra: &v3},
+		},
+	}
+	fullPkt, err := Marshal(&full)
+	if err != nil {
+		t.Fatalf("Marshal full: %v", err)
+	}
+	shorter := Box{
+		Items: []Item{{Name: "only", Extra: &v1}},
+	}
+	shorterPkt, err := Marshal(&shorter)
+	if err != nil {
+		t.Fatalf("Marshal shorter: %v", err)
+	}
+
+	// 1. Reuse destination with fewer elements -> tail slots must be zeroed with write barriers.
+	var dst Box
+	if err := Unmarshal(fullPkt, &dst); err != nil {
+		t.Fatalf("Unmarshal full: %v", err)
+	}
+	origCap := cap(dst.Items)
+	if err := Unmarshal(shorterPkt, &dst); err != nil {
+		t.Fatalf("Unmarshal shorter: %v", err)
+	}
+	runtime.GC()
+	if len(dst.Items) != 1 || cap(dst.Items) != origCap {
+		t.Fatalf("expected reused slice len=1 cap=%d, got len=%d cap=%d", origCap, len(dst.Items), cap(dst.Items))
+	}
+	backing := dst.Items[:origCap]
+	for i := 1; i < origCap; i++ {
+		if backing[i].Name != "" || backing[i].Extra != nil {
+			t.Fatalf("tail slot %d not cleared: %+v", i, backing[i])
+		}
+	}
+
+	// 2. Absent field on reuse -> all slots cleared.
+	if err := Unmarshal(nil, &dst); err != nil {
+		t.Fatalf("Unmarshal empty: %v", err)
+	}
+	runtime.GC()
+	if len(dst.Items) != 0 {
+		t.Fatalf("expected len=0 after empty unmarshal, got %d", len(dst.Items))
+	}
+	backing = dst.Items[:origCap]
+	for i := 0; i < origCap; i++ {
+		if backing[i].Name != "" || backing[i].Extra != nil {
+			t.Fatalf("cleared slot %d retained pointer: %+v", i, backing[i])
+		}
+	}
+
+	// 3. Corrupt submsg array mid-decode into reused slice -> cleared safely.
+	if err := Unmarshal(fullPkt, &dst); err != nil {
+		t.Fatalf("Unmarshal full (2): %v", err)
+	}
+	bad := AppendVarint(nil, (1<<4)|uint64(WireArray))
+	// Body claims 2 submsgs, first is empty (len 0), second claims len 50 (truncated).
+	body := []byte{WireSubMsg, byte(2<<1) | 1, byte(0<<1) | 1, byte(50<<1) | 1}
+	bad = AppendVarint(bad, uint64(len(body)))
+	bad = append(bad, body...)
+	if err := Unmarshal(bad, &dst); err == nil {
+		t.Fatal("expected error for corrupt submsg array")
+	}
+	runtime.GC()
+	if len(dst.Items) != 0 {
+		t.Fatalf("expected len=0 after corrupt submsg array, got %d", len(dst.Items))
+	}
+	backing = dst.Items[:cap(dst.Items)]
+	for i := range backing {
+		if backing[i].Name != "" || backing[i].Extra != nil {
+			t.Fatalf("corrupt-path slot %d not cleared: %+v", i, backing[i])
+		}
+	}
+}
+
+func TestAudit_HighFieldNumbers(t *testing.T) {
+	type HighFields struct {
+		F65536     uint64 `omnibuf:"65536,name=f_65536"`
+		F33554431  string `omnibuf:"33554431,name=max_4b_tag"`
+		F33554432  int32  `omnibuf:"33554432,name=min_9b_tag"`
+		F33554433  bool   `omnibuf:"33554433,name=bool_9b_true"`
+		F33554434  bool   `omnibuf:"33554434,name=bool_9b_false"`
+		F536870911 uint32 `omnibuf:"536870911,name=max_proto_field"`
+	}
+
+	in := HighFields{
+		F65536:     999999,
+		F33554431:  "four-byte-max",
+		F33554432:  -42,
+		F33554433:  true,
+		F33554434:  false,
+		F536870911: 123456789,
+	}
+
+	pkt, err := MarshalOptions{SelfDescribing: true}.Marshal(&in)
+	if err != nil {
+		t.Fatalf("Marshal HighFields: %v", err)
+	}
+
+	var out HighFields
+	if err := Unmarshal(pkt, &out); err != nil {
+		t.Fatalf("Unmarshal HighFields: %v", err)
+	}
+	if out != in {
+		t.Fatalf("HighFields round-trip mismatch:\ngot:  %+v\nwant: %+v", out, in)
+	}
+
+	blind, err := DecodeBlind(pkt)
+	if err != nil {
+		t.Fatalf("DecodeBlind HighFields: %v", err)
+	}
+	if blind["f_65536"] != uint64(999999) ||
+		blind["max_4b_tag"] != "four-byte-max" ||
+		blind["min_9b_tag"] != int64(-42) ||
+		blind["bool_9b_true"] != true ||
+		blind["bool_9b_false"] != false ||
+		blind["max_proto_field"] != uint64(123456789) {
+		t.Fatalf("DecodeBlind HighFields mismatch: %#v", blind)
+	}
+}
+
+func TestAudit_FixedArrayElementMismatchBeforeDecode(t *testing.T) {
+	type FixedSlices struct {
+		F32 []float32 `omnibuf:"1"`
+		U32 []uint32  `omnibuf:"2,wire=fixed32"`
+		F64 []float64 `omnibuf:"3"`
+		U64 []uint64  `omnibuf:"4,wire=fixed64"`
+	}
+
+	// Send WireFixed32 array to []float32 field (expects WireFloat32).
+	pkt := AppendVarint(nil, (1<<4)|uint64(WireArray))
+	pkt = EncodeFixed32Arr(pkt, []uint32{1, 2, 3}, WireFixed32)
+
+	dst := FixedSlices{F32: []float32{9.5}}
+	if err := Unmarshal(pkt, &dst); err == nil {
+		t.Fatal("expected error when WireFixed32 array is decoded into []float32")
+	}
+	if len(dst.F32) != 1 || dst.F32[0] != 9.5 {
+		t.Fatalf("target slice mutated on mismatched element type: %v", dst.F32)
+	}
+
+	// Send WireFloat64 array to []uint64 wire=fixed64 field (expects WireFixed64).
+	pkt64 := AppendVarint(nil, (4<<4)|uint64(WireArray))
+	pkt64 = EncodeFloat64Arr(pkt64, []float64{1.25, 2.5})
+
+	dst64 := FixedSlices{U64: []uint64{77}}
+	if err := Unmarshal(pkt64, &dst64); err == nil {
+		t.Fatal("expected error when WireFloat64 array is decoded into []uint64 fixed64")
+	}
+	if len(dst64.U64) != 1 || dst64.U64[0] != 77 {
+		t.Fatalf("target slice mutated on mismatched 64-bit element type: %v", dst64.U64)
+	}
+}
+
+func TestAudit_Uint32SintSliceNegativeWrapping(t *testing.T) {
+	type scalarMsg struct {
+		V uint32 `omnibuf:"1,wire=sint"`
+	}
+	type sliceMsg struct {
+		Vs []uint32 `omnibuf:"1,wire=sint"`
+	}
+
+	// Encode -1 as WireSint scalar and WireSint array.
+	scalarPkt := AppendVarint(nil, (1<<4)|uint64(WireSint))
+	scalarPkt = AppendVarint(scalarPkt, EncodeZigZag(-1))
+
+	var sOut scalarMsg
+	if err := Unmarshal(scalarPkt, &sOut); err != nil {
+		t.Fatalf("Unmarshal scalar -1 into uint32 sint: %v", err)
+	}
+
+	arrPkt := AppendVarint(nil, (1<<4)|uint64(WireArray))
+	arrPkt = EncodeSintArr(arrPkt, []int64{-1, 3_000_000_000})
+
+	var aOut sliceMsg
+	if err := Unmarshal(arrPkt, &aOut); err != nil {
+		t.Fatalf("Unmarshal sint array with negative into []uint32 sint: %v", err)
+	}
+	if len(aOut.Vs) != 2 || aOut.Vs[0] != sOut.V || aOut.Vs[1] != 3_000_000_000 {
+		t.Fatalf("[]uint32 sint mismatch: got %v, want [%d, 3000000000]", aOut.Vs, sOut.V)
 	}
 }

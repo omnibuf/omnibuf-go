@@ -112,15 +112,15 @@ const (
 
 type fieldCodec struct {
 	elemWireType uint8
-	fieldNum     uint16
 	wireType     uint8
-	tag1B        byte   // Precomputed 1-byte Prefix-Varint tag if fieldNum <= 7
-	tag2B        uint16 // Precomputed 2-byte Prefix-Varint tag if 8 <= fieldNum <= 1023
-	tag4B        uint32 // Precomputed 4-byte Prefix-Varint tag if fieldNum >= 1024
-	is1BTag      bool
-	is4BTag      bool
+	tagLen       uint8 // 1, 2, 4, or 9
 	omitEmpty    bool
 	kind         fieldKind
+	fieldNum     uint32
+	tag1B        byte   // Precomputed 1-byte Prefix-Varint tag if fieldNum <= 7
+	tag2B        uint16 // Precomputed 2-byte Prefix-Varint tag if 8 <= fieldNum <= 1023
+	tag4B        uint32 // Precomputed 4-byte Prefix-Varint tag if 1024 <= fieldNum <= 33554431
+	tag8B        uint64 // Raw tag for 9-byte Prefix-Varint if fieldNum >= 33554432
 	name         string
 	offset       uintptr
 	subCodec     *structCodec
@@ -141,7 +141,7 @@ type structCodec struct {
 	size         uintptr
 	fields       []fieldCodec
 	byNum        [maxDirectFieldSlot + 1]*fieldCodec
-	overflow     map[uint16]*fieldCodec
+	overflow     map[uint32]*fieldCodec
 	expectedMask uint64 // all fields seen; overflow fields are checked separately
 	schemaNames  []string
 	metaOnce     sync.Once
@@ -369,7 +369,7 @@ func compileStructCodec(t reflect.Type, building map[reflect.Type]*structCodec) 
 	}
 	building[t] = sc
 
-	seenNums := make(map[uint16]string, t.NumField())
+	seenNums := make(map[uint32]string, t.NumField())
 	for i := 0; i < t.NumField(); i++ {
 		sf := t.Field(i)
 		if !sf.IsExported() {
@@ -418,7 +418,7 @@ func compileStructCodec(t reflect.Type, building map[reflect.Type]*structCodec) 
 			sc.byNum[fc.fieldNum] = fc
 		} else {
 			if sc.overflow == nil {
-				sc.overflow = make(map[uint16]*fieldCodec)
+				sc.overflow = make(map[uint32]*fieldCodec)
 			}
 			sc.overflow[fc.fieldNum] = fc
 		}
@@ -430,11 +430,11 @@ func compileStructCodec(t reflect.Type, building map[reflect.Type]*structCodec) 
 func parseOmniBufField(sf reflect.StructField, obTag string, building map[reflect.Type]*structCodec) (fieldCodec, error) {
 	parts := strings.Split(obTag, ",")
 	fnumStr := strings.TrimSpace(parts[0])
-	fnum64, err := strconv.ParseUint(fnumStr, 10, 16)
-	if err != nil || fnum64 == 0 || (fnum64 >= 19000 && fnum64 <= 19999) {
+	fnum64, err := strconv.ParseUint(fnumStr, 10, 32)
+	if err != nil || fnum64 == 0 || fnum64 > maxProtobufFieldNumber || (fnum64 >= 19000 && fnum64 <= 19999) {
 		return fieldCodec{}, fmt.Errorf("omnibuf: invalid field number in tag %q on %s", obTag, sf.Name)
 	}
-	fnum := uint16(fnum64)
+	fnum := uint32(fnum64)
 	name := sf.Name
 	wireOpt := ""
 	omitEmpty := false
@@ -481,11 +481,11 @@ func parseProtobufField(sf reflect.StructField, pbTag string, building map[refle
 		return fieldCodec{}, fmt.Errorf("omnibuf: invalid protobuf tag %q on %s", pbTag, sf.Name)
 	}
 	encType := parts[0]
-	fnum64, err := strconv.ParseUint(parts[1], 10, 16)
-	if err != nil || fnum64 == 0 || (fnum64 >= 19000 && fnum64 <= 19999) {
+	fnum64, err := strconv.ParseUint(parts[1], 10, 32)
+	if err != nil || fnum64 == 0 || fnum64 > maxProtobufFieldNumber || (fnum64 >= 19000 && fnum64 <= 19999) {
 		return fieldCodec{}, fmt.Errorf("omnibuf: invalid field number in tag %q on %s", pbTag, sf.Name)
 	}
-	fnum := uint16(fnum64)
+	fnum := uint32(fnum64)
 	name := strings.ToLower(sf.Name)
 	for _, p := range parts[2:] {
 		if after, ok := strings.CutPrefix(p, "name="); ok {
@@ -521,15 +521,19 @@ func parseProtobufField(sf reflect.StructField, pbTag string, building map[refle
 }
 
 func precomputeFieldTag(fc *fieldCodec) {
-	rawTag := (uint32(fc.fieldNum) << 4) | uint32(fc.wireType)
+	rawTag := (uint64(fc.fieldNum) << 4) | uint64(fc.wireType)
 	if rawTag <= 127 {
-		fc.is1BTag = true
+		fc.tagLen = 1
 		fc.tag1B = byte(rawTag<<1) | 1
 	} else if rawTag <= 16383 {
+		fc.tagLen = 2
 		fc.tag2B = uint16(rawTag<<2) | 2
+	} else if rawTag <= 536870911 {
+		fc.tagLen = 4
+		fc.tag4B = uint32(rawTag<<3) | 4
 	} else {
-		fc.is4BTag = true
-		fc.tag4B = (rawTag << 3) | 4
+		fc.tagLen = 9
+		fc.tag8B = rawTag
 	}
 }
 
@@ -1424,25 +1428,38 @@ func (sc *structCodec) encodeStruct(dst []byte, base unsafe.Pointer, st *encStat
 			if *(*bool)(fPtr) {
 				wt = wireBoolTrue
 			}
-			rawTag := (uint32(fc.fieldNum) << 4) | uint32(wt)
+			rawTag := (uint64(fc.fieldNum) << 4) | uint64(wt)
 			if rawTag <= 127 {
 				dst = append(dst, byte(rawTag<<1)|1)
 			} else if rawTag <= 16383 {
 				u := uint16(rawTag<<2) | 2
 				dst = append(dst, byte(u), byte(u>>8))
-			} else {
-				u := (rawTag << 3) | 4
+			} else if rawTag <= 536870911 {
+				u := uint32(rawTag<<3) | 4
 				dst = append(dst, byte(u), byte(u>>8), byte(u>>16), byte(u>>24))
+			} else {
+				dst = append(dst,
+					0x00,
+					byte(rawTag), byte(rawTag>>8), byte(rawTag>>16), byte(rawTag>>24),
+					byte(rawTag>>32), byte(rawTag>>40), byte(rawTag>>48), byte(rawTag>>56),
+				)
 			}
 			continue
 		}
 
-		if fc.is1BTag {
+		switch fc.tagLen {
+		case 1:
 			dst = append(dst, fc.tag1B)
-		} else if !fc.is4BTag {
+		case 2:
 			dst = append(dst, byte(fc.tag2B), byte(fc.tag2B>>8))
-		} else {
+		case 4:
 			dst = append(dst, byte(fc.tag4B), byte(fc.tag4B>>8), byte(fc.tag4B>>16), byte(fc.tag4B>>24))
+		default:
+			dst = append(dst,
+				0x00,
+				byte(fc.tag8B), byte(fc.tag8B>>8), byte(fc.tag8B>>16), byte(fc.tag8B>>24),
+				byte(fc.tag8B>>32), byte(fc.tag8B>>40), byte(fc.tag8B>>48), byte(fc.tag8B>>56),
+			)
 		}
 
 		switch fc.kind {
@@ -1956,21 +1973,12 @@ func (sc *structCodec) decodeStruct(data []byte, base unsafe.Pointer, zeroCopy b
 			pos = nextPos
 			continue
 		}
-		if fieldNum32 > math.MaxUint16 {
-			nextPos, err := skipValueWithDepth(data, pos, wt, depth)
-			if err != nil {
-				return err
-			}
-			pos = nextPos
-			continue
-		}
-		fieldNum := uint16(fieldNum32)
 
 		var fc *fieldCodec
-		if fieldNum <= maxDirectFieldSlot {
-			fc = sc.byNum[fieldNum]
+		if fieldNum32 <= maxDirectFieldSlot {
+			fc = sc.byNum[fieldNum32]
 		} else if sc.overflow != nil {
-			fc = sc.overflow[fieldNum]
+			fc = sc.overflow[fieldNum32]
 		}
 		// A known field arriving with a different wire type is treated like
 		// an unknown field (as in Protobuf): its payload is validated and
@@ -2041,6 +2049,17 @@ func typeHasPointers(t reflect.Type) bool {
 	}
 }
 
+func clearStructValSliceRange(fc *fieldCodec, fPtr unsafe.Pointer, from, to int) {
+	if !fc.elemHasPtrs || from >= to {
+		return
+	}
+	sh := (*unsafeSliceHeader)(fPtr)
+	if sh.Data == nil || to > sh.Cap {
+		return
+	}
+	reflect.NewAt(fc.sliceType, fPtr).Elem().Slice(from, to).Clear()
+}
+
 func clearField(fc *fieldCodec, fPtr unsafe.Pointer) {
 	switch fc.goKind {
 	case reflect.Slice:
@@ -2065,9 +2084,7 @@ func clearField(fc *fieldCodec, fPtr unsafe.Pointer) {
 			return
 		case kindStructValSlice:
 			sh := (*unsafeSliceHeader)(fPtr)
-			if fc.elemHasPtrs && sh.Len > 0 && sh.Data != nil {
-				clear(unsafe.Slice((*byte)(sh.Data), uintptr(sh.Len)*fc.elemSize))
-			}
+			clearStructValSliceRange(fc, fPtr, 0, sh.Len)
 			sh.Len = 0
 			return
 		default:
@@ -2401,7 +2418,7 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 			return 0, err
 		}
 		p := (*[]uint32)(fPtr)
-		sl, ok := appendUint32SintArrBody(sliceForDecode(p, alreadySeen), body)
+		sl, ok := appendSintArrBody(sliceForDecode(p, alreadySeen), body)
 		if !ok {
 			return 0, fmt.Errorf("omnibuf: invalid uint32 sint array at %d", pos)
 		}
@@ -2472,9 +2489,12 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 		if err != nil {
 			return 0, err
 		}
+		if len(body) < 2 || body[0] != fc.elemWireType {
+			return 0, fmt.Errorf("omnibuf: invalid fixed32 array at %d", pos)
+		}
 		p := (*[]uint32)(fPtr)
 		sl, ok := appendFixed32ArrBody(sliceForDecode(p, alreadySeen), body)
-		if !ok || body[0] != fc.elemWireType {
+		if !ok {
 			return 0, fmt.Errorf("omnibuf: invalid fixed32 array at %d", pos)
 		}
 		*p = sl
@@ -2484,9 +2504,12 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 		if err != nil {
 			return 0, err
 		}
+		if len(body) < 2 || body[0] != fc.elemWireType {
+			return 0, fmt.Errorf("omnibuf: invalid fixed64 array at %d", pos)
+		}
 		p := (*[]uint64)(fPtr)
 		sl, ok := appendFixed64ArrBody(sliceForDecode(p, alreadySeen), body)
-		if !ok || body[0] != fc.elemWireType {
+		if !ok {
 			return 0, fmt.Errorf("omnibuf: invalid fixed64 array at %d", pos)
 		}
 		*p = sl
@@ -2496,9 +2519,12 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 		if err != nil {
 			return 0, err
 		}
+		if len(body) < 2 || body[0] != fc.elemWireType {
+			return 0, fmt.Errorf("omnibuf: invalid fixed32 array at %d", pos)
+		}
 		p := (*[]uint8)(fPtr)
 		sl, ok := appendFixed32CastArrBody(sliceForDecode(p, alreadySeen), body)
-		if !ok || body[0] != fc.elemWireType {
+		if !ok {
 			return 0, fmt.Errorf("omnibuf: invalid fixed32 array at %d", pos)
 		}
 		*p = sl
@@ -2508,9 +2534,12 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 		if err != nil {
 			return 0, err
 		}
+		if len(body) < 2 || body[0] != fc.elemWireType {
+			return 0, fmt.Errorf("omnibuf: invalid fixed32 array at %d", pos)
+		}
 		p := (*[]uint16)(fPtr)
 		sl, ok := appendFixed32CastArrBody(sliceForDecode(p, alreadySeen), body)
-		if !ok || body[0] != fc.elemWireType {
+		if !ok {
 			return 0, fmt.Errorf("omnibuf: invalid fixed32 array at %d", pos)
 		}
 		*p = sl
@@ -2520,9 +2549,12 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 		if err != nil {
 			return 0, err
 		}
+		if len(body) < 2 || body[0] != fc.elemWireType {
+			return 0, fmt.Errorf("omnibuf: invalid fixed32 array at %d", pos)
+		}
 		p := (*[]uint64)(fPtr)
 		sl, ok := appendFixed32CastArrBody(sliceForDecode(p, alreadySeen), body)
-		if !ok || body[0] != fc.elemWireType {
+		if !ok {
 			return 0, fmt.Errorf("omnibuf: invalid fixed32 array at %d", pos)
 		}
 		*p = sl
@@ -2532,9 +2564,12 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 		if err != nil {
 			return 0, err
 		}
+		if len(body) < 2 || body[0] != fc.elemWireType {
+			return 0, fmt.Errorf("omnibuf: invalid fixed32 array at %d", pos)
+		}
 		p := (*[]int64)(fPtr)
 		sl, ok := appendSfixed32CastArrBody(sliceForDecode(p, alreadySeen), body)
-		if !ok || body[0] != fc.elemWireType {
+		if !ok {
 			return 0, fmt.Errorf("omnibuf: invalid fixed32 array at %d", pos)
 		}
 		*p = sl
@@ -2544,9 +2579,12 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 		if err != nil {
 			return 0, err
 		}
+		if len(body) < 2 || body[0] != fc.elemWireType {
+			return 0, fmt.Errorf("omnibuf: invalid fixed64 array at %d", pos)
+		}
 		p := (*[]uint8)(fPtr)
 		sl, ok := appendFixed64CastArrBody(sliceForDecode(p, alreadySeen), body)
-		if !ok || body[0] != fc.elemWireType {
+		if !ok {
 			return 0, fmt.Errorf("omnibuf: invalid fixed64 array at %d", pos)
 		}
 		*p = sl
@@ -2556,9 +2594,12 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 		if err != nil {
 			return 0, err
 		}
+		if len(body) < 2 || body[0] != fc.elemWireType {
+			return 0, fmt.Errorf("omnibuf: invalid fixed64 array at %d", pos)
+		}
 		p := (*[]uint16)(fPtr)
 		sl, ok := appendFixed64CastArrBody(sliceForDecode(p, alreadySeen), body)
-		if !ok || body[0] != fc.elemWireType {
+		if !ok {
 			return 0, fmt.Errorf("omnibuf: invalid fixed64 array at %d", pos)
 		}
 		*p = sl
@@ -2568,9 +2609,12 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 		if err != nil {
 			return 0, err
 		}
+		if len(body) < 2 || body[0] != fc.elemWireType {
+			return 0, fmt.Errorf("omnibuf: invalid fixed64 array at %d", pos)
+		}
 		p := (*[]uint32)(fPtr)
 		sl, ok := appendFixed64CastArrBody(sliceForDecode(p, alreadySeen), body)
-		if !ok || body[0] != fc.elemWireType {
+		if !ok {
 			return 0, fmt.Errorf("omnibuf: invalid fixed64 array at %d", pos)
 		}
 		*p = sl
@@ -2633,9 +2677,7 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 			el, en := decodeVarint(arrPayload[p:])
 			if en == 0 || el > uint64(len(arrPayload)-(p+en)) {
 				if reused && !alreadySeen {
-					if fc.elemHasPtrs && oldLen > 0 && sh.Data != nil {
-						clear(unsafe.Slice((*byte)(sh.Data), uintptr(oldLen)*fc.elemSize))
-					}
+					clearStructValSliceRange(fc, fPtr, 0, oldLen)
 					sh.Len = 0
 				}
 				return 0, fmt.Errorf("omnibuf: corrupt submsg array at %d", pos)
@@ -2644,9 +2686,7 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 			elemPtr := unsafe.Add(dataPtr, uintptr(start+j)*fc.elemSize)
 			if err := fc.subCodec.decodeStruct(arrPayload[p:p+int(el)], elemPtr, zeroCopy, depth+2, false); err != nil {
 				if reused && !alreadySeen {
-					if fc.elemHasPtrs && max(oldLen, start+j+1) > 0 && sh.Data != nil {
-						clear(unsafe.Slice((*byte)(sh.Data), uintptr(max(oldLen, start+j+1))*fc.elemSize))
-					}
+					clearStructValSliceRange(fc, fPtr, 0, max(oldLen, start+j+1))
 					sh.Len = 0
 				}
 				return 0, err
@@ -2655,15 +2695,13 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 		}
 		if p != len(arrPayload) {
 			if reused && !alreadySeen {
-				if fc.elemHasPtrs && max(oldLen, total) > 0 && sh.Data != nil {
-					clear(unsafe.Slice((*byte)(sh.Data), uintptr(max(oldLen, total))*fc.elemSize))
-				}
+				clearStructValSliceRange(fc, fPtr, 0, max(oldLen, total))
 				sh.Len = 0
 			}
 			return 0, fmt.Errorf("omnibuf: corrupt submsg array at %d", pos)
 		}
-		if reused && !alreadySeen && total < oldLen && fc.elemHasPtrs && dataPtr != nil {
-			clear(unsafe.Slice((*byte)(unsafe.Add(dataPtr, uintptr(total)*fc.elemSize)), uintptr(oldLen-total)*fc.elemSize))
+		if reused && !alreadySeen && total < oldLen {
+			clearStructValSliceRange(fc, fPtr, total, oldLen)
 		}
 		sh.Data = dataPtr
 		sh.Len = total
