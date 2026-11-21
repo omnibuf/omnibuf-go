@@ -10,14 +10,18 @@ import (
 func TestValidUTF8MatchesStandardLibrary(t *testing.T) {
 	check := func(b []byte) {
 		t.Helper()
-		if got, want := ValidUTF8(b), utf8.Valid(b); got != want {
+		want := utf8.Valid(b)
+		if got := ValidUTF8(b); got != want {
 			t.Fatalf("ValidUTF8(%x) = %v, want %v", b, got, want)
+		}
+		if got := ValidUTF8String(string(b)); got != want {
+			t.Fatalf("ValidUTF8String(%x) = %v, want %v", b, got, want)
 		}
 	}
 	check(nil)
-	// Exercise word-load boundaries, overlap, and every possible non-ASCII byte
-	// at every position, including the final byte.
-	for n := 0; n <= 80; n++ {
+	// Exercise word-load boundaries, overlap, 64-byte chunks, and every possible
+	// non-ASCII byte at every position, including the final byte.
+	for n := 0; n <= 144; n++ {
 		b := bytes.Repeat([]byte{'a'}, n)
 		check(b)
 		for i := range b {

@@ -806,8 +806,16 @@ func TestProtobufStyleConformanceCorpus(t *testing.T) {
 	// ------------------------------------------------------------------------
 	vectors = append(vectors, buildReviewLearningVectors(t)...)
 
+	// ------------------------------------------------------------------------
+	// Category O: Multi-Language Audit Hardening Vectors (UTF-8 vs UTF-16 map
+	// sort order, >53-bit integer precision, 4-segment concatenation, bool-keyed
+	// nested container maps, float formatting thresholds, 18-level TreeNode)
+	// ------------------------------------------------------------------------
+	vectors = append(vectors, buildAuditHardeningVectors(t)...)
+
 	allInvalid := append(buildInvalidWireCases(), buildEdgeInvalidWireCases()...)
 	allInvalid = append(allInvalid, buildReviewInvalidWireCases()...)
+	allInvalid = append(allInvalid, buildAuditInvalidWireCases()...)
 
 	// Verify or update golden corpus file at testdata/conformance_corpus.json
 	corpus := ConformanceCorpusFile{
@@ -2853,9 +2861,355 @@ func buildReviewInvalidWireCases() []InvalidWireCase {
 	}
 }
 
+func buildAuditHardeningVectors(t *testing.T) []ConformanceVector {
+	t.Helper()
+	var out []ConformanceVector
+
+	// O1: UTF-8 vs UTF-16 surrogate map key sort order
+	// Astral codepoints U+10437 and U+1F680 have UTF-8 lead byte 0xF0 (> 0xEE/0xEF),
+	// whereas UTF-16 surrogates 0xD801/0xD83D sort below BMP U+E000..U+FFFF.
+	out = append(out, verifyAllTypesAcrossEngines(
+		t,
+		"utf8_vs_utf16_surrogate_map_sort_order",
+		"O_AuditHardening",
+		"Map with BMP U+E000 / U+FF01 and astral U+10437 / U+1F680 keys enforcing canonical UTF-8 byte sort order",
+		&TestAllTypes{
+			F1Uint32: 1,
+			F12MapStrUint: map[string]uint64{
+				"\uE000_pua":       1,
+				"！_fullwidth_ff01": 2,
+				"𐐷_deseret_10437":  3,
+				"🚀_astral_1f680":   4,
+			},
+		},
+	))
+
+	// O2: Exact 64-bit integer precision above 2^53 (catching float64 rounding)
+	out = append(out, verifyAllTypesAcrossEngines(
+		t,
+		"uint64_int64_above_53bit_precision",
+		"O_AuditHardening",
+		"Exact 2^53+1, -(2^53+1), and MaxUint64-1 values catching IEEE-754 float64 truncation",
+		&TestAllTypes{
+			F2Uint64:   9007199254740993,
+			F4Sint64:   -9007199254740993,
+			F16Fixed64: 18446744073709551614,
+			F12MapStrUint: map[string]uint64{
+				"max_minus_1":      18446744073709551614,
+				"two_pow_53_plus1": 9007199254740993,
+			},
+		},
+	))
+
+	// O3: Positive zero reset immediately following negative zero
+	{
+		msgNeg := &TestAllTypes{
+			F13Float32: math.Float32frombits(0x80000000),
+			F14Float64: math.Float64frombits(0x8000000000000000),
+		}
+		out = append(out, verifyAllTypesAcrossEngines(
+			t,
+			"audit_float_neg_zero_seed",
+			"O_AuditHardening",
+			"Negative zero (-0.0) seed preceding an omitted-float packet to detect stale -0.0 retention",
+			msgNeg,
+		))
+		out = append(out, verifyAllTypesAcrossEngines(
+			t,
+			"audit_float_pos_zero_reset_after_neg_zero",
+			"O_AuditHardening",
+			"Omitted float fields immediately after -0.0 verifying reused dynamic/struct targets reset sign bit to +0.0",
+			&TestAllTypes{F1Uint32: 7},
+		))
+	}
+
+	// O4: Float formatting thresholds inside [1e-6, 1e21)
+	out = append(out, verifyAllTypesAcrossEngines(
+		t,
+		"float_scientific_threshold_values",
+		"O_AuditHardening",
+		"Floats 0.000125 and 15000000.0 testing fixed-point vs exponent formatting in DecodeBlind JSON",
+		&TestAllTypes{
+			F13Float32: 0.000125,
+			F14Float64: 15000000.0,
+		},
+	))
+
+	// O5: 4-segment concatenated WireSubMsg, WireArray, and WireMap
+	{
+		seg1, err := MarshalDeterministic(&TestAllTypes{
+			F8SubMsg:      &AllTypesSubMsg{ID: 11},
+			F10Uint32Arr:  []uint32{10},
+			F12MapStrUint: map[string]uint64{"a": 1},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		seg2, err := MarshalDeterministic(&TestAllTypes{
+			F8SubMsg:      &AllTypesSubMsg{Label: "seg2"},
+			F10Uint32Arr:  []uint32{20},
+			F12MapStrUint: map[string]uint64{"b": 2},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		seg3, err := MarshalDeterministic(&TestAllTypes{
+			F8SubMsg:      &AllTypesSubMsg{Flag: true},
+			F10Uint32Arr:  []uint32{30},
+			F12MapStrUint: map[string]uint64{"a": 10},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		seg4, err := MarshalDeterministic(&TestAllTypes{
+			F8SubMsg:      &AllTypesSubMsg{Score: -444},
+			F10Uint32Arr:  []uint32{40},
+			F12MapStrUint: map[string]uint64{"c": 3},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var pkt4 []byte
+		pkt4 = append(pkt4, seg1...)
+		pkt4 = append(pkt4, seg2...)
+		pkt4 = append(pkt4, seg3...)
+		pkt4 = append(pkt4, seg4...)
+
+		blind4, err := DecodeBlind(pkt4)
+		if err != nil {
+			t.Fatalf("DecodeBlind(pkt4) failed: %v", err)
+		}
+		out = append(out, ConformanceVector{
+			Name:          "concat_4seg_valid_submsg_and_containers",
+			Category:      "O_AuditHardening",
+			Description:   "Four concatenated TestAllTypes segments merging F8SubMsg, F10Uint32Arr, and F12MapStrUint",
+			Schema:        "TestAllTypes",
+			WireHex:       hex.EncodeToString(pkt4),
+			WireByteLen:   len(pkt4),
+			PresentFields: inspectPresentFields(pkt4),
+			ExpectedBlind: blind4,
+		})
+	}
+
+	// O6: Non-empty WireMap<bool, WireArray> and WireMap<bool, WireMap> in TIER_BLIND
+	{
+		var pktBoolMap []byte
+		// Field #1: map<bool, repeated uint32> {false: [10, 20], true: [30]}
+		var arrFalse []byte
+		arrFalse = append(arrFalse, WireUint)
+		arrFalse = AppendVarint(arrFalse, 2)
+		arrFalse = AppendVarint(arrFalse, 10)
+		arrFalse = AppendVarint(arrFalse, 20)
+		var arrTrue []byte
+		arrTrue = append(arrTrue, WireUint)
+		arrTrue = AppendVarint(arrTrue, 1)
+		arrTrue = AppendVarint(arrTrue, 30)
+
+		var map1Body []byte
+		map1Body = append(map1Body, WireBoolFalse, WireArray)
+		map1Body = AppendVarint(map1Body, 2)
+		map1Body = append(map1Body, 0x00)
+		map1Body = AppendVarint(map1Body, uint64(len(arrFalse)))
+		map1Body = append(map1Body, arrFalse...)
+		map1Body = append(map1Body, 0x01)
+		map1Body = AppendVarint(map1Body, uint64(len(arrTrue)))
+		map1Body = append(map1Body, arrTrue...)
+
+		pktBoolMap = appendTag(pktBoolMap, 1, WireMap)
+		pktBoolMap = AppendVarint(pktBoolMap, uint64(len(map1Body)))
+		pktBoolMap = append(pktBoolMap, map1Body...)
+
+		// Field #2: map<bool, map<string, uint64>> {false: {"k0": 100}, true: {"k1": 200}}
+		var innerM0 []byte
+		innerM0 = append(innerM0, WireString, WireUint)
+		innerM0 = AppendVarint(innerM0, 1)
+		innerM0 = AppendVarint(innerM0, 2)
+		innerM0 = append(innerM0, "k0"...)
+		innerM0 = AppendVarint(innerM0, 100)
+		var innerM1 []byte
+		innerM1 = append(innerM1, WireString, WireUint)
+		innerM1 = AppendVarint(innerM1, 1)
+		innerM1 = AppendVarint(innerM1, 2)
+		innerM1 = append(innerM1, "k1"...)
+		innerM1 = AppendVarint(innerM1, 200)
+
+		var map2Body []byte
+		map2Body = append(map2Body, WireBoolFalse, WireMap)
+		map2Body = AppendVarint(map2Body, 2)
+		map2Body = append(map2Body, 0x00)
+		map2Body = AppendVarint(map2Body, uint64(len(innerM0)))
+		map2Body = append(map2Body, innerM0...)
+		map2Body = append(map2Body, 0x01)
+		map2Body = AppendVarint(map2Body, uint64(len(innerM1)))
+		map2Body = append(map2Body, innerM1...)
+
+		pktBoolMap = appendTag(pktBoolMap, 2, WireMap)
+		pktBoolMap = AppendVarint(pktBoolMap, uint64(len(map2Body)))
+		pktBoolMap = append(pktBoolMap, map2Body...)
+
+		blindBoolMap, err := DecodeBlind(pktBoolMap)
+		if err != nil {
+			t.Fatalf("DecodeBlind(pktBoolMap) failed: %v", err)
+		}
+		out = append(out, ConformanceVector{
+			Name:          "blind_map_bool_key_with_array_and_map_values",
+			Category:      "O_AuditHardening",
+			Description:   "Non-empty WireMap<bool, WireArray> and WireMap<bool, WireMap> testing 1-byte boolean map key skipping",
+			Schema:        "ManualBoolKeyNestedContainers",
+			WireHex:       hex.EncodeToString(pktBoolMap),
+			WireByteLen:   len(pktBoolMap),
+			PresentFields: inspectPresentFields(pktBoolMap),
+			ExpectedBlind: sanitizeBlindMapForGoldenJSON(blindBoolMap).(map[string]any),
+		})
+	}
+
+	// O7: 18-level TreeNode chain (valid <= 32 wire container depth, testing SchemaMeta depth cap on SelfDescribing)
+	{
+		cur := &TreeNode{ID: 18, Name: "leaf-18", Weight: -18}
+		for d := 17; d >= 1; d-- {
+			cur = &TreeNode{
+				ID:      uint32(d),
+				Name:    fmt.Sprintf("node-%d", d),
+				Weight:  int64(-d),
+				Primary: cur,
+			}
+		}
+		wireTree18, err := MarshalDeterministic(cur)
+		if err != nil {
+			t.Fatalf("MarshalDeterministic(tree18) failed: %v", err)
+		}
+		blindTree18, err := DecodeBlind(wireTree18)
+		if err != nil {
+			t.Fatalf("DecodeBlind(tree18) failed: %v", err)
+		}
+		out = append(out, ConformanceVector{
+			Name:          "tree_depth_18_valid_self_describing_cap",
+			Category:      "O_AuditHardening",
+			Description:   "18-level TreeNode chain within MaxNestingDepth=32 testing SelfDescribing SchemaMeta depth bounding",
+			Schema:        "TreeNode",
+			WireHex:       hex.EncodeToString(wireTree18),
+			WireByteLen:   len(wireTree18),
+			PresentFields: inspectPresentFields(wireTree18),
+			ExpectedBlind: blindTree18,
+		})
+	}
+
+	return out
+}
+
+func buildAuditInvalidWireCases() []InvalidWireCase {
+	cat := func(parts ...[]byte) []byte {
+		var b []byte
+		for _, p := range parts {
+			b = append(b, p...)
+		}
+		return b
+	}
+
+	// 1. 4-segment concatenated WireSubMsg where segments 1 & 2 are valid and segments 3 & 4 fuse across a truncated varint
+	segValidEmpty := cat(appendTag(nil, 8, WireSubMsg), AppendVarint(nil, 0))
+	segValidId1 := cat(appendTag(nil, 8, WireSubMsg), AppendVarint(nil, 2), appendTag(nil, 1, WireUint), AppendVarint(nil, 1))
+	segTrunc3 := cat(appendTag(nil, 8, WireSubMsg), AppendVarint(nil, 2), []byte{0x21, 0x02})
+	segFuse4 := cat(appendTag(nil, 8, WireSubMsg), AppendVarint(nil, 1), []byte{0x01})
+
+	// 7. Unknown WireString field (#99) with invalid UTF-8 [0xFF, 0xFE] left untouched during OpaqueSplice
+	badUnknownStrUTF8 := cat(
+		appendTag(nil, 1, WireUint), AppendVarint(nil, 42),
+		appendTag(nil, 99, WireString), AppendVarint(nil, 2), []byte{0xFF, 0xFE},
+	)
+
+	// 2. Field #0 with invalid UTF-8 field name in fields map (key=1, val=[0xC3, 0x28])
+	var badF0UTF8Map []byte
+	badF0UTF8Map = append(badF0UTF8Map, WireUint, WireString)
+	badF0UTF8Map = AppendVarint(badF0UTF8Map, 1)
+	badF0UTF8Map = AppendVarint(badF0UTF8Map, 1)
+	badF0UTF8Map = AppendVarint(badF0UTF8Map, 2)
+	badF0UTF8Map = append(badF0UTF8Map, 0xC3, 0x28)
+	badF0UTF8Body := cat(appendTag(nil, 2, WireMap), AppendVarint(nil, uint64(len(badF0UTF8Map))), badF0UTF8Map)
+	badF0UTF8 := cat(appendTag(nil, 0, WireSubMsg), AppendVarint(nil, uint64(len(badF0UTF8Body))), badF0UTF8Body, appendTag(nil, 1, WireUint), AppendVarint(nil, 42))
+
+	// 3. Field #0 with illegal key 0 in fields map
+	var badF0Key0Map []byte
+	badF0Key0Map = append(badF0Key0Map, WireUint, WireString)
+	badF0Key0Map = AppendVarint(badF0Key0Map, 1)
+	badF0Key0Map = AppendVarint(badF0Key0Map, 0)
+	badF0Key0Map = AppendVarint(badF0Key0Map, 3)
+	badF0Key0Map = append(badF0Key0Map, 'b', 'a', 'd')
+	badF0Key0Body := cat(appendTag(nil, 2, WireMap), AppendVarint(nil, uint64(len(badF0Key0Map))), badF0Key0Map)
+	badF0Key0 := cat(appendTag(nil, 0, WireSubMsg), AppendVarint(nil, uint64(len(badF0Key0Body))), badF0Key0Body, appendTag(nil, 1, WireUint), AppendVarint(nil, 42))
+
+	// 4. Field #0 with key > 536870911 (536870912) in fields map
+	var badF0KeyMaxMap []byte
+	badF0KeyMaxMap = append(badF0KeyMaxMap, WireUint, WireString)
+	badF0KeyMaxMap = AppendVarint(badF0KeyMaxMap, 1)
+	badF0KeyMaxMap = AppendVarint(badF0KeyMaxMap, 536870912)
+	badF0KeyMaxMap = AppendVarint(badF0KeyMaxMap, 3)
+	badF0KeyMaxMap = append(badF0KeyMaxMap, 'b', 'a', 'd')
+	badF0KeyMaxBody := cat(appendTag(nil, 2, WireMap), AppendVarint(nil, uint64(len(badF0KeyMaxMap))), badF0KeyMaxMap)
+	badF0KeyMax := cat(appendTag(nil, 0, WireSubMsg), AppendVarint(nil, uint64(len(badF0KeyMaxBody))), badF0KeyMaxBody, appendTag(nil, 1, WireUint), AppendVarint(nil, 42))
+
+	// 5. Field #0 containing an unknown WireString field (#9) with invalid UTF-8 [0xFF, 0xFE]
+	badF0UnknownStrBody := cat(appendTag(nil, 9, WireString), AppendVarint(nil, 2), []byte{0xFF, 0xFE})
+	badF0UnknownStr := cat(appendTag(nil, 0, WireSubMsg), AppendVarint(nil, uint64(len(badF0UnknownStrBody))), badF0UnknownStrBody, appendTag(nil, 1, WireUint), AppendVarint(nil, 42))
+
+	// 6. Sub-message nested 33 levels deep (> MaxNestingDepth = 32) on F8SubMsg / unknown submsg
+	var deepSub33 []byte
+	deepSub33 = cat(appendTag(nil, 1, WireUint), AppendVarint(nil, 9))
+	for range 33 {
+		deepSub33 = cat(appendTag(nil, 8, WireSubMsg), AppendVarint(nil, uint64(len(deepSub33))), deepSub33)
+	}
+
+	return []InvalidWireCase{
+		{
+			Name:        "concat_4seg_split_corrupt_submsg",
+			Category:    "CorruptSubMsg",
+			Description: "Four F8SubMsg occurrences where segments 1 & 2 are valid and segments 3 & 4 fuse across a truncated 2-byte varint",
+			WireHex:     hex.EncodeToString(cat(segValidEmpty, segValidId1, segTrunc3, segFuse4)),
+		},
+		{
+			Name:        "field0_invalid_utf8_field_name",
+			Category:    "InvalidUTF8",
+			Description: "Field #0 SchemaMeta mapping field 1 to invalid UTF-8 bytes [0xC3, 0x28] before a valid F1Uint32",
+			WireHex:     hex.EncodeToString(badF0UTF8),
+		},
+		{
+			Name:        "field0_key_zero_invalid",
+			Category:    "CorruptField0",
+			Description: "Field #0 SchemaMeta fields map containing illegal field number 0",
+			WireHex:     hex.EncodeToString(badF0Key0),
+		},
+		{
+			Name:        "field0_key_exceeds_max_field",
+			Category:    "CorruptField0",
+			Description: "Field #0 SchemaMeta fields map containing field number 536870912 (> 536870911)",
+			WireHex:     hex.EncodeToString(badF0KeyMax),
+		},
+		{
+			Name:        "field0_unknown_wire_string_invalid_utf8",
+			Category:    "InvalidUTF8",
+			Description: "Field #0 SchemaMeta containing unknown field #9 WireString with invalid UTF-8 [0xFF, 0xFE]",
+			WireHex:     hex.EncodeToString(badF0UnknownStr),
+		},
+		{
+			Name:        "submsg_depth_33_exceeded_all_tiers",
+			Category:    "MaliciousDepthBomb",
+			Description: "33 nested WireSubMsg layers exceeding MaxNestingDepth=32 across all schema and blind tiers",
+			WireHex:     hex.EncodeToString(deepSub33),
+		},
+		{
+			Name:        "unknown_wire_string_invalid_utf8",
+			Category:    "InvalidUTF8",
+			Description: "Unknown field #99 WireString containing invalid UTF-8 [0xFF, 0xFE] testing schema skip and OpaqueSplice UTF-8 validation",
+			BlindOnly:   true,
+			WireHex:     hex.EncodeToString(badUnknownStrUTF8),
+		},
+	}
+}
+
 func TestMalformedWireRejectionConformance(t *testing.T) {
 	cases := append(buildInvalidWireCases(), buildEdgeInvalidWireCases()...)
 	cases = append(cases, buildReviewInvalidWireCases()...)
+	cases = append(cases, buildAuditInvalidWireCases()...)
 	for _, tc := range cases {
 		t.Run(tc.Name, func(t *testing.T) {
 			raw, err := hex.DecodeString(tc.WireHex)
@@ -2882,13 +3236,13 @@ func TestMalformedWireRejectionConformance(t *testing.T) {
 				if err := pbAll.UnmarshalOmniBuf(raw, false); err == nil {
 					t.Errorf("[%s] expected pb.TestAllTypes.UnmarshalOmniBuf to return error on %x", tc.Name, raw)
 				}
-				if tc.Category != "InvalidUTF8" || strings.Contains(tc.Name, "field0") {
-					var opAll pb.OpaqueTestAllTypes
-					_ = opAll.Unmarshal(raw)
-					opAll.SetF1Uint32(1)
-					if _, err := opAll.TryMarshalAppend(nil); err == nil {
-						t.Errorf("[%s] expected pb.OpaqueTestAllTypes.TryMarshalAppend to return error on %x", tc.Name, raw)
-					}
+			}
+			if !tc.BlindOnly || tc.Category == "InvalidUTF8" {
+				var opAll pb.OpaqueTestAllTypes
+				_ = opAll.Unmarshal(raw)
+				opAll.SetF1Uint32(1)
+				if _, err := opAll.TryMarshalAppend(nil); err == nil {
+					t.Errorf("[%s] expected pb.OpaqueTestAllTypes.TryMarshalAppend to return error on %x", tc.Name, raw)
 				}
 			}
 

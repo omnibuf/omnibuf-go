@@ -5,6 +5,7 @@ package wire
 import (
 	"encoding/binary"
 	"fmt"
+	"slices"
 )
 
 // Explicit 4-bit Wire Types (0..15) encoded in the low 4 bits of the field tag:
@@ -117,6 +118,9 @@ func PutOverlong2BVarint(dst []byte, v uint16) {
 	binary.LittleEndian.PutUint16(dst[:2], (v<<2)|2)
 }
 
+// Max2BContainerLen is the largest payload length (16,383 bytes) that fits in a 2-byte Prefix-Varint.
+const Max2BContainerLen = 16383
+
 // BackpatchContainerLen fills in the container byte length at dst[lenPos:lenPos+2]
 // for the common fast path (subLen <= 16383). If subLen > 16383, it expands the
 // reserved 2-byte slot to a 4-byte Prefix-Varint (up to 512 MB) or 9-byte Prefix-Varint
@@ -127,6 +131,26 @@ func BackpatchContainerLen(dst []byte, lenPos int) []byte {
 		return dst
 	}
 	return backpatchLargeContainerLen(dst, lenPos)
+}
+
+// BackpatchContainerLen4 fills a pre-reserved 4-byte Prefix-Varint container length slot
+// at dst[lenPos:lenPos+4] when a lower-bound size check proved subLen > 16383 up front.
+func BackpatchContainerLen4(dst []byte, lenPos int) []byte {
+	subLen := uint64(len(dst) - (lenPos + 4))
+	if subLen <= 536870911 {
+		binary.LittleEndian.PutUint32(dst[lenPos:lenPos+4], uint32(subLen<<3)|4)
+		return dst
+	}
+	return backpatchHugeContainerLen4(dst, lenPos, subLen)
+}
+
+//go:noinline
+func backpatchHugeContainerLen4(dst []byte, lenPos int, subLen uint64) []byte {
+	dst = append(dst, 0, 0, 0, 0, 0)
+	copy(dst[lenPos+9:], dst[lenPos+4:len(dst)-5])
+	dst[lenPos] = 0
+	binary.LittleEndian.PutUint64(dst[lenPos+1:lenPos+9], subLen)
+	return dst
 }
 
 //go:noinline
@@ -652,6 +676,30 @@ func validateValueWithDepth(b []byte, pos int, wt uint8, depth int) (int, bool) 
 		}
 		return end, true
 	}
+	if wt == WireString {
+		if pos >= len(b) {
+			return 0, false
+		}
+		lb := b[pos]
+		if (lb & 1) != 0 {
+			l := int(lb >> 1)
+			end := pos + 1 + l
+			if len(b)-pos-1 < l || !ValidUTF8(b[pos+1:end]) {
+				return 0, false
+			}
+			return end, true
+		}
+		sLen, sn := DecodeVarint(b[pos:])
+		if sn == 0 || sLen > uint64(len(b)-(pos+sn)) {
+			return 0, false
+		}
+		start := pos + sn
+		end := start + int(sLen)
+		if !ValidUTF8(b[start:end]) {
+			return 0, false
+		}
+		return end, true
+	}
 	return fastSkipValue(b, pos, wt)
 }
 
@@ -749,14 +797,31 @@ func (e *Encoder) WriteField0Fields(fields map[uint32]string) {
 	if len(fields) == 0 {
 		return
 	}
+	var stackKeys [32]uint32
+	keys := stackKeys[:0]
+	if len(fields) > len(stackKeys) {
+		keys = make([]uint32, 0, len(fields))
+	}
+	for k, name := range fields {
+		if k == 0 || k > 536870911 {
+			panic(fmt.Sprintf("omnibuf: invalid Field #0 field number %d", k))
+		}
+		if !ValidUTF8String(name) {
+			panic("omnibuf: invalid UTF-8 in Field #0 field name")
+		}
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+
 	e.buf = append(e.buf, byte(((0<<4)|WireSubMsg)<<1)|1)
 	lenPos := len(e.buf)
 	e.buf = append(e.buf, 0, 0)
 	e.buf = append(e.buf, byte(((2<<4)|WireMap)<<1)|1)
 	mLenPos := len(e.buf)
 	e.buf = append(e.buf, 0, 0, WireUint, WireString)
-	e.buf = AppendVarint(e.buf, uint64(len(fields)))
-	for k, name := range fields {
+	e.buf = AppendVarint(e.buf, uint64(len(keys)))
+	for _, k := range keys {
+		name := fields[k]
 		e.buf = AppendVarint(e.buf, uint64(k))
 		e.buf = AppendVarint(e.buf, uint64(len(name)))
 		e.buf = append(e.buf, name...)
@@ -768,13 +833,39 @@ func (e *Encoder) WriteField0Fields(fields map[uint32]string) {
 // WriteField0Schema writes Field #0 (Tag = 0x19, WireSubMsg = 12) mapping field numbers 1..len(names)
 // to names[0..len(names)-1].
 func (e *Encoder) WriteField0Schema(names []string) {
-	fields := make(map[uint32]string, len(names))
+	count := 0
 	for i, name := range names {
-		if name != "" {
-			fields[uint32(i+1)] = name
+		if name == "" {
+			continue
 		}
+		if uint64(i+1) > 536870911 {
+			panic(fmt.Sprintf("omnibuf: invalid Field #0 field number %d", i+1))
+		}
+		if !ValidUTF8String(name) {
+			panic("omnibuf: invalid UTF-8 in Field #0 field name")
+		}
+		count++
 	}
-	e.WriteField0Fields(fields)
+	if count == 0 {
+		return
+	}
+	e.buf = append(e.buf, byte(((0<<4)|WireSubMsg)<<1)|1)
+	lenPos := len(e.buf)
+	e.buf = append(e.buf, 0, 0)
+	e.buf = append(e.buf, byte(((2<<4)|WireMap)<<1)|1)
+	mLenPos := len(e.buf)
+	e.buf = append(e.buf, 0, 0, WireUint, WireString)
+	e.buf = AppendVarint(e.buf, uint64(count))
+	for i, name := range names {
+		if name == "" {
+			continue
+		}
+		e.buf = AppendVarint(e.buf, uint64(i+1))
+		e.buf = AppendVarint(e.buf, uint64(len(name)))
+		e.buf = append(e.buf, name...)
+	}
+	e.buf = BackpatchContainerLen(e.buf, mLenPos)
+	e.buf = BackpatchContainerLen(e.buf, lenPos)
 }
 
 // PatchReservedVarint fills a 1-byte reserved varint slot and expands it if value > 127.

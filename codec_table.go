@@ -81,6 +81,8 @@ const (
 	kindUint64Slice
 	kindUint8SintSlice
 	kindUint16SintSlice
+	kindUint32SintSlice
+	kindUint64SintSlice
 	kindInt8Slice
 	kindInt16Slice
 	kindInt32Slice
@@ -124,6 +126,7 @@ type fieldCodec struct {
 	subCodec     *structCodec
 	elemCodec    *fieldCodec
 	elemSize     uintptr
+	elemHasPtrs  bool
 	sliceType    reflect.Type
 	elemType     reflect.Type
 	mapKeyWT     uint8
@@ -145,6 +148,73 @@ type structCodec struct {
 	schemaMeta   *SchemaMeta
 	field0Wire   []byte
 	cyclicSchema bool
+	protoState   ProtoStateOffsets
+}
+
+const noFieldOffset = ^uintptr(0)
+
+// ProtoStateOffsets stores precomputed byte offsets for protoc-gen-go internal
+// sizeCache and unknownFields fields so generated and table codecs can reset them
+// without allocations or reflection on the hot path.
+type ProtoStateOffsets struct {
+	sizeCacheOff     uintptr
+	unknownFieldsOff uintptr
+}
+
+// InspectProtoState inspects T once for protoc-gen-go sizeCache and unknownFields offsets.
+func InspectProtoState[T any]() ProtoStateOffsets {
+	return inspectProtoStateType(reflect.TypeFor[T]())
+}
+
+func inspectProtoStateType(t reflect.Type) ProtoStateOffsets {
+	res := ProtoStateOffsets{
+		sizeCacheOff:     noFieldOffset,
+		unknownFieldsOff: noFieldOffset,
+	}
+	if t == nil || t.Kind() != reflect.Struct {
+		return res
+	}
+	isProtoStruct := false
+	var sizeOff = noFieldOffset
+	var unkOff = noFieldOffset
+	for i := 0; i < t.NumField(); i++ {
+		sf := t.Field(i)
+		if sf.IsExported() {
+			if pbTag := sf.Tag.Get("protobuf"); pbTag != "" && pbTag != "-" {
+				isProtoStruct = true
+			}
+			continue
+		}
+		switch sf.Name {
+		case "state":
+			if strings.Contains(sf.Type.PkgPath(), "protobuf") {
+				isProtoStruct = true
+			}
+		case "sizeCache":
+			if sf.Type.Kind() == reflect.Int32 && sf.Type.Size() == 4 {
+				sizeOff = sf.Offset
+			}
+		case "unknownFields":
+			if sf.Type.Kind() == reflect.Slice && sf.Type.Elem().Kind() == reflect.Uint8 {
+				unkOff = sf.Offset
+			}
+		}
+	}
+	if isProtoStruct {
+		res.sizeCacheOff = sizeOff
+		res.unknownFieldsOff = unkOff
+	}
+	return res
+}
+
+// Reset clears sizeCache unconditionally and clears unknownFields when merge is false.
+func (p ProtoStateOffsets) Reset(ptr unsafe.Pointer, merge bool) {
+	if p.sizeCacheOff != noFieldOffset {
+		*(*int32)(unsafe.Add(ptr, p.sizeCacheOff)) = 0
+	}
+	if !merge && p.unknownFieldsOff != noFieldOffset {
+		*(*[]byte)(unsafe.Add(ptr, p.unknownFieldsOff)) = nil
+	}
 }
 
 var codecCache sync.Map // map[reflect.Type]*structCodec
@@ -293,8 +363,9 @@ func compileStructCodec(t reflect.Type, building map[reflect.Type]*structCodec) 
 		return c, nil
 	}
 	sc := &structCodec{
-		typ:  t,
-		size: t.Size(),
+		typ:        t,
+		size:       t.Size(),
+		protoState: inspectProtoStateType(t),
 	}
 	building[t] = sc
 
@@ -694,6 +765,7 @@ func configureFieldCodec(fc *fieldCodec, sf reflect.StructField, ft reflect.Type
 		fc.wireType = elemCodec.wireType
 		fc.elemType = ft.Elem()
 		fc.elemCodec = elemCodec
+		fc.subCodec = elemCodec.subCodec
 	case reflect.Slice:
 		return configureSliceFieldCodec(fc, sf, ft, wireOpt, building)
 	case reflect.Map:
@@ -783,7 +855,7 @@ func configureSliceFieldCodec(fc *fieldCodec, sf reflect.StructField, ft reflect
 			fc.kind = kindUint32Slice
 			fc.wireType = wireArray
 		case "sint":
-			fc.kind = kindInt32Slice
+			fc.kind = kindUint32SintSlice
 			fc.wireType = wireArray
 		case "fixed32":
 			fc.kind = kindFloat32Slice
@@ -800,7 +872,7 @@ func configureSliceFieldCodec(fc *fieldCodec, sf reflect.StructField, ft reflect
 			fc.kind = kindUint64Slice
 			fc.wireType = wireArray
 		case "sint":
-			fc.kind = kindInt64Slice
+			fc.kind = kindUint64SintSlice
 			fc.wireType = wireArray
 		case "fixed32":
 			fc.kind = kindUint64Fixed32Slice
@@ -903,6 +975,7 @@ func configureSliceFieldCodec(fc *fieldCodec, sf reflect.StructField, ft reflect
 		fc.wireType = wireArray
 		fc.subCodec = sub
 		fc.elemSize = elem.Size()
+		fc.elemHasPtrs = typeHasPointers(elem)
 		fc.sliceType = ft
 		fc.elemType = elem
 	case reflect.Pointer:
@@ -1117,7 +1190,7 @@ func Marshal(v any) ([]byte, error) {
 	return MarshalAppend(nil, v)
 }
 
-// MarshalAppend appends the OmniBuf encoding of struct pointer v to dst[:0] using the
+// MarshalAppend appends the OmniBuf encoding of struct pointer v to dst using the
 // cached unsafe-offset table codec (0 reflection allocations on the hot path).
 func MarshalAppend(dst []byte, v any) ([]byte, error) {
 	return marshalTableAppend(dst, v, MarshalOptions{})
@@ -1138,10 +1211,14 @@ func marshalTableAppend(dst []byte, v any, opts MarshalOptions) ([]byte, error) 
 		return nil, err
 	}
 	ptr := rv.UnsafePointer()
-	if cap(dst) < 512 {
-		dst = make([]byte, 0, 512)
-	} else {
-		dst = dst[:0]
+	if dst == nil {
+		minCap := max(512, sc.minWireSize(ptr, 0)+64)
+		dst = make([]byte, 0, minCap)
+	} else if cap(dst)-len(dst) < 512 {
+		minCap := max(512, sc.minWireSize(ptr, 0)+64)
+		grown := make([]byte, len(dst), max(cap(dst)*2, len(dst)+minCap))
+		copy(grown, dst)
+		dst = grown
 	}
 	if opts.SelfDescribing {
 		f0 := sc.getField0Wire()
@@ -1169,7 +1246,7 @@ type encState struct {
 }
 
 func (st *encState) checkString(fc *fieldCodec, s string) {
-	if st.badUTF8 == "" && !wire.ValidUTF8([]byte(s)) {
+	if st.badUTF8 == "" && !wire.ValidUTF8String(s) {
 		st.badUTF8 = fc.name
 	}
 }
@@ -1200,7 +1277,7 @@ func isFieldEmpty(fc *fieldCodec, fPtr unsafe.Pointer) bool {
 		return len(*(*string)(fPtr)) == 0
 	case kindBytes, kindStringSlice, kindBytesSlice, kindBoolSlice,
 		kindUint8Slice, kindUint16Slice, kindUint32Slice, kindUint64Slice,
-		kindUint8SintSlice, kindUint16SintSlice,
+		kindUint8SintSlice, kindUint16SintSlice, kindUint32SintSlice, kindUint64SintSlice,
 		kindInt8Slice, kindInt16Slice, kindInt32Slice, kindInt64Slice,
 		kindFloat32Slice, kindFloat64Slice,
 		kindUint8Fixed32Slice, kindUint16Fixed32Slice, kindUint64Fixed32Slice,
@@ -1209,8 +1286,20 @@ func isFieldEmpty(fc *fieldCodec, fPtr unsafe.Pointer) bool {
 		kindInt8Fixed64Slice, kindInt16Fixed64Slice, kindInt32Fixed64Slice,
 		kindStructValSlice, kindStructPtrSlice:
 		return (*unsafeSliceHeader)(fPtr).Len == 0
-	case kindStructPtr, kindScalarPtr:
+	case kindStructPtr:
 		return *(*unsafe.Pointer)(fPtr) == nil
+	case kindScalarPtr:
+		for fc.kind == kindScalarPtr {
+			fPtr = *(*unsafe.Pointer)(fPtr)
+			if fPtr == nil {
+				return true
+			}
+			fc = fc.elemCodec
+		}
+		if fc.kind == kindStructPtr {
+			return *(*unsafe.Pointer)(fPtr) == nil
+		}
+		return false
 	case kindStructVal:
 		return isStructEmpty(fc.subCodec, fPtr)
 	case kindMapStringUint:
@@ -1220,6 +1309,77 @@ func isFieldEmpty(fc *fieldCodec, fPtr unsafe.Pointer) bool {
 	default:
 		return false
 	}
+}
+
+func (sc *structCodec) minWireSize(base unsafe.Pointer, depth int) int {
+	if base == nil || depth > 8 {
+		return 0
+	}
+	total := 0
+	fields := sc.fields
+	for i := range fields {
+		fc := &fields[i]
+		fPtr := unsafe.Add(base, fc.offset)
+		switch fc.kind {
+		case kindString:
+			n := len(*(*string)(fPtr))
+			if n > 0 || !fc.omitEmpty {
+				total += 2 + n
+			}
+		case kindBytes:
+			n := (*unsafeSliceHeader)(fPtr).Len
+			if n > 0 || !fc.omitEmpty {
+				total += 2 + n
+			}
+		case kindStructVal:
+			sub := fc.subCodec.minWireSize(fPtr, depth+1)
+			if sub > 0 {
+				total += 3 + sub
+			}
+		case kindStructPtr:
+			p := *(*unsafe.Pointer)(fPtr)
+			if p != nil {
+				total += 3 + fc.subCodec.minWireSize(p, depth+1)
+			}
+		case kindStructValSlice:
+			sh := (*unsafeSliceHeader)(fPtr)
+			if sh.Len > 0 {
+				total += 4
+				for j := range sh.Len {
+					elemPtr := unsafe.Add(sh.Data, uintptr(j)*fc.elemSize)
+					total += 2 + fc.subCodec.minWireSize(elemPtr, depth+1)
+				}
+			}
+		case kindStructPtrSlice:
+			ptrs := *(*[]unsafe.Pointer)(fPtr)
+			if len(ptrs) > 0 {
+				total += 4
+				for j := range ptrs {
+					total += 2
+					if ptrs[j] != nil {
+						total += fc.subCodec.minWireSize(ptrs[j], depth+1)
+					}
+				}
+			}
+		case kindStringSlice:
+			ss := *(*[]string)(fPtr)
+			if len(ss) > 0 {
+				total += 4
+				for j := range ss {
+					total += 1 + len(ss[j])
+				}
+			}
+		case kindBytesSlice:
+			bs := *(*[][]byte)(fPtr)
+			if len(bs) > 0 {
+				total += 4
+				for j := range bs {
+					total += 1 + len(bs[j])
+				}
+			}
+		}
+	}
+	return total
 }
 
 func isStructEmpty(sc *structCodec, base unsafe.Pointer) bool {
@@ -1237,16 +1397,27 @@ func (sc *structCodec) encodeStruct(dst []byte, base unsafe.Pointer, st *encStat
 	for i := range fields {
 		fc := &fields[i]
 		fPtr := unsafe.Add(base, fc.offset)
+		omitEmpty := fc.omitEmpty
 
-		if (fc.kind == kindStructPtr || fc.kind == kindScalarPtr) && *(*unsafe.Pointer)(fPtr) == nil {
-			continue
-		}
-		if fc.omitEmpty && isFieldEmpty(fc, fPtr) {
-			continue
-		}
 		if fc.kind == kindScalarPtr {
-			fPtr = *(*unsafe.Pointer)(fPtr)
-			fc = fc.elemCodec
+			nilPtr := false
+			for fc.kind == kindScalarPtr {
+				fPtr = *(*unsafe.Pointer)(fPtr)
+				if fPtr == nil {
+					nilPtr = true
+					break
+				}
+				fc = fc.elemCodec
+			}
+			if nilPtr {
+				continue
+			}
+		}
+		if fc.kind == kindStructPtr && *(*unsafe.Pointer)(fPtr) == nil {
+			continue
+		}
+		if omitEmpty && isFieldEmpty(&fields[i], unsafe.Add(base, fields[i].offset)) {
+			continue
 		}
 		if fc.kind == kindBool {
 			wt := wireBoolFalse
@@ -1415,6 +1586,10 @@ func (sc *structCodec) encodeStruct(dst []byte, base unsafe.Pointer, st *encStat
 			dst = encodeSintArr(dst, *(*[]uint8)(fPtr))
 		case kindUint16SintSlice:
 			dst = encodeSintArr(dst, *(*[]uint16)(fPtr))
+		case kindUint32SintSlice:
+			dst = encodeSintArr(dst, *(*[]uint32)(fPtr))
+		case kindUint64SintSlice:
+			dst = encodeSintArr(dst, *(*[]uint64)(fPtr))
 		case kindInt8Slice:
 			dst = encodeSintArr(dst, *(*[]int8)(fPtr))
 		case kindInt16Slice:
@@ -1451,41 +1626,94 @@ func (sc *structCodec) encodeStruct(dst []byte, base unsafe.Pointer, st *encStat
 			dst = encodeFixed64CastArr(dst, *(*[]int32)(fPtr), fc.elemWireType)
 		case kindStructVal:
 			lenPos := len(dst)
-			dst = append(dst, 0, 0)
-			dst = fc.subCodec.encodeStruct(dst, fPtr, st)
-			dst = backpatchContainerLen(dst, lenPos)
+			if fc.subCodec.minWireSize(fPtr, 0) > wire.Max2BContainerLen {
+				dst = append(dst, 0, 0, 0, 0)
+				dst = fc.subCodec.encodeStruct(dst, fPtr, st)
+				dst = backpatchContainerLen4(dst, lenPos)
+			} else {
+				dst = append(dst, 0, 0)
+				dst = fc.subCodec.encodeStruct(dst, fPtr, st)
+				dst = backpatchContainerLen(dst, lenPos)
+			}
 		case kindStructPtr:
+			subPtr := *(*unsafe.Pointer)(fPtr)
 			lenPos := len(dst)
-			dst = append(dst, 0, 0)
-			dst = fc.subCodec.encodeStruct(dst, *(*unsafe.Pointer)(fPtr), st)
-			dst = backpatchContainerLen(dst, lenPos)
+			if fc.subCodec.minWireSize(subPtr, 0) > wire.Max2BContainerLen {
+				dst = append(dst, 0, 0, 0, 0)
+				dst = fc.subCodec.encodeStruct(dst, subPtr, st)
+				dst = backpatchContainerLen4(dst, lenPos)
+			} else {
+				dst = append(dst, 0, 0)
+				dst = fc.subCodec.encodeStruct(dst, subPtr, st)
+				dst = backpatchContainerLen(dst, lenPos)
+			}
 		case kindStructValSlice:
 			sh := (*unsafeSliceHeader)(fPtr)
+			arrMin := 2
+			for j := range sh.Len {
+				elemPtr := unsafe.Add(sh.Data, uintptr(j)*fc.elemSize)
+				arrMin += 2 + fc.subCodec.minWireSize(elemPtr, 0)
+			}
 			lenPos := len(dst)
-			dst = append(dst, 0, 0, wireSubMsg)
+			if arrMin > wire.Max2BContainerLen {
+				dst = append(dst, 0, 0, 0, 0, wireSubMsg)
+			} else {
+				dst = append(dst, 0, 0, wireSubMsg)
+			}
 			dst = appendVarint(dst, uint64(sh.Len))
 			for j := range sh.Len {
-				eLenPos := len(dst)
-				dst = append(dst, 0, 0)
 				elemPtr := unsafe.Add(sh.Data, uintptr(j)*fc.elemSize)
-				dst = fc.subCodec.encodeStruct(dst, elemPtr, st)
-				dst = backpatchContainerLen(dst, eLenPos)
+				eLenPos := len(dst)
+				if fc.subCodec.minWireSize(elemPtr, 0) > wire.Max2BContainerLen {
+					dst = append(dst, 0, 0, 0, 0)
+					dst = fc.subCodec.encodeStruct(dst, elemPtr, st)
+					dst = backpatchContainerLen4(dst, eLenPos)
+				} else {
+					dst = append(dst, 0, 0)
+					dst = fc.subCodec.encodeStruct(dst, elemPtr, st)
+					dst = backpatchContainerLen(dst, eLenPos)
+				}
 			}
-			dst = backpatchContainerLen(dst, lenPos)
+			if arrMin > wire.Max2BContainerLen {
+				dst = backpatchContainerLen4(dst, lenPos)
+			} else {
+				dst = backpatchContainerLen(dst, lenPos)
+			}
 		case kindStructPtrSlice:
 			ptrs := *(*[]unsafe.Pointer)(fPtr)
+			arrMin := 2
+			for j := range ptrs {
+				arrMin += 2
+				if ptrs[j] != nil {
+					arrMin += fc.subCodec.minWireSize(ptrs[j], 0)
+				}
+			}
 			lenPos := len(dst)
-			dst = append(dst, 0, 0, wireSubMsg)
+			if arrMin > wire.Max2BContainerLen {
+				dst = append(dst, 0, 0, 0, 0, wireSubMsg)
+			} else {
+				dst = append(dst, 0, 0, wireSubMsg)
+			}
 			dst = appendVarint(dst, uint64(len(ptrs)))
 			for j := range ptrs {
 				eLenPos := len(dst)
-				dst = append(dst, 0, 0)
-				if ptrs[j] != nil {
+				if ptrs[j] != nil && fc.subCodec.minWireSize(ptrs[j], 0) > wire.Max2BContainerLen {
+					dst = append(dst, 0, 0, 0, 0)
 					dst = fc.subCodec.encodeStruct(dst, ptrs[j], st)
+					dst = backpatchContainerLen4(dst, eLenPos)
+				} else {
+					dst = append(dst, 0, 0)
+					if ptrs[j] != nil {
+						dst = fc.subCodec.encodeStruct(dst, ptrs[j], st)
+					}
+					dst = backpatchContainerLen(dst, eLenPos)
 				}
-				dst = backpatchContainerLen(dst, eLenPos)
 			}
-			dst = backpatchContainerLen(dst, lenPos)
+			if arrMin > wire.Max2BContainerLen {
+				dst = backpatchContainerLen4(dst, lenPos)
+			} else {
+				dst = backpatchContainerLen(dst, lenPos)
+			}
 		case kindMapStringUint:
 			m := *(*map[string]uint64)(fPtr)
 			for k := range m {
@@ -1676,13 +1904,10 @@ func sliceForDecode[T any](p *[]T, alreadySeen bool) []T {
 }
 
 func isBoolField(fc *fieldCodec) bool {
-	if fc.kind == kindBool {
-		return true
+	for fc.kind == kindScalarPtr {
+		fc = fc.elemCodec
 	}
-	if fc.kind == kindScalarPtr && fc.elemCodec.kind == kindBool {
-		return true
-	}
-	return false
+	return fc.kind == kindBool
 }
 
 // decodeStruct decodes data into the struct at base. When merge is false the
@@ -1694,6 +1919,7 @@ func (sc *structCodec) decodeStruct(data []byte, base unsafe.Pointer, zeroCopy b
 	if depth > MaxNestingDepth {
 		return fmt.Errorf("omnibuf: nesting depth %d exceeds MaxNestingDepth (%d)", depth, MaxNestingDepth)
 	}
+	sc.protoState.Reset(base, merge)
 	n := len(data)
 	pos := 0
 	var seenMask uint64
@@ -1797,14 +2023,57 @@ func (sc *structCodec) decodeStruct(data []byte, base unsafe.Pointer, zeroCopy b
 // clearField resets a struct field that was absent from the decoded packet.
 // Slices are truncated (keeping capacity for reuse), maps are emptied,
 // pointers are set to nil, and nested struct values are cleared recursively.
+func typeHasPointers(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.Pointer, reflect.String, reflect.Slice, reflect.Map, reflect.Chan, reflect.Func, reflect.Interface, reflect.UnsafePointer:
+		return true
+	case reflect.Array:
+		return t.Len() > 0 && typeHasPointers(t.Elem())
+	case reflect.Struct:
+		for i := 0; i < t.NumField(); i++ {
+			if typeHasPointers(t.Field(i).Type) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
 func clearField(fc *fieldCodec, fPtr unsafe.Pointer) {
 	switch fc.goKind {
 	case reflect.Slice:
-		if fc.kind == kindBytes {
+		switch fc.kind {
+		case kindBytes:
 			*(*[]byte)(fPtr) = nil
 			return
+		case kindStringSlice:
+			s := *(*[]string)(fPtr)
+			clear(s)
+			*(*[]string)(fPtr) = s[:0]
+			return
+		case kindBytesSlice:
+			s := *(*[][]byte)(fPtr)
+			clear(s)
+			*(*[][]byte)(fPtr) = s[:0]
+			return
+		case kindStructPtrSlice:
+			s := *(*[]unsafe.Pointer)(fPtr)
+			clear(s)
+			*(*[]unsafe.Pointer)(fPtr) = s[:0]
+			return
+		case kindStructValSlice:
+			sh := (*unsafeSliceHeader)(fPtr)
+			if fc.elemHasPtrs && sh.Len > 0 && sh.Data != nil {
+				clear(unsafe.Slice((*byte)(sh.Data), uintptr(sh.Len)*fc.elemSize))
+			}
+			sh.Len = 0
+			return
+		default:
+			(*unsafeSliceHeader)(fPtr).Len = 0
+			return
 		}
-		(*unsafeSliceHeader)(fPtr).Len = 0
 	case reflect.Map:
 		if fc.kind == kindMapStringUint {
 			clear(*(*map[string]uint64)(fPtr))
@@ -1820,6 +2089,7 @@ func clearField(fc *fieldCodec, fPtr unsafe.Pointer) {
 		*(*unsafe.Pointer)(fPtr) = nil
 	case reflect.Struct:
 		if fc.subCodec != nil {
+			fc.subCodec.protoState.Reset(fPtr, false)
 			for i := range fc.subCodec.fields {
 				sub := &fc.subCodec.fields[i]
 				clearField(sub, unsafe.Add(fPtr, sub.offset))
@@ -1995,9 +2265,23 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 			return 0, err
 		}
 		p := (*[]string)(fPtr)
-		sl, ok := appendStringArrBodyAs(sliceForDecode(p, alreadySeen), body, zeroCopy, fc.elemWireType)
+		old := *p
+		oldLen := len(old)
+		base := sliceForDecode(p, alreadySeen)
+		sl, ok := appendStringArrBodyAs(base, body, zeroCopy, fc.elemWireType)
 		if !ok {
+			if unsafe.SliceData(base) == unsafe.SliceData(old) && cap(old) > len(base) {
+				if alreadySeen {
+					clear(old[oldLen:cap(old)])
+				} else {
+					clear(old[:oldLen])
+					*p = old[:0]
+				}
+			}
 			return 0, fmt.Errorf("omnibuf: invalid string array at %d", pos)
+		}
+		if !alreadySeen && len(sl) < oldLen && unsafe.SliceData(sl) == unsafe.SliceData(old) {
+			clear(old[len(sl):oldLen])
 		}
 		*p = sl
 		return nextPos, nil
@@ -2007,9 +2291,23 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 			return 0, err
 		}
 		p := (*[][]byte)(fPtr)
-		sl, ok := appendBytesArrBodyAs(sliceForDecode(p, alreadySeen), body, zeroCopy, fc.elemWireType)
+		old := *p
+		oldLen := len(old)
+		base := sliceForDecode(p, alreadySeen)
+		sl, ok := appendBytesArrBodyAs(base, body, zeroCopy, fc.elemWireType)
 		if !ok {
+			if unsafe.SliceData(base) == unsafe.SliceData(old) && cap(old) > len(base) {
+				if alreadySeen {
+					clear(old[oldLen:cap(old)])
+				} else {
+					clear(old[:oldLen])
+					*p = old[:0]
+				}
+			}
 			return 0, fmt.Errorf("omnibuf: invalid bytes array at %d", pos)
+		}
+		if !alreadySeen && len(sl) < oldLen && unsafe.SliceData(sl) == unsafe.SliceData(old) {
+			clear(old[len(sl):oldLen])
 		}
 		*p = sl
 		return nextPos, nil
@@ -2094,6 +2392,30 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 		sl, ok := appendSintArrBody(sliceForDecode(p, alreadySeen), body)
 		if !ok {
 			return 0, fmt.Errorf("omnibuf: invalid uint16 sint array at %d", pos)
+		}
+		*p = sl
+		return nextPos, nil
+	case kindUint32SintSlice:
+		body, nextPos, err := readLenSlice(data, pos, 1)
+		if err != nil {
+			return 0, err
+		}
+		p := (*[]uint32)(fPtr)
+		sl, ok := appendUint32SintArrBody(sliceForDecode(p, alreadySeen), body)
+		if !ok {
+			return 0, fmt.Errorf("omnibuf: invalid uint32 sint array at %d", pos)
+		}
+		*p = sl
+		return nextPos, nil
+	case kindUint64SintSlice:
+		body, nextPos, err := readLenSlice(data, pos, 1)
+		if err != nil {
+			return 0, err
+		}
+		p := (*[]uint64)(fPtr)
+		sl, ok := appendSintArrBody(sliceForDecode(p, alreadySeen), body)
+		if !ok {
+			return 0, fmt.Errorf("omnibuf: invalid uint64 sint array at %d", pos)
 		}
 		*p = sl
 		return nextPos, nil
@@ -2286,41 +2608,66 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 			return 0, fmt.Errorf("omnibuf: corrupt submsg array at %d", pos)
 		}
 		sh := (*unsafeSliceHeader)(fPtr)
+		oldLen := sh.Len
 		start := 0
 		if alreadySeen {
-			start = sh.Len
+			start = oldLen
 		}
 		total := start + elemCount
+		dataPtr := sh.Data
+		newCap := sh.Cap
+		reused := true
 		if sh.Cap < total {
 			if _, ok := countSubMsgArrElems(arrPayload); !ok {
 				return 0, fmt.Errorf("omnibuf: corrupt submsg array at %d", pos)
 			}
 			newSlice := reflect.MakeSlice(fc.sliceType, total, wire.GrowCapacity(sh.Cap, total))
-			newPtr := newSlice.UnsafePointer()
+			dataPtr = newSlice.UnsafePointer()
 			if start > 0 && sh.Data != nil {
 				reflect.Copy(newSlice, reflect.NewAt(fc.sliceType, unsafe.Pointer(sh)).Elem())
 			}
-			sh.Data = newPtr
-			sh.Len = total
-			sh.Cap = newSlice.Cap()
-		} else {
-			sh.Len = total
+			newCap = newSlice.Cap()
+			reused = false
 		}
 		for j := range elemCount {
 			el, en := decodeVarint(arrPayload[p:])
 			if en == 0 || el > uint64(len(arrPayload)-(p+en)) {
+				if reused && !alreadySeen {
+					if fc.elemHasPtrs && oldLen > 0 && sh.Data != nil {
+						clear(unsafe.Slice((*byte)(sh.Data), uintptr(oldLen)*fc.elemSize))
+					}
+					sh.Len = 0
+				}
 				return 0, fmt.Errorf("omnibuf: corrupt submsg array at %d", pos)
 			}
 			p += en
-			elemPtr := unsafe.Add(sh.Data, uintptr(start+j)*fc.elemSize)
+			elemPtr := unsafe.Add(dataPtr, uintptr(start+j)*fc.elemSize)
 			if err := fc.subCodec.decodeStruct(arrPayload[p:p+int(el)], elemPtr, zeroCopy, depth+2, false); err != nil {
+				if reused && !alreadySeen {
+					if fc.elemHasPtrs && max(oldLen, start+j+1) > 0 && sh.Data != nil {
+						clear(unsafe.Slice((*byte)(sh.Data), uintptr(max(oldLen, start+j+1))*fc.elemSize))
+					}
+					sh.Len = 0
+				}
 				return 0, err
 			}
 			p += int(el)
 		}
 		if p != len(arrPayload) {
+			if reused && !alreadySeen {
+				if fc.elemHasPtrs && max(oldLen, total) > 0 && sh.Data != nil {
+					clear(unsafe.Slice((*byte)(sh.Data), uintptr(max(oldLen, total))*fc.elemSize))
+				}
+				sh.Len = 0
+			}
 			return 0, fmt.Errorf("omnibuf: corrupt submsg array at %d", pos)
 		}
+		if reused && !alreadySeen && total < oldLen && fc.elemHasPtrs && dataPtr != nil {
+			clear(unsafe.Slice((*byte)(unsafe.Add(dataPtr, uintptr(total)*fc.elemSize)), uintptr(oldLen-total)*fc.elemSize))
+		}
+		sh.Data = dataPtr
+		sh.Len = total
+		sh.Cap = newCap
 		return nextPos, nil
 	case kindStructPtrSlice:
 		arrPayload, nextPos, err := readLenSlice(data, pos, 0)
@@ -2331,32 +2678,37 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 		if !ok || elem != wireSubMsg {
 			return 0, fmt.Errorf("omnibuf: corrupt submsg array at %d", pos)
 		}
-		ptrs := *(*[]unsafe.Pointer)(fPtr)
+		oldPtrs := *(*[]unsafe.Pointer)(fPtr)
+		oldLen := len(oldPtrs)
 		start := 0
 		if alreadySeen {
-			start = len(ptrs)
+			start = oldLen
 		}
 		total := start + elemCount
-		if cap(ptrs) < total {
+		var ptrs []unsafe.Pointer
+		reused := false
+		if cap(oldPtrs) < total {
 			if _, ok := countSubMsgArrElems(arrPayload); !ok {
 				return 0, fmt.Errorf("omnibuf: corrupt submsg array at %d", pos)
 			}
 			slab := reflect.MakeSlice(reflect.SliceOf(fc.elemType), elemCount, elemCount)
 			slabPtr := slab.UnsafePointer()
-			next := make([]unsafe.Pointer, total, wire.GrowCapacity(cap(ptrs), total))
-			copy(next, ptrs[:start])
+			ptrs = make([]unsafe.Pointer, total, wire.GrowCapacity(cap(oldPtrs), total))
+			copy(ptrs, oldPtrs[:start])
 			for j := range elemCount {
-				next[start+j] = unsafe.Add(slabPtr, uintptr(j)*fc.elemSize)
+				ptrs[start+j] = unsafe.Add(slabPtr, uintptr(j)*fc.elemSize)
 			}
-			ptrs = next
-			*(*[]unsafe.Pointer)(fPtr) = ptrs
 		} else {
-			ptrs = ptrs[:total]
-			*(*[]unsafe.Pointer)(fPtr) = ptrs
+			ptrs = oldPtrs[:total]
+			reused = true
 		}
 		for j := range elemCount {
 			el, en := decodeVarint(arrPayload[p:])
 			if en == 0 || el > uint64(len(arrPayload)-(p+en)) {
+				if reused && !alreadySeen {
+					clear(oldPtrs[:max(oldLen, total)])
+					*(*[]unsafe.Pointer)(fPtr) = oldPtrs[:0]
+				}
 				return 0, fmt.Errorf("omnibuf: corrupt submsg array at %d", pos)
 			}
 			p += en
@@ -2364,13 +2716,25 @@ func decodeFieldValue(data []byte, pos int, wt uint8, fc *fieldCodec, fPtr unsaf
 				ptrs[start+j] = reflect.New(fc.elemType).UnsafePointer()
 			}
 			if err := fc.subCodec.decodeStruct(arrPayload[p:p+int(el)], ptrs[start+j], zeroCopy, depth+2, false); err != nil {
+				if reused && !alreadySeen {
+					clear(oldPtrs[:max(oldLen, total)])
+					*(*[]unsafe.Pointer)(fPtr) = oldPtrs[:0]
+				}
 				return 0, err
 			}
 			p += int(el)
 		}
 		if p != len(arrPayload) {
+			if reused && !alreadySeen {
+				clear(oldPtrs[:max(oldLen, total)])
+				*(*[]unsafe.Pointer)(fPtr) = oldPtrs[:0]
+			}
 			return 0, fmt.Errorf("omnibuf: corrupt submsg array at %d", pos)
 		}
+		if reused && !alreadySeen && total < oldLen {
+			clear(oldPtrs[total:oldLen])
+		}
+		*(*[]unsafe.Pointer)(fPtr) = ptrs
 		return nextPos, nil
 	case kindMapStringUint:
 		body, nextPos, err := readLenSlice(data, pos, 3)

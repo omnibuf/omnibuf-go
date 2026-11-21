@@ -177,7 +177,7 @@ func BenchmarkPlugin_Opaque_ReadModifyWrite_Splice(b *testing.B) {
 		if msg.GetLocation().GetCity() == "Frankfurt" {
 			msg.SetSequence(msg.GetSequence() + 1)
 		}
-		outBuf = msg.MarshalAppend(outBuf)
+		outBuf = msg.MarshalAppend(outBuf[:0])
 		if len(outBuf) == 0 {
 			b.Fatal("empty")
 		}
@@ -194,7 +194,7 @@ func BenchmarkTable_Marshal_ExistingPBStruct_ReuseBuf(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		var err error
-		buf, err = MarshalAppend(buf, pbMsg)
+		buf, err = MarshalAppend(buf[:0], pbMsg)
 		if err != nil || len(buf) == 0 {
 			b.Fatal(err)
 		}
@@ -208,7 +208,7 @@ func BenchmarkTable_Marshal_ValueStruct_ReuseBuf(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		var err error
-		buf, err = MarshalAppend(buf, &orig)
+		buf, err = MarshalAppend(buf[:0], &orig)
 		if err != nil || len(buf) == 0 {
 			b.Fatal(err)
 		}
@@ -223,7 +223,7 @@ func BenchmarkTable_Marshal_ValueStruct_SelfDescribing_ReuseBuf(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		var err error
-		buf, err = opts.MarshalAppend(buf, &orig)
+		buf, err = opts.MarshalAppend(buf[:0], &orig)
 		if err != nil || len(buf) == 0 {
 			b.Fatal(err)
 		}
@@ -353,7 +353,7 @@ func BenchmarkOpaque_ReadModifyWrite_Splice(b *testing.B) {
 		if msg.GetLocation().GetCity() == "Frankfurt" {
 			msg.SetSequence(msg.GetSequence() + 1)
 		}
-		outBuf = msg.MarshalAppend(outBuf)
+		outBuf = msg.MarshalAppend(outBuf[:0])
 		if len(outBuf) == 0 {
 			b.Fatal("empty")
 		}

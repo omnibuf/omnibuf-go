@@ -6,14 +6,31 @@ package pb
 import (
 	"encoding/binary"
 	"fmt"
+	"iter"
 	"math"
+	"unsafe"
 
 	"github.com/omnibuf/omnibuf-go"
 	"github.com/omnibuf/omnibuf-go/wire"
 )
 
+// MinWireSizeOmniBuf returns a fast lower bound on the encoded OmniBuf byte size of Location.
+func (x *Location) MinWireSizeOmniBuf(depth int) int {
+	if x == nil || depth > 8 {
+		return 0
+	}
+	total := 18
+	total += len(x.Region)
+	total += len(x.Datacenter)
+	total += len(x.City)
+	return total
+}
+
 // MarshalOmniBufAppend encodes Location in a single forward pass using generated field tags.
 func (x *Location) MarshalOmniBufAppend(dst []byte) []byte {
+	if dst == nil {
+		dst = make([]byte, 0, max(64, x.MinWireSizeOmniBuf(0)+64))
+	}
 	dst = append(dst, 0x35)
 	dst = wire.AppendVarint(dst, uint64(len(x.Region)))
 	dst = append(dst, x.Region...)
@@ -32,6 +49,53 @@ func (x *Location) MarshalOmniBufAppend(dst []byte) []byte {
 	b_5 := math.Float32bits(x.Longitude)
 	dst = append(dst, byte(b_5), byte(b_5>>8), byte(b_5>>16), byte(b_5>>24))
 	return dst
+}
+
+// ValidateOmniBufUTF8 verifies that all string fields in Location contain valid UTF-8.
+func (x *Location) ValidateOmniBufUTF8() error {
+	if x == nil {
+		return nil
+	}
+	if !wire.ValidUTF8String(x.Region) {
+		return fmt.Errorf("omnibuf: field region: string contains invalid UTF-8")
+	}
+	if !wire.ValidUTF8String(x.Datacenter) {
+		return fmt.Errorf("omnibuf: field datacenter: string contains invalid UTF-8")
+	}
+	if !wire.ValidUTF8String(x.City) {
+		return fmt.Errorf("omnibuf: field city: string contains invalid UTF-8")
+	}
+	return nil
+}
+
+// TryMarshalOmniBufAppend validates UTF-8 on string fields and appends Location to dst.
+func (x *Location) TryMarshalOmniBufAppend(dst []byte) ([]byte, error) {
+	if x == nil {
+		return nil, fmt.Errorf("omnibuf: Marshal requires non-nil pointer")
+	}
+	if err := x.ValidateOmniBufUTF8(); err != nil {
+		return nil, err
+	}
+	return x.MarshalOmniBufAppend(dst), nil
+}
+
+var _omnibufField0_Location = []byte{0x19, 0x16, 0x01, 0x35, 0x11, 0x4c, 0x6f, 0x63, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x5d, 0xe2, 0x00, 0x00, 0x0a, 0x0d, 0x03, 0x0d, 0x72, 0x65, 0x67, 0x69, 0x6f, 0x6e, 0x05, 0x15, 0x64, 0x61, 0x74, 0x61, 0x63, 0x65, 0x6e, 0x74, 0x65, 0x72, 0x07, 0x09, 0x63, 0x69, 0x74, 0x79, 0x09, 0x09, 0x72, 0x61, 0x63, 0x6b, 0x0b, 0x11, 0x6c, 0x61, 0x74, 0x69, 0x74, 0x75, 0x64, 0x65, 0x0d, 0x13, 0x6c, 0x6f, 0x6e, 0x67, 0x69, 0x74, 0x75, 0x64, 0x65}
+
+// MarshalOmniBufSelfDescribingAppend prepends Field #0 SchemaMeta and appends Location to dst.
+func (x *Location) MarshalOmniBufSelfDescribingAppend(dst []byte) []byte {
+	dst = append(dst, _omnibufField0_Location...)
+	return x.MarshalOmniBufAppend(dst)
+}
+
+// TryMarshalOmniBufSelfDescribingAppend validates UTF-8, prepends Field #0 SchemaMeta, and appends Location to dst.
+func (x *Location) TryMarshalOmniBufSelfDescribingAppend(dst []byte) ([]byte, error) {
+	if x == nil {
+		return nil, fmt.Errorf("omnibuf: Marshal requires non-nil pointer")
+	}
+	if err := x.ValidateOmniBufUTF8(); err != nil {
+		return nil, err
+	}
+	return x.MarshalOmniBufSelfDescribingAppend(dst), nil
 }
 
 //go:noinline
@@ -56,8 +120,13 @@ func (x *Location) clearUnseenOmniBuf(seenMask uint64) {
 	}
 }
 
+var _omnibufProtoState_Location = omnibuf.InspectProtoState[Location]()
+
 // UnmarshalOmniBuf decodes data into Location using generated switch dispatch.
 func (x *Location) UnmarshalOmniBuf(data []byte, zeroCopy bool) error {
+	if x == nil {
+		return fmt.Errorf("omnibuf: Unmarshal requires non-nil pointer")
+	}
 	return x.decodeOmniBuf(data, zeroCopy, 0, false)
 }
 
@@ -65,6 +134,7 @@ func (x *Location) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merge bo
 	if depth > omnibuf.MaxNestingDepth {
 		return fmt.Errorf("omnibuf: max nesting depth exceeded")
 	}
+	_omnibufProtoState_Location.Reset(unsafe.Pointer(x), merge)
 	const expectedMask uint64 = 0x3f
 	var seenMask uint64
 	n := len(data)
@@ -186,8 +256,7 @@ type OpaqueLocation struct {
 }
 
 func (x *OpaqueLocation) Unmarshal(b []byte) error {
-	x.raw = b
-	x.dirty = 0
+	*x = OpaqueLocation{raw: b}
 	return nil
 }
 
@@ -276,12 +345,25 @@ func (x *OpaqueLocation) appendDirtyField(b []byte, fnum uint16) []byte {
 	return b
 }
 
+func (x *OpaqueLocation) validateDirtyUTF8() error {
+	if (x.dirty&(uint64(1)<<1)) != 0 && !wire.ValidUTF8String(x.f_region) {
+		return fmt.Errorf("omnibuf: field region: string contains invalid UTF-8")
+	}
+	if (x.dirty&(uint64(1)<<2)) != 0 && !wire.ValidUTF8String(x.f_datacenter) {
+		return fmt.Errorf("omnibuf: field datacenter: string contains invalid UTF-8")
+	}
+	if (x.dirty&(uint64(1)<<3)) != 0 && !wire.ValidUTF8String(x.f_city) {
+		return fmt.Errorf("omnibuf: field city: string contains invalid UTF-8")
+	}
+	return nil
+}
+
 // MarshalAppend re-serializes OpaqueLocation using zero-decode wire splicing for unmodified fields.
 func (x *OpaqueLocation) MarshalAppend(dst []byte) []byte {
 	if x.dirty == 0 {
 		return wire.CopyPacket(dst, x.raw)
 	}
-	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 6, x.appendDirtyField)
+	return wire.SpliceFields(dst, x.raw, x.dirty, 6, x.appendDirtyField)
 }
 
 // TryMarshalAppend re-serializes OpaqueLocation using zero-decode wire splicing and returns an error if x.raw is corrupt.
@@ -292,7 +374,10 @@ func (x *OpaqueLocation) TryMarshalAppend(dst []byte) ([]byte, error) {
 		}
 		return wire.CopyPacket(dst, x.raw), nil
 	}
-	return wire.TrySpliceFields(dst[:0], x.raw, x.dirty, 6, x.appendDirtyField)
+	if err := x.validateDirtyUTF8(); err != nil {
+		return nil, err
+	}
+	return wire.TrySpliceFields(dst, x.raw, x.dirty, 6, x.appendDirtyField)
 }
 
 // Marshal re-serializes OpaqueLocation into a newly allocated packet, returning an error if x.raw is corrupt.
@@ -300,8 +385,21 @@ func (x *OpaqueLocation) Marshal() ([]byte, error) {
 	return x.TryMarshalAppend(nil)
 }
 
+// MinWireSizeOmniBuf returns a fast lower bound on the encoded OmniBuf byte size of Neighbor.
+func (x *Neighbor) MinWireSizeOmniBuf(depth int) int {
+	if x == nil || depth > 8 {
+		return 0
+	}
+	total := 7
+	total += len(x.Router)
+	return total
+}
+
 // MarshalOmniBufAppend encodes Neighbor in a single forward pass using generated field tags.
 func (x *Neighbor) MarshalOmniBufAppend(dst []byte) []byte {
+	if dst == nil {
+		dst = make([]byte, 0, max(64, x.MinWireSizeOmniBuf(0)+64))
+	}
 	dst = append(dst, 0x21)
 	dst = wire.AppendVarint(dst, uint64(x.PeerAsn))
 	dst = append(dst, 0x55)
@@ -315,6 +413,47 @@ func (x *Neighbor) MarshalOmniBufAppend(dst []byte) []byte {
 		dst = append(dst, 0x85)
 	}
 	return dst
+}
+
+// ValidateOmniBufUTF8 verifies that all string fields in Neighbor contain valid UTF-8.
+func (x *Neighbor) ValidateOmniBufUTF8() error {
+	if x == nil {
+		return nil
+	}
+	if !wire.ValidUTF8String(x.Router) {
+		return fmt.Errorf("omnibuf: field router: string contains invalid UTF-8")
+	}
+	return nil
+}
+
+// TryMarshalOmniBufAppend validates UTF-8 on string fields and appends Neighbor to dst.
+func (x *Neighbor) TryMarshalOmniBufAppend(dst []byte) ([]byte, error) {
+	if x == nil {
+		return nil, fmt.Errorf("omnibuf: Marshal requires non-nil pointer")
+	}
+	if err := x.ValidateOmniBufUTF8(); err != nil {
+		return nil, err
+	}
+	return x.MarshalOmniBufAppend(dst), nil
+}
+
+var _omnibufField0_Neighbor = []byte{0x19, 0xee, 0x00, 0x35, 0x11, 0x4e, 0x65, 0x69, 0x67, 0x68, 0x62, 0x6f, 0x72, 0x5d, 0xba, 0x00, 0x00, 0x0a, 0x09, 0x03, 0x11, 0x70, 0x65, 0x65, 0x72, 0x5f, 0x61, 0x73, 0x6e, 0x05, 0x0d, 0x72, 0x6f, 0x75, 0x74, 0x65, 0x72, 0x07, 0x15, 0x6c, 0x61, 0x74, 0x65, 0x6e, 0x63, 0x79, 0x5f, 0x75, 0x73, 0x09, 0x17, 0x65, 0x73, 0x74, 0x61, 0x62, 0x6c, 0x69, 0x73, 0x68, 0x65, 0x64}
+
+// MarshalOmniBufSelfDescribingAppend prepends Field #0 SchemaMeta and appends Neighbor to dst.
+func (x *Neighbor) MarshalOmniBufSelfDescribingAppend(dst []byte) []byte {
+	dst = append(dst, _omnibufField0_Neighbor...)
+	return x.MarshalOmniBufAppend(dst)
+}
+
+// TryMarshalOmniBufSelfDescribingAppend validates UTF-8, prepends Field #0 SchemaMeta, and appends Neighbor to dst.
+func (x *Neighbor) TryMarshalOmniBufSelfDescribingAppend(dst []byte) ([]byte, error) {
+	if x == nil {
+		return nil, fmt.Errorf("omnibuf: Marshal requires non-nil pointer")
+	}
+	if err := x.ValidateOmniBufUTF8(); err != nil {
+		return nil, err
+	}
+	return x.MarshalOmniBufSelfDescribingAppend(dst), nil
 }
 
 //go:noinline
@@ -333,8 +472,13 @@ func (x *Neighbor) clearUnseenOmniBuf(seenMask uint64) {
 	}
 }
 
+var _omnibufProtoState_Neighbor = omnibuf.InspectProtoState[Neighbor]()
+
 // UnmarshalOmniBuf decodes data into Neighbor using generated switch dispatch.
 func (x *Neighbor) UnmarshalOmniBuf(data []byte, zeroCopy bool) error {
+	if x == nil {
+		return fmt.Errorf("omnibuf: Unmarshal requires non-nil pointer")
+	}
 	return x.decodeOmniBuf(data, zeroCopy, 0, false)
 }
 
@@ -342,6 +486,7 @@ func (x *Neighbor) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merge bo
 	if depth > omnibuf.MaxNestingDepth {
 		return fmt.Errorf("omnibuf: max nesting depth exceeded")
 	}
+	_omnibufProtoState_Neighbor.Reset(unsafe.Pointer(x), merge)
 	const expectedMask uint64 = 0xf
 	var seenMask uint64
 	n := len(data)
@@ -435,8 +580,7 @@ type OpaqueNeighbor struct {
 }
 
 func (x *OpaqueNeighbor) Unmarshal(b []byte) error {
-	x.raw = b
-	x.dirty = 0
+	*x = OpaqueNeighbor{raw: b}
 	return nil
 }
 
@@ -499,12 +643,19 @@ func (x *OpaqueNeighbor) appendDirtyField(b []byte, fnum uint16) []byte {
 	return b
 }
 
+func (x *OpaqueNeighbor) validateDirtyUTF8() error {
+	if (x.dirty&(uint64(1)<<2)) != 0 && !wire.ValidUTF8String(x.f_router) {
+		return fmt.Errorf("omnibuf: field router: string contains invalid UTF-8")
+	}
+	return nil
+}
+
 // MarshalAppend re-serializes OpaqueNeighbor using zero-decode wire splicing for unmodified fields.
 func (x *OpaqueNeighbor) MarshalAppend(dst []byte) []byte {
 	if x.dirty == 0 {
 		return wire.CopyPacket(dst, x.raw)
 	}
-	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 4, x.appendDirtyField)
+	return wire.SpliceFields(dst, x.raw, x.dirty, 4, x.appendDirtyField)
 }
 
 // TryMarshalAppend re-serializes OpaqueNeighbor using zero-decode wire splicing and returns an error if x.raw is corrupt.
@@ -515,7 +666,10 @@ func (x *OpaqueNeighbor) TryMarshalAppend(dst []byte) ([]byte, error) {
 		}
 		return wire.CopyPacket(dst, x.raw), nil
 	}
-	return wire.TrySpliceFields(dst[:0], x.raw, x.dirty, 4, x.appendDirtyField)
+	if err := x.validateDirtyUTF8(); err != nil {
+		return nil, err
+	}
+	return wire.TrySpliceFields(dst, x.raw, x.dirty, 4, x.appendDirtyField)
 }
 
 // Marshal re-serializes OpaqueNeighbor into a newly allocated packet, returning an error if x.raw is corrupt.
@@ -523,8 +677,37 @@ func (x *OpaqueNeighbor) Marshal() ([]byte, error) {
 	return x.TryMarshalAppend(nil)
 }
 
+// MinWireSizeOmniBuf returns a fast lower bound on the encoded OmniBuf byte size of PeerUpdate.
+func (x *PeerUpdate) MinWireSizeOmniBuf(depth int) int {
+	if x == nil || depth > 8 {
+		return 0
+	}
+	total := 20
+	total += len(x.RouterId)
+	if len(x.Tags) > 0 {
+		total += 4
+		for _, s := range x.Tags {
+			total += 1 + len(s)
+		}
+	}
+	total += 3 + len(x.Prefixes)
+	if x.Location != nil {
+		total += 3 + x.Location.MinWireSizeOmniBuf(depth+1)
+	}
+	if len(x.Neighbors) > 0 {
+		total += 4
+		for _, elem := range x.Neighbors {
+			total += 2 + elem.MinWireSizeOmniBuf(depth+1)
+		}
+	}
+	return total
+}
+
 // MarshalOmniBufAppend encodes PeerUpdate in a single forward pass using generated field tags.
 func (x *PeerUpdate) MarshalOmniBufAppend(dst []byte) []byte {
+	if dst == nil {
+		dst = make([]byte, 0, max(64, x.MinWireSizeOmniBuf(0)+64))
+	}
 	dst = append(dst, 0x21)
 	dst = wire.AppendVarint(dst, uint64(x.Asn))
 	dst = append(dst, 0x55)
@@ -543,17 +726,29 @@ func (x *PeerUpdate) MarshalOmniBufAppend(dst []byte) []byte {
 	b_5 := math.Float64bits(x.CpuLoad)
 	dst = append(dst, byte(b_5), byte(b_5>>8), byte(b_5>>16), byte(b_5>>24), byte(b_5>>32), byte(b_5>>40), byte(b_5>>48), byte(b_5>>56))
 	dst = append(dst, 0xfb)
+	arrMin_6 := 2
+	for _, s := range x.Tags {
+		arrMin_6 += 1 + len(s)
+	}
 	lenPos_6 := len(dst)
-	dst = append(dst, 0, 0, wire.WireString)
+	if arrMin_6 > wire.Max2BContainerLen {
+		dst = append(dst, 0, 0, 0, 0, wire.WireString)
+	} else {
+		dst = append(dst, 0, 0, wire.WireString)
+	}
 	dst = wire.AppendVarint(dst, uint64(len(x.Tags)))
 	for _, s := range x.Tags {
 		dst = wire.AppendVarint(dst, uint64(len(s)))
 		dst = append(dst, s...)
 	}
-	if d := len(dst) - lenPos_6; d <= 16385 {
-		binary.LittleEndian.PutUint16(dst[lenPos_6:], uint16(d<<2-6))
+	if arrMin_6 > wire.Max2BContainerLen {
+		dst = wire.BackpatchContainerLen4(dst, lenPos_6)
 	} else {
-		dst = wire.BackpatchContainerLen(dst, lenPos_6)
+		if d := len(dst) - lenPos_6; d <= 16385 {
+			binary.LittleEndian.PutUint16(dst[lenPos_6:], uint16(d<<2-6))
+		} else {
+			dst = wire.BackpatchContainerLen(dst, lenPos_6)
+		}
 	}
 	dst = append(dst, 0x36, 0x02)
 	lenPos_7 := len(dst)
@@ -570,38 +765,120 @@ func (x *PeerUpdate) MarshalOmniBufAppend(dst []byte) []byte {
 	if x.Location != nil {
 		dst = append(dst, 0x72, 0x02)
 		lenPos_8 := len(dst)
-		dst = append(dst, 0, 0)
-		dst = x.Location.MarshalOmniBufAppend(dst)
-		if d := len(dst) - lenPos_8; d <= 16385 {
-			binary.LittleEndian.PutUint16(dst[lenPos_8:], uint16(d<<2-6))
+		if x.Location.MinWireSizeOmniBuf(0) > wire.Max2BContainerLen {
+			dst = append(dst, 0, 0, 0, 0)
+			dst = x.Location.MarshalOmniBufAppend(dst)
+			dst = wire.BackpatchContainerLen4(dst, lenPos_8)
 		} else {
-			dst = wire.BackpatchContainerLen(dst, lenPos_8)
+			dst = append(dst, 0, 0)
+			dst = x.Location.MarshalOmniBufAppend(dst)
+			if d := len(dst) - lenPos_8; d <= 16385 {
+				binary.LittleEndian.PutUint16(dst[lenPos_8:], uint16(d<<2-6))
+			} else {
+				dst = wire.BackpatchContainerLen(dst, lenPos_8)
+			}
 		}
 	}
 	dst = append(dst, 0xb6, 0x02)
+	arrMin_9 := 2
+	for _, elem := range x.Neighbors {
+		arrMin_9 += 2 + elem.MinWireSizeOmniBuf(0)
+	}
 	lenPos_9 := len(dst)
-	dst = append(dst, 0, 0, wire.WireSubMsg)
+	if arrMin_9 > wire.Max2BContainerLen {
+		dst = append(dst, 0, 0, 0, 0, wire.WireSubMsg)
+	} else {
+		dst = append(dst, 0, 0, wire.WireSubMsg)
+	}
 	dst = wire.AppendVarint(dst, uint64(len(x.Neighbors)))
 	for _, elem := range x.Neighbors {
 		eLenPos := len(dst)
-		dst = append(dst, 0, 0)
-		if elem != nil {
+		if elem != nil && elem.MinWireSizeOmniBuf(0) > wire.Max2BContainerLen {
+			dst = append(dst, 0, 0, 0, 0)
 			dst = elem.MarshalOmniBufAppend(dst)
-		}
-		if d := len(dst) - eLenPos; d <= 16385 {
-			binary.LittleEndian.PutUint16(dst[eLenPos:], uint16(d<<2-6))
+			dst = wire.BackpatchContainerLen4(dst, eLenPos)
 		} else {
-			dst = wire.BackpatchContainerLen(dst, eLenPos)
+			dst = append(dst, 0, 0)
+			if elem != nil {
+				dst = elem.MarshalOmniBufAppend(dst)
+			}
+			if d := len(dst) - eLenPos; d <= 16385 {
+				binary.LittleEndian.PutUint16(dst[eLenPos:], uint16(d<<2-6))
+			} else {
+				dst = wire.BackpatchContainerLen(dst, eLenPos)
+			}
 		}
 	}
-	if d := len(dst) - lenPos_9; d <= 16385 {
-		binary.LittleEndian.PutUint16(dst[lenPos_9:], uint16(d<<2-6))
+	if arrMin_9 > wire.Max2BContainerLen {
+		dst = wire.BackpatchContainerLen4(dst, lenPos_9)
 	} else {
-		dst = wire.BackpatchContainerLen(dst, lenPos_9)
+		if d := len(dst) - lenPos_9; d <= 16385 {
+			binary.LittleEndian.PutUint16(dst[lenPos_9:], uint16(d<<2-6))
+		} else {
+			dst = wire.BackpatchContainerLen(dst, lenPos_9)
+		}
 	}
 	dst = append(dst, 0xc2, 0x02)
 	dst = wire.AppendVarint(dst, x.Sequence)
 	return dst
+}
+
+// ValidateOmniBufUTF8 verifies that all string fields in PeerUpdate contain valid UTF-8.
+func (x *PeerUpdate) ValidateOmniBufUTF8() error {
+	if x == nil {
+		return nil
+	}
+	if !wire.ValidUTF8String(x.RouterId) {
+		return fmt.Errorf("omnibuf: field router_id: string contains invalid UTF-8")
+	}
+	for _, s := range x.Tags {
+		if !wire.ValidUTF8String(s) {
+			return fmt.Errorf("omnibuf: field tags: string element contains invalid UTF-8")
+		}
+	}
+	if x.Location != nil {
+		if err := x.Location.ValidateOmniBufUTF8(); err != nil {
+			return err
+		}
+	}
+	for _, elem := range x.Neighbors {
+		if elem != nil {
+			if err := elem.ValidateOmniBufUTF8(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// TryMarshalOmniBufAppend validates UTF-8 on string fields and appends PeerUpdate to dst.
+func (x *PeerUpdate) TryMarshalOmniBufAppend(dst []byte) ([]byte, error) {
+	if x == nil {
+		return nil, fmt.Errorf("omnibuf: Marshal requires non-nil pointer")
+	}
+	if err := x.ValidateOmniBufUTF8(); err != nil {
+		return nil, err
+	}
+	return x.MarshalOmniBufAppend(dst), nil
+}
+
+var _omnibufField0_PeerUpdate = []byte{0x19, 0x16, 0x04, 0x35, 0x15, 0x50, 0x65, 0x65, 0x72, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x5d, 0xaa, 0x01, 0x00, 0x0a, 0x17, 0x03, 0x07, 0x61, 0x73, 0x6e, 0x05, 0x13, 0x72, 0x6f, 0x75, 0x74, 0x65, 0x72, 0x5f, 0x69, 0x64, 0x07, 0x0d, 0x61, 0x63, 0x74, 0x69, 0x76, 0x65, 0x09, 0x15, 0x75, 0x70, 0x74, 0x69, 0x6d, 0x65, 0x5f, 0x73, 0x65, 0x63, 0x0b, 0x11, 0x72, 0x73, 0x73, 0x69, 0x5f, 0x64, 0x62, 0x6d, 0x0d, 0x11, 0x63, 0x70, 0x75, 0x5f, 0x6c, 0x6f, 0x61, 0x64, 0x0f, 0x09, 0x74, 0x61, 0x67, 0x73, 0x11, 0x11, 0x70, 0x72, 0x65, 0x66, 0x69, 0x78, 0x65, 0x73, 0x13, 0x11, 0x6c, 0x6f, 0x63, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x15, 0x13, 0x6e, 0x65, 0x69, 0x67, 0x68, 0x62, 0x6f, 0x72, 0x73, 0x17, 0x11, 0x73, 0x65, 0x71, 0x75, 0x65, 0x6e, 0x63, 0x65, 0x7d, 0x26, 0x02, 0x00, 0x0c, 0x05, 0x13, 0x16, 0x01, 0x35, 0x11, 0x4c, 0x6f, 0x63, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x5d, 0xe2, 0x00, 0x00, 0x0a, 0x0d, 0x03, 0x0d, 0x72, 0x65, 0x67, 0x69, 0x6f, 0x6e, 0x05, 0x15, 0x64, 0x61, 0x74, 0x61, 0x63, 0x65, 0x6e, 0x74, 0x65, 0x72, 0x07, 0x09, 0x63, 0x69, 0x74, 0x79, 0x09, 0x09, 0x72, 0x61, 0x63, 0x6b, 0x0b, 0x11, 0x6c, 0x61, 0x74, 0x69, 0x74, 0x75, 0x64, 0x65, 0x0d, 0x13, 0x6c, 0x6f, 0x6e, 0x67, 0x69, 0x74, 0x75, 0x64, 0x65, 0x15, 0xee, 0x00, 0x35, 0x11, 0x4e, 0x65, 0x69, 0x67, 0x68, 0x62, 0x6f, 0x72, 0x5d, 0xba, 0x00, 0x00, 0x0a, 0x09, 0x03, 0x11, 0x70, 0x65, 0x65, 0x72, 0x5f, 0x61, 0x73, 0x6e, 0x05, 0x0d, 0x72, 0x6f, 0x75, 0x74, 0x65, 0x72, 0x07, 0x15, 0x6c, 0x61, 0x74, 0x65, 0x6e, 0x63, 0x79, 0x5f, 0x75, 0x73, 0x09, 0x17, 0x65, 0x73, 0x74, 0x61, 0x62, 0x6c, 0x69, 0x73, 0x68, 0x65, 0x64}
+
+// MarshalOmniBufSelfDescribingAppend prepends Field #0 SchemaMeta and appends PeerUpdate to dst.
+func (x *PeerUpdate) MarshalOmniBufSelfDescribingAppend(dst []byte) []byte {
+	dst = append(dst, _omnibufField0_PeerUpdate...)
+	return x.MarshalOmniBufAppend(dst)
+}
+
+// TryMarshalOmniBufSelfDescribingAppend validates UTF-8, prepends Field #0 SchemaMeta, and appends PeerUpdate to dst.
+func (x *PeerUpdate) TryMarshalOmniBufSelfDescribingAppend(dst []byte) ([]byte, error) {
+	if x == nil {
+		return nil, fmt.Errorf("omnibuf: Marshal requires non-nil pointer")
+	}
+	if err := x.ValidateOmniBufUTF8(); err != nil {
+		return nil, err
+	}
+	return x.MarshalOmniBufSelfDescribingAppend(dst), nil
 }
 
 //go:noinline
@@ -625,6 +902,7 @@ func (x *PeerUpdate) clearUnseenOmniBuf(seenMask uint64) {
 		x.CpuLoad = 0
 	}
 	if (seenMask & (1 << 6)) == 0 {
+		clear(x.Tags)
 		x.Tags = x.Tags[:0]
 	}
 	if (seenMask & (1 << 7)) == 0 {
@@ -634,6 +912,7 @@ func (x *PeerUpdate) clearUnseenOmniBuf(seenMask uint64) {
 		x.Location = nil
 	}
 	if (seenMask & (1 << 9)) == 0 {
+		clear(x.Neighbors)
 		x.Neighbors = x.Neighbors[:0]
 	}
 	if (seenMask & (1 << 10)) == 0 {
@@ -641,8 +920,13 @@ func (x *PeerUpdate) clearUnseenOmniBuf(seenMask uint64) {
 	}
 }
 
+var _omnibufProtoState_PeerUpdate = omnibuf.InspectProtoState[PeerUpdate]()
+
 // UnmarshalOmniBuf decodes data into PeerUpdate using generated switch dispatch.
 func (x *PeerUpdate) UnmarshalOmniBuf(data []byte, zeroCopy bool) error {
+	if x == nil {
+		return fmt.Errorf("omnibuf: Unmarshal requires non-nil pointer")
+	}
 	return x.decodeOmniBuf(data, zeroCopy, 0, false)
 }
 
@@ -650,6 +934,7 @@ func (x *PeerUpdate) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merge 
 	if depth > omnibuf.MaxNestingDepth {
 		return fmt.Errorf("omnibuf: max nesting depth exceeded")
 	}
+	_omnibufProtoState_PeerUpdate.Reset(unsafe.Pointer(x), merge)
 	const expectedMask uint64 = 0x7ff
 	var seenMask uint64
 	n := len(data)
@@ -739,10 +1024,6 @@ func (x *PeerUpdate) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merge 
 			pos += bn
 			body := data[pos : pos+int(byteLen)]
 			pos += int(byteLen)
-			if !merge && (seenMask&(1<<6)) == 0 {
-				x.Tags = x.Tags[:0]
-			}
-			seenMask |= 1 << 6
 			if len(body) < 2 || body[0] != wire.WireString {
 				return fmt.Errorf("omnibuf: invalid string array")
 			}
@@ -751,30 +1032,54 @@ func (x *PeerUpdate) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merge 
 			if cn == 0 || cu > uint64(len(body)-p) {
 				return fmt.Errorf("omnibuf: invalid string array count")
 			}
+			oldSlice := x.Tags
+			oldLen := len(oldSlice)
+			firstOcc := !merge && (seenMask&(1<<6)) == 0
+			if firstOcc {
+				x.Tags = oldSlice[:0]
+			}
+			seenMask |= 1 << 6
 			count := int(cu)
 			start := len(x.Tags)
 			total := start + count
+			reused := false
 			if cap(x.Tags) < total {
 				next := make([]string, total, wire.GrowCapacity(cap(x.Tags), total))
 				copy(next, x.Tags)
 				x.Tags = next
 			} else {
 				x.Tags = x.Tags[:total]
+				reused = true
 			}
 			for i := 0; i < count; i++ {
 				l, ln := wire.DecodeVarint(body[p:])
 				if ln == 0 || l > uint64(len(body)-(p+ln)) {
+					if reused && firstOcc {
+						clear(oldSlice[:max(oldLen, total)])
+						x.Tags = oldSlice[:0]
+					}
 					return fmt.Errorf("omnibuf: invalid string element")
 				}
 				p += ln
 				if !wire.ValidUTF8(body[p : p+int(l)]) {
+					if reused && firstOcc {
+						clear(oldSlice[:max(oldLen, total)])
+						x.Tags = oldSlice[:0]
+					}
 					return fmt.Errorf("omnibuf: invalid UTF-8 in string element")
 				}
 				x.Tags[start+i] = wire.DecodeStr(body[p:p+int(l)], zeroCopy)
 				p += int(l)
 			}
 			if p != len(body) {
+				if reused && firstOcc {
+					clear(oldSlice[:max(oldLen, total)])
+					x.Tags = oldSlice[:0]
+				}
 				return fmt.Errorf("omnibuf: string array trailing bytes")
+			}
+			if reused && firstOcc && total < oldLen {
+				clear(oldSlice[total:oldLen])
 			}
 		case 141:
 			if depth+1 > omnibuf.MaxNestingDepth {
@@ -846,10 +1151,6 @@ func (x *PeerUpdate) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merge 
 			pos += bn
 			body := data[pos : pos+int(byteLen)]
 			pos += int(byteLen)
-			if !merge && (seenMask&(1<<9)) == 0 {
-				x.Neighbors = x.Neighbors[:0]
-			}
-			seenMask |= 1 << 9
 			if depth+1 > omnibuf.MaxNestingDepth || len(body) < 2 || body[0] != wire.WireSubMsg {
 				return fmt.Errorf("omnibuf: invalid submsg array")
 			}
@@ -858,9 +1159,17 @@ func (x *PeerUpdate) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merge 
 			if cn == 0 || cu > uint64(len(body)-p) {
 				return fmt.Errorf("omnibuf: invalid submsg array count")
 			}
+			oldSlice := x.Neighbors
+			oldLen := len(oldSlice)
+			firstOcc := !merge && (seenMask&(1<<9)) == 0
+			if firstOcc {
+				x.Neighbors = oldSlice[:0]
+			}
+			seenMask |= 1 << 9
 			count := int(cu)
 			start := len(x.Neighbors)
 			total := start + count
+			reused := false
 			if cap(x.Neighbors) < total {
 				if _, ok := wire.CountSubMsgArrElems(body); !ok {
 					return fmt.Errorf("omnibuf: invalid submsg array")
@@ -874,10 +1183,15 @@ func (x *PeerUpdate) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merge 
 				x.Neighbors = next
 			} else {
 				x.Neighbors = x.Neighbors[:total]
+				reused = true
 			}
 			for i := 0; i < count; i++ {
 				el, en := wire.DecodeVarint(body[p:])
 				if en == 0 || el > uint64(len(body)-(p+en)) {
+					if reused && firstOcc {
+						clear(oldSlice[:max(oldLen, total)])
+						x.Neighbors = oldSlice[:0]
+					}
 					return fmt.Errorf("omnibuf: invalid submsg elem length")
 				}
 				p += en
@@ -885,12 +1199,23 @@ func (x *PeerUpdate) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merge 
 					x.Neighbors[start+i] = new(Neighbor)
 				}
 				if err := x.Neighbors[start+i].decodeOmniBuf(body[p:p+int(el)], zeroCopy, depth+2, false); err != nil {
+					if reused && firstOcc {
+						clear(oldSlice[:max(oldLen, total)])
+						x.Neighbors = oldSlice[:0]
+					}
 					return err
 				}
 				p += int(el)
 			}
 			if p != len(body) {
+				if reused && firstOcc {
+					clear(oldSlice[:max(oldLen, total)])
+					x.Neighbors = oldSlice[:0]
+				}
 				return fmt.Errorf("omnibuf: submsg array trailing bytes")
+			}
+			if reused && firstOcc && total < oldLen {
+				clear(oldSlice[total:oldLen])
 			}
 		case 176:
 			v, vn := wire.DecodeVarint(data[pos:])
@@ -937,8 +1262,7 @@ type OpaquePeerUpdate struct {
 }
 
 func (x *OpaquePeerUpdate) Unmarshal(b []byte) error {
-	x.raw = b
-	x.dirty = 0
+	*x = OpaquePeerUpdate{raw: b}
 	return nil
 }
 
@@ -1057,6 +1381,26 @@ func (x *OpaquePeerUpdate) NeighborsLen() int {
 	}
 	return wire.SubMsgArrLen(x.raw, 10)
 }
+
+func (x *OpaquePeerUpdate) IterNeighbors() iter.Seq2[int, OpaqueNeighbor] {
+	return func(yield func(int, OpaqueNeighbor) bool) {
+		if (x.dirty & (uint64(1) << 10)) != 0 {
+			for i, elem := range x.f_neighbors {
+				var v OpaqueNeighbor
+				if elem != nil {
+					v = OpaqueNeighbor{raw: elem.MarshalOmniBufAppend(nil)}
+				}
+				if !yield(i, v) {
+					return
+				}
+			}
+			return
+		}
+		wire.IterSubMsgArr(x.raw, 10, func(i int, rawElem []byte) bool {
+			return yield(i, OpaqueNeighbor{raw: rawElem})
+		})
+	}
+}
 func (x *OpaquePeerUpdate) SetNeighbors(v []*Neighbor) {
 	x.f_neighbors = v
 	x.dirty |= (uint64(1) << 10)
@@ -1133,12 +1477,40 @@ func (x *OpaquePeerUpdate) appendDirtyField(b []byte, fnum uint16) []byte {
 	return b
 }
 
+func (x *OpaquePeerUpdate) validateDirtyUTF8() error {
+	if (x.dirty&(uint64(1)<<2)) != 0 && !wire.ValidUTF8String(x.f_router_id) {
+		return fmt.Errorf("omnibuf: field router_id: string contains invalid UTF-8")
+	}
+	if (x.dirty & (uint64(1) << 7)) != 0 {
+		for _, s := range x.f_tags {
+			if !wire.ValidUTF8String(s) {
+				return fmt.Errorf("omnibuf: field tags: string element contains invalid UTF-8")
+			}
+		}
+	}
+	if (x.dirty&(uint64(1)<<9)) != 0 && x.f_location != nil {
+		if err := x.f_location.ValidateOmniBufUTF8(); err != nil {
+			return err
+		}
+	}
+	if (x.dirty & (uint64(1) << 10)) != 0 {
+		for _, elem := range x.f_neighbors {
+			if elem != nil {
+				if err := elem.ValidateOmniBufUTF8(); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // MarshalAppend re-serializes OpaquePeerUpdate using zero-decode wire splicing for unmodified fields.
 func (x *OpaquePeerUpdate) MarshalAppend(dst []byte) []byte {
 	if x.dirty == 0 {
 		return wire.CopyPacket(dst, x.raw)
 	}
-	return wire.SpliceFields(dst[:0], x.raw, x.dirty, 11, x.appendDirtyField)
+	return wire.SpliceFields(dst, x.raw, x.dirty, 11, x.appendDirtyField)
 }
 
 // TryMarshalAppend re-serializes OpaquePeerUpdate using zero-decode wire splicing and returns an error if x.raw is corrupt.
@@ -1149,7 +1521,10 @@ func (x *OpaquePeerUpdate) TryMarshalAppend(dst []byte) ([]byte, error) {
 		}
 		return wire.CopyPacket(dst, x.raw), nil
 	}
-	return wire.TrySpliceFields(dst[:0], x.raw, x.dirty, 11, x.appendDirtyField)
+	if err := x.validateDirtyUTF8(); err != nil {
+		return nil, err
+	}
+	return wire.TrySpliceFields(dst, x.raw, x.dirty, 11, x.appendDirtyField)
 }
 
 // Marshal re-serializes OpaquePeerUpdate into a newly allocated packet, returning an error if x.raw is corrupt.

@@ -1,6 +1,8 @@
 package omnibuf
 
 import (
+	"math"
+
 	"github.com/omnibuf/omnibuf-go/wire"
 )
 
@@ -32,6 +34,31 @@ func encodeFixed64Arr(d []byte, v []uint64, elem uint8) []byte {
 func appendBoolArrBody(d []bool, b []byte) ([]bool, bool)        { return wire.AppendBoolArrBody(d, b) }
 func appendUintArrBody[T intOrUint](d []T, b []byte) ([]T, bool) { return wire.AppendUintArrBody(d, b) }
 func appendSintArrBody[T intOrUint](d []T, b []byte) ([]T, bool) { return wire.AppendSintArrBody(d, b) }
+func appendUint32SintArrBody(dst []uint32, body []byte) ([]uint32, bool) {
+	if len(body) < 2 || body[0] != wireSint {
+		return nil, false
+	}
+	cu, n := decodeVarint(body[1:])
+	p := 1 + n
+	if n == 0 || cu > uint64(len(body)-p) {
+		return nil, false
+	}
+	c := int(cu)
+	dst, start := growSliceOmni(dst, c)
+	for i := 0; i < c; i++ {
+		v, vn := decodeVarint(body[p:])
+		if vn == 0 {
+			return nil, false
+		}
+		p += vn
+		d := decodeZigZag(v)
+		if d < 0 || d > math.MaxUint32 {
+			return nil, false
+		}
+		dst[start+i] = uint32(d)
+	}
+	return dst, p == len(body)
+}
 func appendFixed32CastArrBody[T intOrUint](d []T, b []byte) ([]T, bool) {
 	return wire.AppendFixed32ArrBody(d, b)
 }

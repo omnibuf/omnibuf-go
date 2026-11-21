@@ -3,6 +3,7 @@ package wire
 import (
 	"encoding/binary"
 	"fmt"
+	"math/bits"
 	"unsafe"
 )
 
@@ -10,7 +11,7 @@ import (
 // Opaque API Runtime Support: Zero-Decode Wire Splicing
 // ============================================================================
 
-// CopyPacket writes raw into dst[:0], allocating a detached slice when dst's
+// CopyPacket appends raw to dst, allocating a detached slice when dst's
 // backing array overlaps raw so neither raw nor the returned slice aliases the other.
 func CopyPacket(dst, raw []byte) []byte {
 	n := len(raw)
@@ -20,10 +21,13 @@ func CopyPacket(dst, raw []byte) []byte {
 		rawStart := uintptr(unsafe.Pointer(unsafe.SliceData(raw)))
 		rawEnd := rawStart + uintptr(n)
 		if dstStart < rawEnd && rawStart < dstEnd {
-			return append([]byte(nil), raw...)
+			out := make([]byte, len(dst)+n)
+			copy(out, dst)
+			copy(out[len(dst):], raw)
+			return out
 		}
 	}
-	return append(dst[:0], raw...)
+	return append(dst, raw...)
 }
 
 // SpliceFields splices unmodified contiguous byte ranges from raw and invokes appendDirty
@@ -116,13 +120,14 @@ func SpliceFields(dst, raw []byte, dirtyMask uint64, maxField uint16, appendDirt
 	}
 
 	// Append any newly added dirty fields that were not present in raw
-	rem := dirtyMask &^ emitted
-	if rem != 0 {
-		for fnum := uint16(1); fnum <= maxField && fnum < 64; fnum++ {
-			if (rem & (uint64(1) << fnum)) != 0 {
-				dst = appendDirty(dst, fnum)
-			}
-		}
+	rem := dirtyMask &^ emitted &^ 1
+	if maxField < 63 {
+		rem &= (uint64(1) << (maxField + 1)) - 1
+	}
+	for rem != 0 {
+		fnum := uint16(bits.TrailingZeros64(rem))
+		dst = appendDirty(dst, fnum)
+		rem &= rem - 1
 	}
 	return dst
 }
@@ -206,13 +211,14 @@ func TrySpliceFields(dst, raw []byte, dirtyMask uint64, maxField uint16, appendD
 		dst = append(dst, raw[cleanStart:n]...)
 	}
 
-	rem := dirtyMask &^ emitted
-	if rem != 0 {
-		for fnum := uint16(1); fnum <= maxField && fnum < 64; fnum++ {
-			if (rem & (uint64(1) << fnum)) != 0 {
-				dst = appendDirty(dst, fnum)
-			}
-		}
+	rem := dirtyMask &^ emitted &^ 1
+	if maxField < 63 {
+		rem &= (uint64(1) << (maxField + 1)) - 1
+	}
+	for rem != 0 {
+		fnum := uint16(bits.TrailingZeros64(rem))
+		dst = appendDirty(dst, fnum)
+		rem &= rem - 1
 	}
 	return dst, nil
 }

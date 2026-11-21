@@ -18,9 +18,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/omnibuf/omnibuf-go"
+	"github.com/omnibuf/omnibuf-go/wire"
 )
 
 // EmbeddedCorpusJSON holds the built-in language-independent conformance test corpus
@@ -301,7 +303,9 @@ func LoadCorpus(corpusPath string) (*ConformanceCorpusFile, error) {
 		sourceLabel = corpusPath
 	}
 	var corpus ConformanceCorpusFile
-	if err := json.Unmarshal(corpusBytes, &corpus); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(corpusBytes))
+	dec.UseNumber()
+	if err := dec.Decode(&corpus); err != nil {
 		return nil, fmt.Errorf("unmarshal corpus %s: %w", sourceLabel, err)
 	}
 	return &corpus, nil
@@ -429,10 +433,14 @@ func RunSuiteWithOptions(opts RunOptions) (*Summary, error) {
 				recordResult(TestTierBlind, vec.Name, fmt.Sprintf("unexpected error: parse=%q runtime=%q serialize=%q", resp.ParseError, resp.RuntimeError, resp.SerializeError), resp.Skipped)
 			} else if vec.ExpectedBlind != nil {
 				var gotBlind map[string]any
-				if err := json.Unmarshal([]byte(resp.JSONPayload), &gotBlind); err != nil {
+				dec := json.NewDecoder(strings.NewReader(resp.JSONPayload))
+				dec.UseNumber()
+				if err := dec.Decode(&gotBlind); err != nil {
 					recordResult(TestTierBlind, vec.Name, fmt.Sprintf("invalid JSON response %q: %v", resp.JSONPayload, err), "")
 				} else if !jsonMapsEqual(gotBlind, vec.ExpectedBlind) {
 					recordResult(TestTierBlind, vec.Name, fmt.Sprintf("DecodeBlind JSON mismatch:\ngot:  %v\nwant: %v", gotBlind, vec.ExpectedBlind), "")
+				} else if err := verifyBlindJSONFormatInvariants(vec.Name, resp.JSONPayload); err != nil {
+					recordResult(TestTierBlind, vec.Name, err.Error(), "")
 				} else {
 					recordResult(TestTierBlind, vec.Name, "", resp.Skipped)
 				}
@@ -565,48 +573,74 @@ func RunSuiteWithOptions(opts RunOptions) (*Summary, error) {
 				} else {
 					recordResult(tier, vec.Name+"/SelfDescribing", "", respSD.Skipped)
 				}
-			} else if vec.Schema == "TestAllTypes" && tier == TestTierPlugin {
-				reqSplice := &ConformanceRequest{
-					TestName:              vec.Name + "/" + tier.String() + "/OpaqueSpliceGrow",
+			} else if vec.Schema == "TestAllTypes" {
+				reqSD := &ConformanceRequest{
+					TestName:              vec.Name + "/" + tier.String() + "/SelfDescribing",
 					MessageType:           canonicalMessageType(vec.Schema),
 					Tier:                  uint32(tier),
 					RequestedOutputFormat: uint32(WireFormatOmniBuf),
 					OmniBufPayload:        rawWire,
-					TestOpaqueSplice:      true,
+					SelfDescribing:        true,
 				}
-				respSplice, err := sendReq(reqSplice)
+				respSD, err := sendReq(reqSD)
 				if err != nil {
 					_ = stdin.Close()
 					_ = cmd.Wait()
 					return nil, err
 				}
-				if respSplice.ParseError != "" || respSplice.SerializeError != "" || respSplice.RuntimeError != "" {
-					recordResult(tier, vec.Name+"/OpaqueSpliceGrow", fmt.Sprintf("error: parse=%q serialize=%q runtime=%q", respSplice.ParseError, respSplice.SerializeError, respSplice.RuntimeError), respSplice.Skipped)
-				} else if err := verifyOpaqueSpliceGrowEquivalence(vec.Schema, rawWire, respSplice.OmniBufPayload); err != nil {
-					recordResult(tier, vec.Name+"/OpaqueSpliceGrow", err.Error(), respSplice.Skipped)
+				if respSD.ParseError != "" || respSD.SerializeError != "" || respSD.RuntimeError != "" {
+					recordResult(tier, vec.Name+"/SelfDescribing", fmt.Sprintf("error: parse=%q serialize=%q runtime=%q", respSD.ParseError, respSD.SerializeError, respSD.RuntimeError), respSD.Skipped)
+				} else if meta, ok := omnibuf.ReadField0SchemaMeta(respSD.OmniBufPayload); !ok || meta.Fields[6] != "f6_string" {
+					recordResult(tier, vec.Name+"/SelfDescribing", "missing or invalid Field #0 SchemaMeta in TestAllTypes self_describing output", respSD.Skipped)
+				} else if err := verifyRoundTripEquivalence(vec.Schema, rawWire, respSD.OmniBufPayload); err != nil {
+					recordResult(tier, vec.Name+"/SelfDescribing", err.Error(), respSD.Skipped)
 				} else {
-					recordResult(tier, vec.Name+"/OpaqueSpliceGrow", "", respSplice.Skipped)
+					recordResult(tier, vec.Name+"/SelfDescribing", "", respSD.Skipped)
+				}
 
-					reqShrink := &ConformanceRequest{
-						TestName:               vec.Name + "/" + tier.String() + "/OpaqueSpliceShrink",
-						MessageType:            canonicalMessageType(vec.Schema),
-						Tier:                   uint32(tier),
-						RequestedOutputFormat:  uint32(WireFormatOmniBuf),
-						OmniBufPayload:         respSplice.OmniBufPayload,
-						TestOpaqueSpliceShrink: true,
+				if tier == TestTierPlugin {
+					reqSplice := &ConformanceRequest{
+						TestName:              vec.Name + "/" + tier.String() + "/OpaqueSpliceGrow",
+						MessageType:           canonicalMessageType(vec.Schema),
+						Tier:                  uint32(tier),
+						RequestedOutputFormat: uint32(WireFormatOmniBuf),
+						OmniBufPayload:        rawWire,
+						TestOpaqueSplice:      true,
 					}
-					respShrink, err := sendReq(reqShrink)
+					respSplice, err := sendReq(reqSplice)
 					if err != nil {
 						_ = stdin.Close()
 						_ = cmd.Wait()
 						return nil, err
 					}
-					if respShrink.ParseError != "" || respShrink.SerializeError != "" || respShrink.RuntimeError != "" {
-						recordResult(tier, vec.Name+"/OpaqueSpliceShrink", fmt.Sprintf("error: parse=%q serialize=%q runtime=%q", respShrink.ParseError, respShrink.SerializeError, respShrink.RuntimeError), respShrink.Skipped)
-					} else if err := verifyOpaqueSpliceShrinkEquivalence(vec.Schema, respSplice.OmniBufPayload, respShrink.OmniBufPayload); err != nil {
-						recordResult(tier, vec.Name+"/OpaqueSpliceShrink", err.Error(), respShrink.Skipped)
+					if respSplice.ParseError != "" || respSplice.SerializeError != "" || respSplice.RuntimeError != "" {
+						recordResult(tier, vec.Name+"/OpaqueSpliceGrow", fmt.Sprintf("error: parse=%q serialize=%q runtime=%q", respSplice.ParseError, respSplice.SerializeError, respSplice.RuntimeError), respSplice.Skipped)
+					} else if err := verifyOpaqueSpliceGrowEquivalence(vec.Schema, rawWire, respSplice.OmniBufPayload); err != nil {
+						recordResult(tier, vec.Name+"/OpaqueSpliceGrow", err.Error(), respSplice.Skipped)
 					} else {
-						recordResult(tier, vec.Name+"/OpaqueSpliceShrink", "", respShrink.Skipped)
+						recordResult(tier, vec.Name+"/OpaqueSpliceGrow", "", respSplice.Skipped)
+
+						reqShrink := &ConformanceRequest{
+							TestName:               vec.Name + "/" + tier.String() + "/OpaqueSpliceShrink",
+							MessageType:            canonicalMessageType(vec.Schema),
+							Tier:                   uint32(tier),
+							RequestedOutputFormat:  uint32(WireFormatOmniBuf),
+							OmniBufPayload:         respSplice.OmniBufPayload,
+							TestOpaqueSpliceShrink: true,
+						}
+						respShrink, err := sendReq(reqShrink)
+						if err != nil {
+							_ = stdin.Close()
+							_ = cmd.Wait()
+							return nil, err
+						}
+						if respShrink.ParseError != "" || respShrink.SerializeError != "" || respShrink.RuntimeError != "" {
+							recordResult(tier, vec.Name+"/OpaqueSpliceShrink", fmt.Sprintf("error: parse=%q serialize=%q runtime=%q", respShrink.ParseError, respShrink.SerializeError, respShrink.RuntimeError), respShrink.Skipped)
+						} else if err := verifyOpaqueSpliceShrinkEquivalence(vec.Schema, respSplice.OmniBufPayload, respShrink.OmniBufPayload); err != nil {
+							recordResult(tier, vec.Name+"/OpaqueSpliceShrink", err.Error(), respShrink.Skipped)
+						} else {
+							recordResult(tier, vec.Name+"/OpaqueSpliceShrink", "", respShrink.Skipped)
+						}
 					}
 				}
 			}
@@ -678,8 +712,7 @@ func RunSuiteWithOptions(opts RunOptions) (*Summary, error) {
 				recordResult(tier, "Invalid/"+ic.Name, "", resp.Skipped)
 			}
 
-			isNonField0UTF8 := ic.Category == "InvalidUTF8" && !strings.Contains(ic.Name, "field0")
-			if !ic.BlindOnly && !isNonField0UTF8 && tier == TestTierPlugin && (icSchema == "TestAllTypes" || icSchema == "PeerUpdate") {
+			if (!ic.BlindOnly || ic.Category == "InvalidUTF8") && tier == TestTierPlugin && (icSchema == "TestAllTypes" || icSchema == "PeerUpdate") {
 				reqSplice := &ConformanceRequest{
 					TestName:              "Invalid/" + ic.Name + "/" + tier.String() + "/OpaqueSplice",
 					MessageType:           icMsgType,
@@ -924,6 +957,9 @@ func verifyOpaqueSpliceShrinkEquivalence(schema string, inputWire, outputWire []
 }
 
 func verifyRoundTripEquivalence(schema string, inputWire, outputWire []byte) error {
+	if err := verifyCanonicalStringMapOrder(outputWire); err != nil {
+		return err
+	}
 	switch schema {
 	case "PeerUpdate":
 		var want, got PeerUpdate
@@ -1072,12 +1108,166 @@ func jsonMapsEqual(a, b map[string]any) bool {
 	if err1 != nil || err2 != nil {
 		return false
 	}
-	var na, nb any
-	if err := json.Unmarshal(ja, &na); err != nil {
-		return false
-	}
-	if err := json.Unmarshal(jb, &nb); err != nil {
+	na, err1 := decodeNormalizedJSON(ja)
+	nb, err2 := decodeNormalizedJSON(jb)
+	if err1 != nil || err2 != nil {
 		return false
 	}
 	return reflect.DeepEqual(na, nb)
+}
+
+func decodeNormalizedJSON(raw []byte) (any, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return nil, err
+	}
+	return normalizeJSONValue(v), nil
+}
+
+func normalizeJSONValue(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, val := range x {
+			out[k] = normalizeJSONValue(val)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, val := range x {
+			out[i] = normalizeJSONValue(val)
+		}
+		return out
+	case json.Number:
+		s := string(x)
+		if !strings.ContainsAny(s, ".eE") {
+			if strings.HasPrefix(s, "-0") && strings.Trim(s[1:], "0") == "" {
+				return "-0.0"
+			}
+			if u, err := strconv.ParseUint(s, 10, 64); err == nil {
+				return u
+			}
+			if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+				return i
+			}
+		}
+		if f, err := x.Float64(); err == nil {
+			if f == 0 && math.Signbit(f) {
+				return "-0.0"
+			}
+			if math.Trunc(f) == f && f >= 0 && f < 9007199254740992 {
+				return uint64(f)
+			}
+			if math.Trunc(f) == f && f < 0 && f > -9007199254740992 {
+				return int64(f)
+			}
+			return f
+		}
+		return s
+	default:
+		return v
+	}
+}
+
+func verifyCanonicalStringMapOrder(data []byte) error {
+	pos := 0
+	for pos < len(data) {
+		tag, tn := wire.DecodeVarint(data[pos:])
+		if tn <= 0 {
+			return fmt.Errorf("invalid tag varint in output wire at %d", pos)
+		}
+		pos += tn
+		fnum := tag >> 4
+		wt := uint8(tag & 0x0F)
+		if fnum == 0 {
+			next, err := wire.SkipValue(data, pos, wt)
+			if err != nil {
+				return err
+			}
+			pos = next
+			continue
+		}
+		switch wt {
+		case wire.WireSubMsg:
+			bLen, bn := wire.DecodeVarint(data[pos:])
+			if bn <= 0 || bLen > uint64(len(data)-pos-bn) {
+				return fmt.Errorf("invalid submsg length at %d", pos)
+			}
+			sub := data[pos+bn : pos+bn+int(bLen)]
+			if err := verifyCanonicalStringMapOrder(sub); err != nil {
+				return err
+			}
+			pos += bn + int(bLen)
+		case wire.WireMap:
+			bLen, bn := wire.DecodeVarint(data[pos:])
+			if bn <= 0 || bLen > uint64(len(data)-pos-bn) {
+				return fmt.Errorf("invalid map length at %d", pos)
+			}
+			body := data[pos+bn : pos+bn+int(bLen)]
+			keyWT, valWT, count, p, ok := wire.ParseMapHeader(body)
+			if !ok {
+				return fmt.Errorf("invalid map header at %d", pos)
+			}
+			if keyWT == wire.WireString {
+				var prevKey []byte
+				hasPrev := false
+				for range count {
+					sLen, sn := wire.DecodeVarint(body[p:])
+					if sn <= 0 || sLen > uint64(len(body)-p-sn) {
+						return fmt.Errorf("invalid map string key length")
+					}
+					p += sn
+					curKey := body[p : p+int(sLen)]
+					p += int(sLen)
+					if hasPrev && bytes.Compare(prevKey, curKey) > 0 {
+						return fmt.Errorf("non-deterministic WireMap string key order: %q (%x) appeared before %q (%x); canonical UTF-8 byte order required",
+							string(prevKey), prevKey, string(curKey), curKey)
+					}
+					prevKey = curKey
+					hasPrev = true
+					nextP, err := skipMapContainerEntry(body, p, valWT)
+					if err != nil {
+						return err
+					}
+					p = nextP
+				}
+			}
+			pos += bn + int(bLen)
+		default:
+			next, err := wire.SkipValue(data, pos, wt)
+			if err != nil {
+				return err
+			}
+			pos = next
+		}
+	}
+	return nil
+}
+
+func skipMapContainerEntry(body []byte, p int, wt uint8) (int, error) {
+	if wt == wire.WireBoolFalse {
+		if p >= len(body) || body[p] > 1 {
+			return 0, fmt.Errorf("invalid bool map value")
+		}
+		return p + 1, nil
+	}
+	return wire.SkipValue(body, p, wt)
+}
+
+func verifyBlindJSONFormatInvariants(vecName, rawJSON string) error {
+	if vecName == "utf8_vs_utf16_surrogate_map_sort_order" {
+		idxFF01 := strings.Index(rawJSON, "！_fullwidth_ff01")
+		idx1F680 := strings.Index(rawJSON, "🚀_astral_1f680")
+		if idxFF01 >= 0 && idx1F680 >= 0 && idx1F680 < idxFF01 {
+			return fmt.Errorf("DecodeBlind JSON sorted UTF-16 surrogate key before U+FF01 (want UTF-8 byte order): %s", rawJSON)
+		}
+	}
+	if vecName == "float_scientific_threshold_values" {
+		if strings.Contains(strings.ToLower(rawJSON), "1.25e-4") || strings.Contains(strings.ToLower(rawJSON), "1.5e7") || strings.Contains(strings.ToLower(rawJSON), "1.5e+7") {
+			return fmt.Errorf("DecodeBlind JSON used scientific notation inside [1e-6, 1e21) range: %s", rawJSON)
+		}
+	}
+	return nil
 }

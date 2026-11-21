@@ -80,7 +80,9 @@ func ValidUTF8(b []byte) bool {
 	// still goes through the standard UTF-8 validator.
 	n := len(b)
 	switch {
-	case n >= 8 && n <= 64:
+	case n > 64:
+		return validUTF8Long(b)
+	case n >= 8:
 		var bits uint64
 		for i := 0; i < n-8; i += 8 {
 			bits |= binary.LittleEndian.Uint64(b[i:])
@@ -89,11 +91,11 @@ func ValidUTF8(b []byte) bool {
 		if bits&0x8080808080808080 == 0 {
 			return true
 		}
-	case n >= 4 && n < 8:
+	case n >= 4:
 		if (binary.LittleEndian.Uint32(b)|binary.LittleEndian.Uint32(b[n-4:]))&0x80808080 == 0 {
 			return true
 		}
-	case n < 4:
+	default:
 		var bits byte
 		for _, c := range b {
 			bits |= c
@@ -103,6 +105,46 @@ func ValidUTF8(b []byte) bool {
 		}
 	}
 	return utf8.Valid(b)
+}
+
+func validUTF8Long(b []byte) bool {
+	i := 0
+	for len(b)-i >= 64 {
+		s := b[i : i+64 : i+64]
+		w0 := binary.LittleEndian.Uint64(s[0:])
+		w1 := binary.LittleEndian.Uint64(s[8:])
+		w2 := binary.LittleEndian.Uint64(s[16:])
+		w3 := binary.LittleEndian.Uint64(s[24:])
+		w4 := binary.LittleEndian.Uint64(s[32:])
+		w5 := binary.LittleEndian.Uint64(s[40:])
+		w6 := binary.LittleEndian.Uint64(s[48:])
+		w7 := binary.LittleEndian.Uint64(s[56:])
+		if ((w0|w1|w2|w3)|(w4|w5|w6|w7))&0x8080808080808080 != 0 {
+			return utf8.Valid(b[i:])
+		}
+		i += 64
+	}
+	rem := b[i:]
+	if len(rem) >= 8 {
+		var bits uint64
+		for j := 0; j < len(rem)-8; j += 8 {
+			bits |= binary.LittleEndian.Uint64(rem[j:])
+		}
+		bits |= binary.LittleEndian.Uint64(rem[len(rem)-8:])
+		if bits&0x8080808080808080 == 0 {
+			return true
+		}
+		return utf8.Valid(rem)
+	}
+	return utf8.Valid(rem)
+}
+
+// ValidUTF8String reports whether s is valid UTF-8 without copying string bytes.
+func ValidUTF8String(s string) bool {
+	if len(s) == 0 {
+		return true
+	}
+	return ValidUTF8(unsafe.Slice(unsafe.StringData(s), len(s)))
 }
 
 // DecodeStr converts b into a Go string (zero-copy via unsafe.String if zeroCopy is true).

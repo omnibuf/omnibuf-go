@@ -50,7 +50,7 @@ func finalizeWireType(fc *fieldCodec, t reflect.Type, opt string) {
 			fc.elemWireType = wireSubMsg
 		case kindUint8Slice, kindUint16Slice, kindUint32Slice, kindUint64Slice:
 			fc.elemWireType = wireUint
-		case kindInt8Slice, kindInt16Slice, kindInt32Slice, kindInt64Slice, kindUint8SintSlice, kindUint16SintSlice:
+		case kindInt8Slice, kindInt16Slice, kindInt32Slice, kindInt64Slice, kindUint8SintSlice, kindUint16SintSlice, kindUint32SintSlice, kindUint64SintSlice:
 			fc.elemWireType = wireSint
 		default:
 			wt := uint8(wireFixed64)

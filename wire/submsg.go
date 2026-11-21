@@ -339,9 +339,44 @@ func ReadSubMsgArrElem(packet []byte, fieldNum uint16, index int) ([]byte, bool)
 	}
 }
 
+// IterSubMsgArr iterates over all sub-message slices in a WireArray field in a single O(M) linear scan.
+// If any segment of packet or the array is malformed, it yields zero elements.
+func IterSubMsgArr(packet []byte, fieldNum uint16, yield func(int, []byte) bool) {
+	if SubMsgArrLen(packet, fieldNum) == 0 {
+		return
+	}
+	idx := 0
+	for pos := 0; ; {
+		body, nextPos, matched, valid := nextContainerField(packet, pos, fieldNum, WireArray, 0)
+		if !valid || !matched {
+			return
+		}
+		pos = nextPos
+		_, count, p, ok := ParseArrayHeader(body)
+		if !ok {
+			return
+		}
+		for range count {
+			l, n := DecodeVarint(body[p:])
+			if n == 0 || l > uint64(len(body)-p-n) {
+				return
+			}
+			p += n
+			end := p + int(l)
+			if !yield(idx, body[p:end:end]) {
+				return
+			}
+			idx++
+			p = end
+		}
+	}
+}
+
 // ReadNestedStringBytes locates targetField inside subMsgField, supporting merged sub-messages across concatenated packets.
 func ReadNestedStringBytes(packet []byte, subMsgField, targetField uint16) ([]byte, bool) {
+	var firstSub []byte
 	var lastBytes []byte
+	segCount := 0
 	found := false
 	for pos := 0; ; {
 		sub, nextPos, matched, valid := nextContainerField(packet, pos, subMsgField, WireSubMsg, 0)
@@ -352,6 +387,17 @@ func ReadNestedStringBytes(packet []byte, subMsgField, targetField uint16) ([]by
 			return lastBytes, found
 		}
 		pos = nextPos
+		segCount++
+		if segCount == 1 {
+			firstSub = sub
+		} else {
+			if segCount == 2 && !ValidateMessage(firstSub, 1) {
+				return nil, false
+			}
+			if !ValidateMessage(sub, 1) {
+				return nil, false
+			}
+		}
 		if b, ok := ReadStringBytes(sub, targetField); ok {
 			lastBytes = b
 			found = true

@@ -994,7 +994,7 @@ func BenchmarkLargeNested_OmniBuf_StructTags(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		var err error
-		buf, err = MarshalAppend(buf, &orig)
+		buf, err = MarshalAppend(buf[:0], &orig)
 		if err != nil || len(buf) <= 38912 {
 			b.Fatal(err)
 		}
@@ -1122,7 +1122,7 @@ func BenchmarkEmbeddedSubMsgGrow_OmniBuf_OpaqueSplice(b *testing.B) {
 				Longitude:  loc.GetLongitude(),
 			})
 		}
-		outBuf = msg.MarshalAppend(outBuf)
+		outBuf = msg.MarshalAppend(outBuf[:0])
 		if len(outBuf) <= 20480 {
 			b.Fatal("short")
 		}

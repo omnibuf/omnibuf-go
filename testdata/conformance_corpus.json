@@ -3694,6 +3694,537 @@
           "new_id": 10
         }
       }
+    },
+    {
+      "name": "utf8_vs_utf16_surrogate_map_sort_order",
+      "category": "O_AuditHardening",
+      "description": "Map with BMP U+E000 / U+FF01 and astral U+10437 / U+1F680 keys enforcing canonical UTF-8 byte sort order",
+      "schema": "TestAllTypes",
+      "wire_hex": "2103410163018301a5d501f70176020a000a01b6020a000001f6020a000c013a031e010a00090fee80805f7075610325efbc815f66756c6c77696474685f666630310525f09090b75f646573657265745f31303433370723f09f9a805f61737472616c5f316636383009620300000000a6030000000000000000d20300000000160400000000000000002a0501",
+      "wire_byte_len": 141,
+      "present_fields": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        20
+      ],
+      "expected_blind": {
+        "field_1": 1,
+        "field_10": [],
+        "field_11": [],
+        "field_12": {
+          "_pua": 1,
+          "！_fullwidth_ff01": 2,
+          "𐐷_deseret_10437": 3,
+          "🚀_astral_1f680": 4
+        },
+        "field_13": 0,
+        "field_14": 0,
+        "field_15": 0,
+        "field_16": 0,
+        "field_2": 0,
+        "field_20": "",
+        "field_3": 0,
+        "field_4": 0,
+        "field_5": false,
+        "field_6": "",
+        "field_7": "",
+        "field_9": []
+      }
+    },
+    {
+      "name": "uint64_int64_above_53bit_precision",
+      "category": "O_AuditHardening",
+      "description": "Exact 2^53+1, -(2^53+1), and MaxUint64-1 values catching IEEE-754 float64 truncation",
+      "schema": "TestAllTypes",
+      "wire_hex": "210141000100000000002000630183000100000000004000a5d501f70176020a000a01b6020a000001f6020a000c013a03ca000a0005176d61785f6d696e75735f3100feffffffffffffff2174776f5f706f775f35335f706c757331000100000000002000620300000000a6030000000000000000d203000000001604feffffffffffffff2a0501",
+      "wire_byte_len": 136,
+      "present_fields": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        20
+      ],
+      "expected_blind": {
+        "field_1": 0,
+        "field_10": [],
+        "field_11": [],
+        "field_12": {
+          "max_minus_1": 18446744073709551614,
+          "two_pow_53_plus1": 9007199254740993
+        },
+        "field_13": 0,
+        "field_14": 0,
+        "field_15": 0,
+        "field_16": 18446744073709551614,
+        "field_2": 9007199254740993,
+        "field_20": "",
+        "field_3": 0,
+        "field_4": -9007199254740993,
+        "field_5": false,
+        "field_6": "",
+        "field_7": "",
+        "field_9": []
+      }
+    },
+    {
+      "name": "audit_float_neg_zero_seed",
+      "category": "O_AuditHardening",
+      "description": "Negative zero (-0.0) seed preceding an omitted-float packet to detect stale -0.0 retention",
+      "schema": "TestAllTypes",
+      "wire_hex": "2101410163018301a5d501f70176020a000a01b6020a000001f6020a000c013a030e000a0001620300000080a6030000000000000080d20300000000160400000000000000002a0501",
+      "wire_byte_len": 73,
+      "present_fields": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        20
+      ],
+      "expected_blind": {
+        "field_1": 0,
+        "field_10": [],
+        "field_11": [],
+        "field_12": {},
+        "field_13": -0,
+        "field_14": -0,
+        "field_15": 0,
+        "field_16": 0,
+        "field_2": 0,
+        "field_20": "",
+        "field_3": 0,
+        "field_4": 0,
+        "field_5": false,
+        "field_6": "",
+        "field_7": "",
+        "field_9": []
+      }
+    },
+    {
+      "name": "audit_float_pos_zero_reset_after_neg_zero",
+      "category": "O_AuditHardening",
+      "description": "Omitted float fields immediately after -0.0 verifying reused dynamic/struct targets reset sign bit to +0.0",
+      "schema": "TestAllTypes",
+      "wire_hex": "210f410163018301a5d501f70176020a000a01b6020a000001f6020a000c013a030e000a0001620300000000a6030000000000000000d20300000000160400000000000000002a0501",
+      "wire_byte_len": 73,
+      "present_fields": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        20
+      ],
+      "expected_blind": {
+        "field_1": 7,
+        "field_10": [],
+        "field_11": [],
+        "field_12": {},
+        "field_13": 0,
+        "field_14": 0,
+        "field_15": 0,
+        "field_16": 0,
+        "field_2": 0,
+        "field_20": "",
+        "field_3": 0,
+        "field_4": 0,
+        "field_5": false,
+        "field_6": "",
+        "field_7": "",
+        "field_9": []
+      }
+    },
+    {
+      "name": "float_scientific_threshold_values",
+      "category": "O_AuditHardening",
+      "description": "Floats 0.000125 and 15000000.0 testing fixed-point vs exponent formatting in DecodeBlind JSON",
+      "schema": "TestAllTypes",
+      "wire_hex": "2101410163018301a5d501f70176020a000a01b6020a000001f6020a000c013a030e000a000162036f120339a60300000000389c6c41d20300000000160400000000000000002a0501",
+      "wire_byte_len": 73,
+      "present_fields": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        20
+      ],
+      "expected_blind": {
+        "field_1": 0,
+        "field_10": [],
+        "field_11": [],
+        "field_12": {},
+        "field_13": 0.000125,
+        "field_14": 15000000,
+        "field_15": 0,
+        "field_16": 0,
+        "field_2": 0,
+        "field_20": "",
+        "field_3": 0,
+        "field_4": 0,
+        "field_5": false,
+        "field_6": "",
+        "field_7": "",
+        "field_9": []
+      }
+    },
+    {
+      "name": "concat_4seg_valid_submsg_and_containers",
+      "category": "O_AuditHardening",
+      "description": "Four concatenated TestAllTypes segments merging F8SubMsg, F10Uint32Arr, and F12MapStrUint",
+      "schema": "TestAllTypes",
+      "wire_hex": "2101410163018301a5d501f70132021e002117550165830176020a000a01b6020e00000315f6020a000c013a031a000a0003036103620300000000a6030000000000000000d20300000000160400000000000000002a05012101410163018301a5d501f70132022e00210155097365673265830176020a000a01b6020e00000329f6020a000c013a031a000a0003036205620300000000a6030000000000000000d20300000000160400000000000000002a05012101410163018301a5d501f70132021e002101550167830176020a000a01b6020e0000033df6020a000c013a031a000a0003036115620300000000a6030000000000000000d20300000000160400000000000000002a05012101410163018301a5d501f70132022200210155016583de0d76020a000a01b6020e00000351f6020a000c013a031a000a0003036307620300000000a6030000000000000000d20300000000160400000000000000002a0501",
+      "wire_byte_len": 357,
+      "present_fields": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        20,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        20,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        20,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        20
+      ],
+      "expected_blind": {
+        "field_1": 0,
+        "field_10": [
+          10,
+          20,
+          30,
+          40
+        ],
+        "field_11": [],
+        "field_12": {
+          "a": 10,
+          "b": 2,
+          "c": 3
+        },
+        "field_13": 0,
+        "field_14": 0,
+        "field_15": 0,
+        "field_16": 0,
+        "field_2": 0,
+        "field_20": "",
+        "field_3": 0,
+        "field_4": 0,
+        "field_5": false,
+        "field_6": "",
+        "field_7": "",
+        "field_8": {
+          "field_1": 0,
+          "field_2": "",
+          "field_3": false,
+          "field_4": -444
+        },
+        "field_9": []
+      }
+    },
+    {
+      "name": "blind_map_bool_key_with_array_and_map_values",
+      "category": "O_AuditHardening",
+      "description": "Non-empty WireMap\u003cbool, WireArray\u003e and WireMap\u003cbool, WireMap\u003e testing 1-byte boolean map key skipping",
+      "schema": "ManualBoolKeyNestedContainers",
+      "wire_hex": "3d1d020d05000900051529010700033d5d2d020e05000f0a0003056b30c901110a0003056b312203",
+      "wire_byte_len": 40,
+      "present_fields": [
+        1,
+        2
+      ],
+      "expected_blind": {
+        "field_1": {
+          "false": [
+            10,
+            20
+          ],
+          "true": [
+            30
+          ]
+        },
+        "field_2": {
+          "false": {
+            "k0": 100
+          },
+          "true": {
+            "k1": 200
+          }
+        }
+      }
+    },
+    {
+      "name": "tree_depth_18_valid_self_describing_cap",
+      "category": "O_AuditHardening",
+      "description": "18-level TreeNode chain within MaxNestingDepth=32 testing SelfDescribing SchemaMeta depth bounding",
+      "schema": "TreeNode",
+      "wire_hex": "2103550d6e6f64652d3163039956082105550d6e6f64652d32630799da072107550d6e6f64652d33630b995e072109550d6e6f64652d34630f99e206210b550d6e6f64652d356313996606210d550d6e6f64652d36631799ea05210f550d6e6f64652d37631b996e052111550d6e6f64652d38631f99f2042113550d6e6f64652d3963239976042115550f6e6f64652d3130632799f6032117550f6e6f64652d3131632b9976032119550f6e6f64652d3132632f99f602211b550f6e6f64652d31336333997602211d550f6e6f64652d3134633799f601211f550f6e6f64652d3135633b9976012121550f6e6f64652d3136633f99f6002123550f6e6f64652d313763439976002125550f6c6561662d31386347bb0a000c01db0a000c01fd0e000a0001bb0a000c01db0a000c01fd0e000a0001bb0a000c01db0a000c01fd0e000a0001bb0a000c01db0a000c01fd0e000a0001bb0a000c01db0a000c01fd0e000a0001bb0a000c01db0a000c01fd0e000a0001bb0a000c01db0a000c01fd0e000a0001bb0a000c01db0a000c01fd0e000a0001bb0a000c01db0a000c01fd0e000a0001bb0a000c01db0a000c01fd0e000a0001bb0a000c01db0a000c01fd0e000a0001bb0a000c01db0a000c01fd0e000a0001bb0a000c01db0a000c01fd0e000a0001bb0a000c01db0a000c01fd0e000a0001bb0a000c01db0a000c01fd0e000a0001bb0a000c01db0a000c01fd0e000a0001bb0a000c01db0a000c01fd0e000a0001bb0a000c01db0a000c01fd0e000a0001",
+      "wire_byte_len": 564,
+      "present_fields": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "expected_blind": {
+        "field_1": 1,
+        "field_2": "node-1",
+        "field_3": -1,
+        "field_4": {
+          "field_1": 2,
+          "field_2": "node-2",
+          "field_3": -2,
+          "field_4": {
+            "field_1": 3,
+            "field_2": "node-3",
+            "field_3": -3,
+            "field_4": {
+              "field_1": 4,
+              "field_2": "node-4",
+              "field_3": -4,
+              "field_4": {
+                "field_1": 5,
+                "field_2": "node-5",
+                "field_3": -5,
+                "field_4": {
+                  "field_1": 6,
+                  "field_2": "node-6",
+                  "field_3": -6,
+                  "field_4": {
+                    "field_1": 7,
+                    "field_2": "node-7",
+                    "field_3": -7,
+                    "field_4": {
+                      "field_1": 8,
+                      "field_2": "node-8",
+                      "field_3": -8,
+                      "field_4": {
+                        "field_1": 9,
+                        "field_2": "node-9",
+                        "field_3": -9,
+                        "field_4": {
+                          "field_1": 10,
+                          "field_2": "node-10",
+                          "field_3": -10,
+                          "field_4": {
+                            "field_1": 11,
+                            "field_2": "node-11",
+                            "field_3": -11,
+                            "field_4": {
+                              "field_1": 12,
+                              "field_2": "node-12",
+                              "field_3": -12,
+                              "field_4": {
+                                "field_1": 13,
+                                "field_2": "node-13",
+                                "field_3": -13,
+                                "field_4": {
+                                  "field_1": 14,
+                                  "field_2": "node-14",
+                                  "field_3": -14,
+                                  "field_4": {
+                                    "field_1": 15,
+                                    "field_2": "node-15",
+                                    "field_3": -15,
+                                    "field_4": {
+                                      "field_1": 16,
+                                      "field_2": "node-16",
+                                      "field_3": -16,
+                                      "field_4": {
+                                        "field_1": 17,
+                                        "field_2": "node-17",
+                                        "field_3": -17,
+                                        "field_4": {
+                                          "field_1": 18,
+                                          "field_2": "leaf-18",
+                                          "field_3": -18,
+                                          "field_5": [],
+                                          "field_6": [],
+                                          "field_7": {}
+                                        },
+                                        "field_5": [],
+                                        "field_6": [],
+                                        "field_7": {}
+                                      },
+                                      "field_5": [],
+                                      "field_6": [],
+                                      "field_7": {}
+                                    },
+                                    "field_5": [],
+                                    "field_6": [],
+                                    "field_7": {}
+                                  },
+                                  "field_5": [],
+                                  "field_6": [],
+                                  "field_7": {}
+                                },
+                                "field_5": [],
+                                "field_6": [],
+                                "field_7": {}
+                              },
+                              "field_5": [],
+                              "field_6": [],
+                              "field_7": {}
+                            },
+                            "field_5": [],
+                            "field_6": [],
+                            "field_7": {}
+                          },
+                          "field_5": [],
+                          "field_6": [],
+                          "field_7": {}
+                        },
+                        "field_5": [],
+                        "field_6": [],
+                        "field_7": {}
+                      },
+                      "field_5": [],
+                      "field_6": [],
+                      "field_7": {}
+                    },
+                    "field_5": [],
+                    "field_6": [],
+                    "field_7": {}
+                  },
+                  "field_5": [],
+                  "field_6": [],
+                  "field_7": {}
+                },
+                "field_5": [],
+                "field_6": [],
+                "field_7": {}
+              },
+              "field_5": [],
+              "field_6": [],
+              "field_7": {}
+            },
+            "field_5": [],
+            "field_6": [],
+            "field_7": {}
+          },
+          "field_5": [],
+          "field_6": [],
+          "field_7": {}
+        },
+        "field_5": [],
+        "field_6": [],
+        "field_7": {}
+      }
     }
   ],
   "invalid_cases": [
@@ -4243,6 +4774,49 @@
       "description": "Field #99 appears as WireArray(WireArray(WireUint)) then WireArray(WireArray(WireString))",
       "blind_only": true,
       "wire_hex": "f6180d0d030700030ff6180f0d03090a030361"
+    },
+    {
+      "name": "concat_4seg_split_corrupt_submsg",
+      "category": "CorruptSubMsg",
+      "description": "Four F8SubMsg occurrences where segments 1 \u0026 2 are valid and segments 3 \u0026 4 fuse across a truncated 2-byte varint",
+      "wire_hex": "3202013202052103320205210232020301"
+    },
+    {
+      "name": "field0_invalid_utf8_field_name",
+      "category": "InvalidUTF8",
+      "description": "Field #0 SchemaMeta mapping field 1 to invalid UTF-8 bytes [0xC3, 0x28] before a valid F1Uint32",
+      "wire_hex": "19135d0f000a030305c3282155"
+    },
+    {
+      "name": "field0_key_zero_invalid",
+      "category": "CorruptField0",
+      "description": "Field #0 SchemaMeta fields map containing illegal field number 0",
+      "wire_hex": "19155d11000a0301076261642155"
+    },
+    {
+      "name": "field0_key_exceeds_max_field",
+      "category": "CorruptField0",
+      "description": "Field #0 SchemaMeta fields map containing field number 536870912 (\u003e 536870911)",
+      "wire_hex": "19255d21000a03000000002000000000076261642155"
+    },
+    {
+      "name": "field0_unknown_wire_string_invalid_utf8",
+      "category": "InvalidUTF8",
+      "description": "Field #0 SchemaMeta containing unknown field #9 WireString with invalid UTF-8 [0xFF, 0xFE]",
+      "wire_hex": "190b6a0205fffe2155"
+    },
+    {
+      "name": "submsg_depth_33_exceeded_all_tiers",
+      "category": "MaliciousDepthBomb",
+      "description": "33 nested WireSubMsg layers exceeding MaxNestingDepth=32 across all schema and blind tiers",
+      "wire_hex": "3202c53202bf3202b93202b33202ad3202a73202a132029b32029532028f32028932028332027d32027732027132026b32026532025f32025932025332024d32024732024132023b32023532022f32022932022332021d32021732021132020b3202052113"
+    },
+    {
+      "name": "unknown_wire_string_invalid_utf8",
+      "category": "InvalidUTF8",
+      "description": "Unknown field #99 WireString containing invalid UTF-8 [0xFF, 0xFE] testing schema skip and OpaqueSplice UTF-8 validation",
+      "blind_only": true,
+      "wire_hex": "2155ea1805fffe"
     }
   ]
 }

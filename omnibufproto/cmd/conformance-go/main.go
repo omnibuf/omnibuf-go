@@ -210,13 +210,16 @@ func handlePluginTier(req *conformance.ConformanceRequest) *conformance.Conforma
 		}
 
 		if req.SelfDescribing {
-			out, err := (omnibuf.MarshalOptions{Deterministic: true, SelfDescribing: true}).Marshal(&msg)
+			out, err := msg.TryMarshalOmniBufSelfDescribingAppend(nil)
 			if err != nil {
 				return &conformance.ConformanceResponse{SerializeError: err.Error()}
 			}
 			return &conformance.ConformanceResponse{OmniBufPayload: out}
 		}
-		dst := msg.MarshalOmniBufAppend(nil)
+		dst, err := msg.TryMarshalOmniBufAppend(nil)
+		if err != nil {
+			return &conformance.ConformanceResponse{SerializeError: err.Error()}
+		}
 		return &conformance.ConformanceResponse{
 			OmniBufPayload: dst,
 		}
@@ -351,11 +354,20 @@ func handlePluginTier(req *conformance.ConformanceRequest) *conformance.Conforma
 			}
 		}
 
-		dst := msg.MarshalOmniBufAppend(nil)
+		if req.SelfDescribing {
+			out, err := msg.TryMarshalOmniBufSelfDescribingAppend(nil)
+			if err != nil {
+				return &conformance.ConformanceResponse{SerializeError: err.Error()}
+			}
+			return &conformance.ConformanceResponse{OmniBufPayload: out}
+		}
+		dst, err := msg.TryMarshalOmniBufAppend(nil)
+		if err != nil {
+			return &conformance.ConformanceResponse{SerializeError: err.Error()}
+		}
 		return &conformance.ConformanceResponse{
 			OmniBufPayload: dst,
 		}
-
 	default:
 		return &conformance.ConformanceResponse{
 			Skipped: "plugin tier generated for PeerUpdate and TestAllTypes",

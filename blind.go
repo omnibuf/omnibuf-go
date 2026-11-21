@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"maps"
 	"math"
-	"reflect"
 )
 
 // ErrNonFiniteFloat is returned by DecodeBlindJSON when a packet contains NaN or +-Infinity.
@@ -246,7 +245,7 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 			if fnum == 0 {
 				return nil, fmt.Errorf("omnibuf: invalid field #0 inside SchemaMeta")
 			}
-			nextPos, err := skipValueWithDepth(data, pos, wt, depth)
+			nextPos, err := skipValueWithDepthChecked(data, pos, wt, depth, true)
 			if err != nil {
 				return nil, err
 			}
@@ -554,11 +553,11 @@ func decodeBlindWithSchema(data []byte, inherited *blindSchema, depth int) (map[
 				return nil, err
 			}
 			if prev, ok := out[name]; ok {
-				a, b := reflect.ValueOf(prev), reflect.ValueOf(arr)
-				if a.Type() != b.Type() {
-					return nil, fmt.Errorf("omnibuf: array element type changed")
+				merged, err := appendBlindSlices(prev, arr)
+				if err != nil {
+					return nil, err
 				}
-				arr = reflect.AppendSlice(a, b).Interface()
+				arr = merged
 			}
 			out[name] = arr
 			pos = next
@@ -759,7 +758,7 @@ func parseBlindContainerShape(data []byte, pos int, wt uint8, depth int) (*blind
 	}
 	var merged *blindShape
 	for range count {
-		nextP, err := validateContainerEntry(body, p, keyWT, depth+1)
+		nextP, err := validateContainerEntryChecked(body, p, keyWT, depth+1, true)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -959,6 +958,79 @@ func validateField0(data []byte, pos int, wt uint8, depth int) (int, error) {
 	return next, nil
 }
 
+func appendBlindSlices(prev, next any) (any, error) {
+	switch a := prev.(type) {
+	case []uint64:
+		b, ok := next.([]uint64)
+		if !ok {
+			return nil, fmt.Errorf("omnibuf: array element type changed")
+		}
+		return append(a, b...), nil
+	case []int64:
+		b, ok := next.([]int64)
+		if !ok {
+			return nil, fmt.Errorf("omnibuf: array element type changed")
+		}
+		return append(a, b...), nil
+	case []bool:
+		b, ok := next.([]bool)
+		if !ok {
+			return nil, fmt.Errorf("omnibuf: array element type changed")
+		}
+		return append(a, b...), nil
+	case []string:
+		b, ok := next.([]string)
+		if !ok {
+			return nil, fmt.Errorf("omnibuf: array element type changed")
+		}
+		return append(a, b...), nil
+	case [][]byte:
+		b, ok := next.([][]byte)
+		if !ok {
+			return nil, fmt.Errorf("omnibuf: array element type changed")
+		}
+		return append(a, b...), nil
+	case []uint32:
+		b, ok := next.([]uint32)
+		if !ok {
+			return nil, fmt.Errorf("omnibuf: array element type changed")
+		}
+		return append(a, b...), nil
+	case []int32:
+		b, ok := next.([]int32)
+		if !ok {
+			return nil, fmt.Errorf("omnibuf: array element type changed")
+		}
+		return append(a, b...), nil
+	case []float32:
+		b, ok := next.([]float32)
+		if !ok {
+			return nil, fmt.Errorf("omnibuf: array element type changed")
+		}
+		return append(a, b...), nil
+	case []float64:
+		b, ok := next.([]float64)
+		if !ok {
+			return nil, fmt.Errorf("omnibuf: array element type changed")
+		}
+		return append(a, b...), nil
+	case []map[string]any:
+		b, ok := next.([]map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("omnibuf: array element type changed")
+		}
+		return append(a, b...), nil
+	case []any:
+		b, ok := next.([]any)
+		if !ok {
+			return nil, fmt.Errorf("omnibuf: array element type changed")
+		}
+		return append(a, b...), nil
+	default:
+		return nil, fmt.Errorf("omnibuf: array element type changed")
+	}
+}
+
 func decodeArrayBlind(body []byte, schema *blindSchema, depth int) (any, error) {
 	if depth > MaxNestingDepth {
 		return nil, fmt.Errorf("omnibuf: array nesting limit exceeded")
@@ -967,68 +1039,203 @@ func decodeArrayBlind(body []byte, schema *blindSchema, depth int) (any, error) 
 	if !ok {
 		return nil, fmt.Errorf("omnibuf: invalid array header")
 	}
-	var typ reflect.Type
 	switch elem {
 	case wireUint:
-		typ = reflect.TypeOf(uint64(0))
+		out := make([]uint64, count)
+		for i := range count {
+			v, vn := decodeVarint(body[p:])
+			if vn == 0 {
+				return nil, fmt.Errorf("omnibuf: truncated array varint")
+			}
+			out[i] = v
+			p += vn
+		}
+		if p != len(body) {
+			return nil, fmt.Errorf("omnibuf: array count/length mismatch")
+		}
+		return out, nil
 	case wireSint:
-		typ = reflect.TypeOf(int64(0))
+		out := make([]int64, count)
+		for i := range count {
+			v, vn := decodeVarint(body[p:])
+			if vn == 0 {
+				return nil, fmt.Errorf("omnibuf: truncated array sint")
+			}
+			out[i] = decodeZigZag(v)
+			p += vn
+		}
+		if p != len(body) {
+			return nil, fmt.Errorf("omnibuf: array count/length mismatch")
+		}
+		return out, nil
 	case wireBoolFalse:
-		typ = reflect.TypeOf(false)
+		if len(body)-p != count {
+			return nil, fmt.Errorf("omnibuf: array count/length mismatch")
+		}
+		out := make([]bool, count)
+		for i := range count {
+			b := body[p+i]
+			if b > 1 {
+				return nil, fmt.Errorf("omnibuf: invalid bool byte in array")
+			}
+			out[i] = b == 1
+		}
+		return out, nil
 	case wireString:
-		typ = reflect.TypeOf("")
+		out := make([]string, count)
+		for i := range count {
+			vBytes, nextP, err := readStrSlice(body, p)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = string(vBytes)
+			p = nextP
+		}
+		if p != len(body) {
+			return nil, fmt.Errorf("omnibuf: array count/length mismatch")
+		}
+		return out, nil
 	case wireBytes:
-		typ = reflect.TypeOf([]byte{})
+		out := make([][]byte, count)
+		for i := range count {
+			vBytes, nextP, err := readLenSlice(body, p, 0)
+			if err != nil {
+				return nil, err
+			}
+			cp := make([]byte, len(vBytes))
+			copy(cp, vBytes)
+			out[i] = cp
+			p = nextP
+		}
+		if p != len(body) {
+			return nil, fmt.Errorf("omnibuf: array count/length mismatch")
+		}
+		return out, nil
 	case wireFixed32:
-		typ = reflect.TypeOf(uint32(0))
+		if len(body)-p != count*4 {
+			return nil, fmt.Errorf("omnibuf: array count/length mismatch")
+		}
+		out := make([]uint32, count)
+		for i := range count {
+			out[i] = binary.LittleEndian.Uint32(body[p+i*4:])
+		}
+		return out, nil
 	case wireFixed64:
-		typ = reflect.TypeOf(uint64(0))
+		if len(body)-p != count*8 {
+			return nil, fmt.Errorf("omnibuf: array count/length mismatch")
+		}
+		out := make([]uint64, count)
+		for i := range count {
+			out[i] = binary.LittleEndian.Uint64(body[p+i*8:])
+		}
+		return out, nil
 	case wireSfixed32:
-		typ = reflect.TypeOf(int32(0))
+		if len(body)-p != count*4 {
+			return nil, fmt.Errorf("omnibuf: array count/length mismatch")
+		}
+		out := make([]int32, count)
+		for i := range count {
+			out[i] = int32(binary.LittleEndian.Uint32(body[p+i*4:]))
+		}
+		return out, nil
 	case wireSfixed64:
-		typ = reflect.TypeOf(int64(0))
+		if len(body)-p != count*8 {
+			return nil, fmt.Errorf("omnibuf: array count/length mismatch")
+		}
+		out := make([]int64, count)
+		for i := range count {
+			out[i] = int64(binary.LittleEndian.Uint64(body[p+i*8:]))
+		}
+		return out, nil
 	case wireFloat32:
-		typ = reflect.TypeOf(float32(0))
+		if len(body)-p != count*4 {
+			return nil, fmt.Errorf("omnibuf: array count/length mismatch")
+		}
+		out := make([]float32, count)
+		for i := range count {
+			out[i] = math.Float32frombits(binary.LittleEndian.Uint32(body[p+i*4:]))
+		}
+		return out, nil
 	case wireFloat64:
-		typ = reflect.TypeOf(float64(0))
-	case wireSubMsg, wireMap:
-		typ = reflect.TypeOf(map[string]any{})
-	case wireArray, wireExtended:
-		typ = reflect.TypeOf((*any)(nil)).Elem()
+		if len(body)-p != count*8 {
+			return nil, fmt.Errorf("omnibuf: array count/length mismatch")
+		}
+		out := make([]float64, count)
+		for i := range count {
+			out[i] = math.Float64frombits(binary.LittleEndian.Uint64(body[p+i*8:]))
+		}
+		return out, nil
+	case wireSubMsg:
+		out := make([]map[string]any, count)
+		for i := range count {
+			vBytes, nextP, err := readLenSlice(body, p, 0)
+			if err != nil {
+				return nil, err
+			}
+			subMap, err := decodeBlindWithSchema(vBytes, schema, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = subMap
+			p = nextP
+		}
+		if p != len(body) {
+			return nil, fmt.Errorf("omnibuf: array count/length mismatch")
+		}
+		return out, nil
+	case wireMap:
+		out := make([]map[string]any, count)
+		for i := range count {
+			nested, nextP, err := readLenSlice(body, p, 3)
+			if err != nil {
+				return nil, err
+			}
+			mp, err := decodeMapBodyBlind(nested, schema, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = mp
+			p = nextP
+		}
+		if p != len(body) {
+			return nil, fmt.Errorf("omnibuf: array count/length mismatch")
+		}
+		return out, nil
+	case wireArray:
+		out := make([]any, count)
+		for i := range count {
+			nested, nextP, err := readLenSlice(body, p, 2)
+			if err != nil {
+				return nil, err
+			}
+			arr, err := decodeArrayBlind(nested, schema, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = arr
+			p = nextP
+		}
+		if p != len(body) {
+			return nil, fmt.Errorf("omnibuf: array count/length mismatch")
+		}
+		return out, nil
+	case wireExtended:
+		out := make([]any, count)
+		for i := range count {
+			v, nextP, err := decodeMapValBlind(body, p, elem, schema, depth)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = v
+			p = nextP
+		}
+		if p != len(body) {
+			return nil, fmt.Errorf("omnibuf: array count/length mismatch")
+		}
+		return out, nil
 	default:
 		return nil, fmt.Errorf("omnibuf: unsupported array element type %d", elem)
 	}
-	out := reflect.MakeSlice(reflect.SliceOf(typ), count, count)
-	for i := 0; i < count; i++ {
-		var value any
-		var next int
-		var err error
-		switch elem {
-		case wireArray:
-			var nested []byte
-			nested, next, err = readLenSlice(body, p, 2)
-			if err == nil {
-				value, err = decodeArrayBlind(nested, schema, depth+1)
-			}
-		case wireMap:
-			var nested []byte
-			nested, next, err = readLenSlice(body, p, 3)
-			if err == nil {
-				value, err = decodeMapBodyBlind(nested, schema, depth+1)
-			}
-		default:
-			value, next, err = decodeMapValBlind(body, p, elem, schema, depth)
-		}
-		if err != nil {
-			return nil, err
-		}
-		out.Index(i).Set(reflect.ValueOf(value))
-		p = next
-	}
-	if p != len(body) {
-		return nil, fmt.Errorf("omnibuf: array count/length mismatch")
-	}
-	return out.Interface(), nil
 }
 
 func decodeMapBodyBlind(body []byte, schema *blindSchema, depth int) (map[string]any, error) {

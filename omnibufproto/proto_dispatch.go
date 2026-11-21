@@ -59,9 +59,12 @@ func hasAllOpenStructFields(t reflect.Type, md protoreflect.MessageDescriptor, v
 	}
 	visited[t] = true
 
-	pbFieldCount := 0
+	matched := make(map[protoreflect.FieldNumber]bool, md.Fields().Len())
 	for i := 0; i < t.NumField(); i++ {
 		sf := t.Field(i)
+		if sf.Anonymous && sf.Type.Implements(protoMessageType) {
+			return false
+		}
 		if !sf.IsExported() {
 			continue
 		}
@@ -69,7 +72,6 @@ func hasAllOpenStructFields(t reflect.Type, md protoreflect.MessageDescriptor, v
 		if pbTag == "" || pbTag == "-" {
 			continue
 		}
-		pbFieldCount++
 		parts := strings.Split(pbTag, ",")
 		if len(parts) < 2 {
 			continue
@@ -78,10 +80,12 @@ func hasAllOpenStructFields(t reflect.Type, md protoreflect.MessageDescriptor, v
 		if err != nil {
 			continue
 		}
-		fd := md.Fields().ByNumber(protoreflect.FieldNumber(fnum))
+		fn := protoreflect.FieldNumber(fnum)
+		fd := md.Fields().ByNumber(fn)
 		if fd == nil {
 			continue
 		}
+		matched[fn] = true
 		switch {
 		case fd.IsMap():
 			if fd.MapValue().Message() != nil && sf.Type.Kind() == reflect.Map {
@@ -101,5 +105,5 @@ func hasAllOpenStructFields(t reflect.Type, md protoreflect.MessageDescriptor, v
 			}
 		}
 	}
-	return md.Fields().Len() == 0 || pbFieldCount > 0
+	return len(matched) == md.Fields().Len()
 }

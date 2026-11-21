@@ -1,11 +1,14 @@
 package main
 
 import (
+	"cmp"
 	"flag"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
+	"github.com/omnibuf/omnibuf-go"
 	"github.com/omnibuf/omnibuf-go/wire"
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/proto"
@@ -276,8 +279,14 @@ func generateFile(gen *protogen.Plugin, file *protogen.File) {
 	g.P("import (")
 	g.P(`	"encoding/binary"`)
 	g.P(`	"fmt"`)
+	if generatedFileUsesIter(file) {
+		g.P(`	"iter"`)
+	}
 	if generatedFileUsesMath(file) {
 		g.P(`	"math"`)
+	}
+	if len(file.Messages) > 0 {
+		g.P(`	"unsafe"`)
 	}
 	g.P()
 	g.P(`	"github.com/omnibuf/omnibuf-go"`)
@@ -291,6 +300,65 @@ func generateFile(gen *protogen.Plugin, file *protogen.File) {
 			generateOpaqueMessage(g, msg)
 		}
 	}
+}
+
+func buildMessageSchemaMeta(md protoreflect.MessageDescriptor, schemaDepth int, active map[protoreflect.FullName]bool) (*omnibuf.SchemaMeta, bool) {
+	if md == nil || schemaDepth+1 > omnibuf.MaxNestingDepth {
+		return nil, false
+	}
+	if active[md.FullName()] {
+		return nil, true
+	}
+	if active == nil {
+		active = make(map[protoreflect.FullName]bool)
+	}
+	active[md.FullName()] = true
+	defer delete(active, md.FullName())
+
+	cyclic := false
+	fields := md.Fields()
+	nFields := fields.Len()
+	meta := &omnibuf.SchemaMeta{
+		TypeName: string(md.Name()),
+		Fields:   make(map[uint32]string, nFields),
+	}
+	for i := range nFields {
+		fd := fields.Get(i)
+		fnum := uint32(fd.Number())
+		meta.Fields[fnum] = string(fd.Name())
+		var childMD protoreflect.MessageDescriptor
+		if fd.IsMap() && fd.MapValue().Kind() == protoreflect.MessageKind {
+			childMD = fd.MapValue().Message()
+		} else if !fd.IsMap() && fd.Kind() == protoreflect.MessageKind {
+			childMD = fd.Message()
+		}
+		if childMD != nil && schemaDepth+3 <= omnibuf.MaxNestingDepth {
+			child, childCyclic := buildMessageSchemaMeta(childMD, schemaDepth+2, active)
+			if childCyclic {
+				cyclic = true
+			}
+			if child != nil {
+				if meta.Children == nil {
+					meta.Children = make(map[uint32]*omnibuf.SchemaMeta)
+				}
+				meta.Children[fnum] = child
+			}
+		}
+	}
+	return meta, cyclic
+}
+
+func formatByteSliceLiteral(b []byte) string {
+	var sb strings.Builder
+	sb.WriteString("[]byte{")
+	for i, v := range b {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		fmt.Fprintf(&sb, "0x%02x", v)
+	}
+	sb.WriteByte('}')
+	return sb.String()
 }
 
 func emitConstTag(g *protogen.GeneratedFile, dstVar string, rawTag uint64) {
@@ -338,9 +406,88 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 		return fmt.Sprintf("expectedMask%d", word)
 	}
 
+	orderedFields := slices.Clone(msg.Fields)
+	slices.SortFunc(orderedFields, func(a, b *protogen.Field) int {
+		return cmp.Compare(a.Desc.Number(), b.Desc.Number())
+	})
+
+	g.P("// MinWireSizeOmniBuf returns a fast lower bound on the encoded OmniBuf byte size of ", typeName, ".")
+	g.P("func (x *", typeName, ") MinWireSizeOmniBuf(depth int) int {")
+	g.P("	if x == nil || depth > 8 {")
+	g.P("		return 0")
+	g.P("	}")
+	constMinBytes := 0
+	for _, f := range orderedFields {
+		if f.Desc.IsMap() || f.Desc.IsList() || f.Desc.Kind() == protoreflect.MessageKind {
+			continue
+		}
+		switch f.Desc.Kind() {
+		case protoreflect.BoolKind:
+			constMinBytes += 1
+		case protoreflect.Fixed32Kind, protoreflect.Sfixed32Kind, protoreflect.FloatKind:
+			constMinBytes += 5
+		case protoreflect.Fixed64Kind, protoreflect.Sfixed64Kind, protoreflect.DoubleKind:
+			constMinBytes += 9
+		default:
+			constMinBytes += 2
+		}
+	}
+	g.P("	total := ", constMinBytes)
+	for _, f := range orderedFields {
+		if f.Desc.IsMap() {
+			continue
+		}
+		if f.Desc.IsList() {
+			switch f.Desc.Kind() {
+			case protoreflect.StringKind:
+				g.P("	if len(x.", f.GoName, ") > 0 {")
+				g.P("		total += 4")
+				g.P("		for _, s := range x.", f.GoName, " {")
+				g.P("			total += 1 + len(s)")
+				g.P("		}")
+				g.P("	}")
+			case protoreflect.BytesKind:
+				g.P("	if len(x.", f.GoName, ") > 0 {")
+				g.P("		total += 4")
+				g.P("		for _, b := range x.", f.GoName, " {")
+				g.P("			total += 1 + len(b)")
+				g.P("		}")
+				g.P("	}")
+			case protoreflect.MessageKind:
+				g.P("	if len(x.", f.GoName, ") > 0 {")
+				g.P("		total += 4")
+				g.P("		for _, elem := range x.", f.GoName, " {")
+				g.P("			total += 2 + elem.MinWireSizeOmniBuf(depth+1)")
+				g.P("		}")
+				g.P("	}")
+			case protoreflect.Fixed32Kind, protoreflect.Sfixed32Kind, protoreflect.FloatKind:
+				g.P("	total += 3 + len(x.", f.GoName, ")*4")
+			case protoreflect.Fixed64Kind, protoreflect.Sfixed64Kind, protoreflect.DoubleKind:
+				g.P("	total += 3 + len(x.", f.GoName, ")*8")
+			default:
+				g.P("	total += 3 + len(x.", f.GoName, ")")
+			}
+			continue
+		}
+		switch f.Desc.Kind() {
+		case protoreflect.StringKind, protoreflect.BytesKind:
+			g.P("	total += len(x.", f.GoName, ")")
+		case protoreflect.MessageKind:
+			g.P("	if x.", f.GoName, " != nil {")
+			g.P("		total += 3 + x.", f.GoName, ".MinWireSizeOmniBuf(depth+1)")
+			g.P("	}")
+		}
+	}
+	g.P("	return total")
+	g.P("}")
+	g.P()
+
 	g.P("// MarshalOmniBufAppend encodes ", typeName, " in a single forward pass using generated field tags.")
 	g.P("func (x *", typeName, ") MarshalOmniBufAppend(dst []byte) []byte {")
-	for i, f := range msg.Fields {
+	g.P("	if dst == nil {")
+	g.P("		dst = make([]byte, 0, max(64, x.MinWireSizeOmniBuf(0)+64))")
+	g.P("	}")
+	for i, f := range orderedFields {
 		fnum := uint16(f.Desc.Number())
 		wt := wireTypeForField(f)
 		rawTag := (uint64(fnum) << 4) | uint64(wt)
@@ -358,9 +505,15 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 			g.P("\tif x.", f.GoName, " != nil {")
 			emitConstTag(g, "dst", rawTag)
 			g.P("		lenPos_", i, " := len(dst)")
-			g.P("		dst = append(dst, 0, 0)")
-			g.P("		dst = x.", f.GoName, ".MarshalOmniBufAppend(dst)")
+			g.P("		if x.", f.GoName, ".MinWireSizeOmniBuf(0) > wire.Max2BContainerLen {")
+			g.P("			dst = append(dst, 0, 0, 0, 0)")
+			g.P("			dst = x.", f.GoName, ".MarshalOmniBufAppend(dst)")
+			g.P("			dst = wire.BackpatchContainerLen4(dst, lenPos_", i, ")")
+			g.P("		} else {")
+			g.P("			dst = append(dst, 0, 0)")
+			g.P("			dst = x.", f.GoName, ".MarshalOmniBufAppend(dst)")
 			emitBackpatchLen(g, "dst", fmt.Sprintf("lenPos_%d", i))
+			g.P("		}")
 			g.P("\t}")
 			continue
 		}
@@ -374,14 +527,26 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 		if f.Desc.IsList() {
 			switch f.Desc.Kind() {
 			case protoreflect.StringKind:
+				g.P("	arrMin_", i, " := 2")
+				g.P("	for _, s := range x.", f.GoName, " {")
+				g.P("		arrMin_", i, " += 1 + len(s)")
+				g.P("	}")
 				g.P("	lenPos_", i, " := len(dst)")
-				g.P("	dst = append(dst, 0, 0, wire.WireString)")
+				g.P("	if arrMin_", i, " > wire.Max2BContainerLen {")
+				g.P("		dst = append(dst, 0, 0, 0, 0, wire.WireString)")
+				g.P("	} else {")
+				g.P("		dst = append(dst, 0, 0, wire.WireString)")
+				g.P("	}")
 				g.P("	dst = wire.AppendVarint(dst, uint64(len(x.", f.GoName, ")))")
 				g.P("	for _, s := range x.", f.GoName, " {")
 				g.P("		dst = wire.AppendVarint(dst, uint64(len(s)))")
 				g.P("		dst = append(dst, s...)")
 				g.P("	}")
+				g.P("	if arrMin_", i, " > wire.Max2BContainerLen {")
+				g.P("		dst = wire.BackpatchContainerLen4(dst, lenPos_", i, ")")
+				g.P("	} else {")
 				emitBackpatchLen(g, "dst", fmt.Sprintf("lenPos_%d", i))
+				g.P("	}")
 			case protoreflect.BytesKind:
 				g.P("	dst = wire.EncodeBytesArr(dst, x.", f.GoName, ")")
 			case protoreflect.BoolKind:
@@ -409,18 +574,36 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 			case protoreflect.DoubleKind:
 				g.P("	dst = wire.EncodeFloat64Arr(dst, x.", f.GoName, ")")
 			case protoreflect.MessageKind:
+				g.P("	arrMin_", i, " := 2")
+				g.P("	for _, elem := range x.", f.GoName, " {")
+				g.P("		arrMin_", i, " += 2 + elem.MinWireSizeOmniBuf(0)")
+				g.P("	}")
 				g.P("	lenPos_", i, " := len(dst)")
-				g.P("	dst = append(dst, 0, 0, wire.WireSubMsg)")
+				g.P("	if arrMin_", i, " > wire.Max2BContainerLen {")
+				g.P("		dst = append(dst, 0, 0, 0, 0, wire.WireSubMsg)")
+				g.P("	} else {")
+				g.P("		dst = append(dst, 0, 0, wire.WireSubMsg)")
+				g.P("	}")
 				g.P("	dst = wire.AppendVarint(dst, uint64(len(x.", f.GoName, ")))")
 				g.P("	for _, elem := range x.", f.GoName, " {")
 				g.P("		eLenPos := len(dst)")
-				g.P("		dst = append(dst, 0, 0)")
-				g.P("		if elem != nil {")
+				g.P("		if elem != nil && elem.MinWireSizeOmniBuf(0) > wire.Max2BContainerLen {")
+				g.P("			dst = append(dst, 0, 0, 0, 0)")
 				g.P("			dst = elem.MarshalOmniBufAppend(dst)")
-				g.P("		}")
+				g.P("			dst = wire.BackpatchContainerLen4(dst, eLenPos)")
+				g.P("		} else {")
+				g.P("			dst = append(dst, 0, 0)")
+				g.P("			if elem != nil {")
+				g.P("				dst = elem.MarshalOmniBufAppend(dst)")
+				g.P("			}")
 				emitBackpatchLen(g, "dst", "eLenPos")
+				g.P("		}")
 				g.P("	}")
+				g.P("	if arrMin_", i, " > wire.Max2BContainerLen {")
+				g.P("		dst = wire.BackpatchContainerLen4(dst, lenPos_", i, ")")
+				g.P("	} else {")
 				emitBackpatchLen(g, "dst", fmt.Sprintf("lenPos_%d", i))
+				g.P("	}")
 			}
 			continue
 		}
@@ -455,6 +638,108 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 	g.P("}")
 	g.P()
 
+	g.P("// ValidateOmniBufUTF8 verifies that all string fields in ", typeName, " contain valid UTF-8.")
+	g.P("func (x *", typeName, ") ValidateOmniBufUTF8() error {")
+	g.P("	if x == nil {")
+	g.P("		return nil")
+	g.P("	}")
+	for _, f := range msg.Fields {
+		if f.Desc.IsMap() {
+			g.P("	for k := range x.", f.GoName, " {")
+			g.P("		if !wire.ValidUTF8String(k) {")
+			g.P(fmt.Sprintf(`			return fmt.Errorf("omnibuf: field %s: map key contains invalid UTF-8")`, f.Desc.TextName()))
+			g.P("		}")
+			g.P("	}")
+			continue
+		}
+		if f.Desc.IsList() {
+			switch f.Desc.Kind() {
+			case protoreflect.StringKind:
+				g.P("	for _, s := range x.", f.GoName, " {")
+				g.P("		if !wire.ValidUTF8String(s) {")
+				g.P(fmt.Sprintf(`			return fmt.Errorf("omnibuf: field %s: string element contains invalid UTF-8")`, f.Desc.TextName()))
+				g.P("		}")
+				g.P("	}")
+			case protoreflect.MessageKind:
+				if messageHasStringFields(f.Message, nil) {
+					g.P("	for _, elem := range x.", f.GoName, " {")
+					g.P("		if elem != nil {")
+					g.P("			if err := elem.ValidateOmniBufUTF8(); err != nil {")
+					g.P("				return err")
+					g.P("			}")
+					g.P("		}")
+					g.P("	}")
+				}
+			}
+			continue
+		}
+		switch f.Desc.Kind() {
+		case protoreflect.StringKind:
+			g.P("	if !wire.ValidUTF8String(x.", f.GoName, ") {")
+			g.P(fmt.Sprintf(`		return fmt.Errorf("omnibuf: field %s: string contains invalid UTF-8")`, f.Desc.TextName()))
+			g.P("	}")
+		case protoreflect.MessageKind:
+			if messageHasStringFields(f.Message, nil) {
+				g.P("	if x.", f.GoName, " != nil {")
+				g.P("		if err := x.", f.GoName, ".ValidateOmniBufUTF8(); err != nil {")
+				g.P("			return err")
+				g.P("		}")
+				g.P("	}")
+			}
+		}
+	}
+	g.P("	return nil")
+	g.P("}")
+	g.P()
+
+	g.P("// TryMarshalOmniBufAppend validates UTF-8 on string fields and appends ", typeName, " to dst.")
+	g.P("func (x *", typeName, ") TryMarshalOmniBufAppend(dst []byte) ([]byte, error) {")
+	g.P("	if x == nil {")
+	g.P(`		return nil, fmt.Errorf("omnibuf: Marshal requires non-nil pointer")`)
+	g.P("	}")
+	g.P("	if err := x.ValidateOmniBufUTF8(); err != nil {")
+	g.P("		return nil, err")
+	g.P("	}")
+	g.P("	return x.MarshalOmniBufAppend(dst), nil")
+	g.P("}")
+	g.P()
+
+	schemaMeta, cyclicSchema := buildMessageSchemaMeta(msg.Desc, 1, nil)
+	if !cyclicSchema {
+		field0Bytes := schemaMeta.AppendField0(nil, true)
+		g.P("var _omnibufField0_", typeName, " = ", formatByteSliceLiteral(field0Bytes))
+		g.P()
+		g.P("// MarshalOmniBufSelfDescribingAppend prepends Field #0 SchemaMeta and appends ", typeName, " to dst.")
+		g.P("func (x *", typeName, ") MarshalOmniBufSelfDescribingAppend(dst []byte) []byte {")
+		g.P("	dst = append(dst, _omnibufField0_", typeName, "...)")
+		g.P("	return x.MarshalOmniBufAppend(dst)")
+		g.P("}")
+		g.P()
+		g.P("// TryMarshalOmniBufSelfDescribingAppend validates UTF-8, prepends Field #0 SchemaMeta, and appends ", typeName, " to dst.")
+		g.P("func (x *", typeName, ") TryMarshalOmniBufSelfDescribingAppend(dst []byte) ([]byte, error) {")
+		g.P("	if x == nil {")
+		g.P(`		return nil, fmt.Errorf("omnibuf: Marshal requires non-nil pointer")`)
+		g.P("	}")
+		g.P("	if err := x.ValidateOmniBufUTF8(); err != nil {")
+		g.P("		return nil, err")
+		g.P("	}")
+		g.P("	return x.MarshalOmniBufSelfDescribingAppend(dst), nil")
+		g.P("}")
+		g.P()
+	} else {
+		g.P("// MarshalOmniBufSelfDescribingAppend prepends Field #0 SchemaMeta and appends ", typeName, " to dst.")
+		g.P("func (x *", typeName, ") MarshalOmniBufSelfDescribingAppend(dst []byte) []byte {")
+		g.P("	out, _ := (omnibuf.MarshalOptions{Deterministic: true, SelfDescribing: true}).MarshalAppend(dst, x)")
+		g.P("	return out")
+		g.P("}")
+		g.P()
+		g.P("// TryMarshalOmniBufSelfDescribingAppend validates UTF-8, prepends Field #0 SchemaMeta, and appends ", typeName, " to dst.")
+		g.P("func (x *", typeName, ") TryMarshalOmniBufSelfDescribingAppend(dst []byte) ([]byte, error) {")
+		g.P("	return (omnibuf.MarshalOptions{Deterministic: true, SelfDescribing: true}).MarshalAppend(dst, x)")
+		g.P("}")
+		g.P()
+	}
+
 	var clearParams []string
 	var clearArgs []string
 	var maskCheckConds []string
@@ -475,6 +760,10 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 		if f.Desc.IsMap() {
 			g.P("		clear(x.", f.GoName, ")")
 		} else if f.Desc.IsList() {
+			switch f.Desc.Kind() {
+			case protoreflect.StringKind, protoreflect.BytesKind, protoreflect.MessageKind:
+				g.P("		clear(x.", f.GoName, ")")
+			}
 			g.P("		x.", f.GoName, " = x.", f.GoName, "[:0]")
 		} else {
 			switch f.Desc.Kind() {
@@ -495,8 +784,14 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 	g.P("}")
 	g.P()
 
+	g.P("var _omnibufProtoState_", typeName, " = omnibuf.InspectProtoState[", typeName, "]()")
+	g.P()
+
 	g.P("// UnmarshalOmniBuf decodes data into ", typeName, " using generated switch dispatch.")
 	g.P("func (x *", typeName, ") UnmarshalOmniBuf(data []byte, zeroCopy bool) error {")
+	g.P("	if x == nil {")
+	g.P(`		return fmt.Errorf("omnibuf: Unmarshal requires non-nil pointer")`)
+	g.P("	}")
 	g.P("	return x.decodeOmniBuf(data, zeroCopy, 0, false)")
 	g.P("}")
 	g.P()
@@ -505,6 +800,7 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 	g.P("	if depth > omnibuf.MaxNestingDepth {")
 	g.P(`		return fmt.Errorf("omnibuf: max nesting depth exceeded")`)
 	g.P("	}")
+	g.P("	_omnibufProtoState_", typeName, ".Reset(unsafe.Pointer(x), merge)")
 	for w := 0; w < numWords; w++ {
 		g.P(fmt.Sprintf("	const %s uint64 = 0x%x", expectedVar(w), expectedMasks[w]))
 		g.P("	var ", maskVar(w), " uint64")
@@ -606,10 +902,12 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 			g.P("			pos += bn")
 			g.P("			body := data[pos : pos+int(byteLen)]")
 			g.P("			pos += int(byteLen)")
-			g.P("			if !merge && (", mv, "&(1<<", bit, ")) == 0 {")
-			g.P("				x.", f.GoName, " = x.", f.GoName, "[:0]")
-			g.P("			}")
-			g.P("			", mv, " |= 1 << ", bit)
+			if f.Desc.Kind() != protoreflect.StringKind && f.Desc.Kind() != protoreflect.BytesKind && f.Desc.Kind() != protoreflect.MessageKind {
+				g.P("			if !merge && (", mv, "&(1<<", bit, ")) == 0 {")
+				g.P("				x.", f.GoName, " = x.", f.GoName, "[:0]")
+				g.P("			}")
+				g.P("			", mv, " |= 1 << ", bit)
+			}
 			switch f.Desc.Kind() {
 			case protoreflect.StringKind:
 				g.P("			if len(body) < 2 || body[0] != wire.WireString {")
@@ -620,36 +918,74 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 				g.P("			if cn == 0 || cu > uint64(len(body)-p) {")
 				g.P(`				return fmt.Errorf("omnibuf: invalid string array count")`)
 				g.P("			}")
+				g.P("			oldSlice := x.", f.GoName)
+				g.P("			oldLen := len(oldSlice)")
+				g.P("			firstOcc := !merge && (", mv, "&(1<<", bit, ")) == 0")
+				g.P("			if firstOcc {")
+				g.P("				x.", f.GoName, " = oldSlice[:0]")
+				g.P("			}")
+				g.P("			", mv, " |= 1 << ", bit)
 				g.P("			count := int(cu)")
 				g.P("			start := len(x.", f.GoName, ")")
 				g.P("			total := start + count")
+				g.P("			reused := false")
 				g.P("			if cap(x.", f.GoName, ") < total {")
 				g.P("				next := make([]string, total, wire.GrowCapacity(cap(x.", f.GoName, "), total))")
 				g.P("				copy(next, x.", f.GoName, ")")
 				g.P("				x.", f.GoName, " = next")
 				g.P("			} else {")
 				g.P("				x.", f.GoName, " = x.", f.GoName, "[:total]")
+				g.P("				reused = true")
 				g.P("			}")
 				g.P("			for i := 0; i < count; i++ {")
 				g.P("				l, ln := wire.DecodeVarint(body[p:])")
 				g.P("				if ln == 0 || l > uint64(len(body)-(p+ln)) {")
+				g.P("					if reused && firstOcc {")
+				g.P("						clear(oldSlice[:max(oldLen, total)])")
+				g.P("						x.", f.GoName, " = oldSlice[:0]")
+				g.P("					}")
 				g.P(`					return fmt.Errorf("omnibuf: invalid string element")`)
 				g.P("				}")
 				g.P("				p += ln")
 				g.P("				if !wire.ValidUTF8(body[p : p+int(l)]) {")
+				g.P("					if reused && firstOcc {")
+				g.P("						clear(oldSlice[:max(oldLen, total)])")
+				g.P("						x.", f.GoName, " = oldSlice[:0]")
+				g.P("					}")
 				g.P(`					return fmt.Errorf("omnibuf: invalid UTF-8 in string element")`)
 				g.P("				}")
 				g.P("				x.", f.GoName, "[start+i] = wire.DecodeStr(body[p:p+int(l)], zeroCopy)")
 				g.P("				p += int(l)")
 				g.P("			}")
 				g.P("			if p != len(body) {")
+				g.P("				if reused && firstOcc {")
+				g.P("					clear(oldSlice[:max(oldLen, total)])")
+				g.P("					x.", f.GoName, " = oldSlice[:0]")
+				g.P("				}")
 				g.P(`				return fmt.Errorf("omnibuf: string array trailing bytes")`)
 				g.P("			}")
+				g.P("			if reused && firstOcc && total < oldLen {")
+				g.P("				clear(oldSlice[total:oldLen])")
+				g.P("			}")
 			case protoreflect.BytesKind:
+				g.P("			oldSlice := x.", f.GoName)
+				g.P("			oldLen := len(oldSlice)")
+				g.P("			firstOcc := !merge && (", mv, "&(1<<", bit, ")) == 0")
+				g.P("			if firstOcc {")
+				g.P("				x.", f.GoName, " = oldSlice[:0]")
+				g.P("			}")
+				g.P("			", mv, " |= 1 << ", bit)
 				g.P("			var ok bool")
 				g.P("			x.", f.GoName, ", ok = wire.AppendBytesArrBody(x.", f.GoName, ", body, zeroCopy)")
 				g.P("			if !ok {")
+				g.P("				if firstOcc && unsafe.SliceData(x.", f.GoName, ") == unsafe.SliceData(oldSlice) {")
+				g.P("					clear(oldSlice[:oldLen])")
+				g.P("					x.", f.GoName, " = oldSlice[:0]")
+				g.P("				}")
 				g.P(`				return fmt.Errorf("omnibuf: invalid bytes array")`)
+				g.P("			}")
+				g.P("			if firstOcc && len(x.", f.GoName, ") < oldLen && unsafe.SliceData(x.", f.GoName, ") == unsafe.SliceData(oldSlice) {")
+				g.P("				clear(oldSlice[len(x.", f.GoName, "):oldLen])")
 				g.P("			}")
 			case protoreflect.BoolKind:
 				g.P("			var ok bool")
@@ -757,9 +1093,17 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 				g.P("			if cn == 0 || cu > uint64(len(body)-p) {")
 				g.P(`				return fmt.Errorf("omnibuf: invalid submsg array count")`)
 				g.P("			}")
+				g.P("			oldSlice := x.", f.GoName)
+				g.P("			oldLen := len(oldSlice)")
+				g.P("			firstOcc := !merge && (", mv, "&(1<<", bit, ")) == 0")
+				g.P("			if firstOcc {")
+				g.P("				x.", f.GoName, " = oldSlice[:0]")
+				g.P("			}")
+				g.P("			", mv, " |= 1 << ", bit)
 				g.P("			count := int(cu)")
 				g.P("			start := len(x.", f.GoName, ")")
 				g.P("			total := start + count")
+				g.P("			reused := false")
 				g.P("			if cap(x.", f.GoName, ") < total {")
 				g.P("				if _, ok := wire.CountSubMsgArrElems(body); !ok {")
 				g.P(`					return fmt.Errorf("omnibuf: invalid submsg array")`)
@@ -773,10 +1117,15 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 				g.P("				x.", f.GoName, " = next")
 				g.P("			} else {")
 				g.P("				x.", f.GoName, " = x.", f.GoName, "[:total]")
+				g.P("				reused = true")
 				g.P("			}")
 				g.P("			for i := 0; i < count; i++ {")
 				g.P("				el, en := wire.DecodeVarint(body[p:])")
 				g.P("				if en == 0 || el > uint64(len(body)-(p+en)) {")
+				g.P("					if reused && firstOcc {")
+				g.P("						clear(oldSlice[:max(oldLen, total)])")
+				g.P("						x.", f.GoName, " = oldSlice[:0]")
+				g.P("					}")
 				g.P(`					return fmt.Errorf("omnibuf: invalid submsg elem length")`)
 				g.P("				}")
 				g.P("				p += en")
@@ -784,12 +1133,23 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 				g.P("					x.", f.GoName, "[start+i] = new(", elemType, ")")
 				g.P("				}")
 				g.P("				if err := x.", f.GoName, "[start+i].decodeOmniBuf(body[p:p+int(el)], zeroCopy, depth+2, false); err != nil {")
+				g.P("					if reused && firstOcc {")
+				g.P("						clear(oldSlice[:max(oldLen, total)])")
+				g.P("						x.", f.GoName, " = oldSlice[:0]")
+				g.P("					}")
 				g.P("					return err")
 				g.P("				}")
 				g.P("				p += int(el)")
 				g.P("			}")
 				g.P("			if p != len(body) {")
+				g.P("				if reused && firstOcc {")
+				g.P("					clear(oldSlice[:max(oldLen, total)])")
+				g.P("					x.", f.GoName, " = oldSlice[:0]")
+				g.P("				}")
 				g.P(`				return fmt.Errorf("omnibuf: submsg array trailing bytes")`)
+				g.P("			}")
+				g.P("			if reused && firstOcc && total < oldLen {")
+				g.P("				clear(oldSlice[total:oldLen])")
 				g.P("			}")
 			}
 			continue
@@ -1010,8 +1370,7 @@ func generateOpaqueMessage(g *protogen.GeneratedFile, msg *protogen.Message) {
 	g.P("}")
 	g.P()
 	g.P("func (x *", name, ") Unmarshal(b []byte) error {")
-	g.P("	x.raw = b")
-	g.P("	x.dirty = 0")
+	g.P("	*x = ", name, "{raw: b}")
 	g.P("	return nil")
 	g.P("}")
 	g.P()
@@ -1204,6 +1563,26 @@ func generateOpaqueMessage(g *protogen.GeneratedFile, msg *protogen.Message) {
 				g.P("	if (x.dirty & ", bitExpr, ") != 0 { return len(x.", privName, ") }")
 				g.P("	return wire.SubMsgArrLen(x.raw, ", fnum, ")")
 				g.P("}")
+				g.P()
+				g.P("func (x *", name, ") Iter", goName, "() iter.Seq2[int, ", subOpaque, "] {")
+				g.P("	return func(yield func(int, ", subOpaque, ") bool) {")
+				g.P("		if (x.dirty & ", bitExpr, ") != 0 {")
+				g.P("			for i, elem := range x.", privName, " {")
+				g.P("				var v ", subOpaque)
+				g.P("				if elem != nil {")
+				g.P("					v = ", subOpaque, "{raw: elem.MarshalOmniBufAppend(nil)}")
+				g.P("				}")
+				g.P("				if !yield(i, v) {")
+				g.P("					return")
+				g.P("				}")
+				g.P("			}")
+				g.P("			return")
+				g.P("		}")
+				g.P("		wire.IterSubMsgArr(x.raw, ", fnum, ", func(i int, rawElem []byte) bool {")
+				g.P("			return yield(i, ", subOpaque, "{raw: rawElem})")
+				g.P("		})")
+				g.P("	}")
+				g.P("}")
 				g.P("func (x *", name, ") Set", goName, "(v []*", elemType, ") { x.", privName, " = v; x.dirty |= ", bitExpr, " }")
 				g.P()
 			}
@@ -1321,10 +1700,19 @@ func generateOpaqueMessage(g *protogen.GeneratedFile, msg *protogen.Message) {
 	}
 
 	// Generate MarshalAppend, TryMarshalAppend, and Marshal on Opaque struct with zero-decode splice support.
-	maxFnum := uint16(msg.Fields[len(msg.Fields)-1].Desc.Number())
+	sortedFields := slices.Clone(msg.Fields)
+	slices.SortFunc(sortedFields, func(a, b *protogen.Field) int {
+		return cmp.Compare(a.Desc.Number(), b.Desc.Number())
+	})
+	var maxFnum uint16
+	for _, f := range sortedFields {
+		if fn := uint16(f.Desc.Number()); fn > maxFnum {
+			maxFnum = fn
+		}
+	}
 	g.P("func (x *", name, ") appendDirtyField(b []byte, fnum uint16) []byte {")
 	g.P("	switch fnum {")
-	for _, f := range msg.Fields {
+	for _, f := range sortedFields {
 		fnum := uint16(f.Desc.Number())
 		privName := "f_" + f.Desc.TextName()
 		g.P("	case ", fnum, ":")
@@ -1422,12 +1810,70 @@ func generateOpaqueMessage(g *protogen.GeneratedFile, msg *protogen.Message) {
 	g.P("	return b")
 	g.P("}")
 	g.P()
+	g.P("func (x *", name, ") validateDirtyUTF8() error {")
+	for _, f := range sortedFields {
+		fnum := uint16(f.Desc.Number())
+		privName := "f_" + f.Desc.TextName()
+		bitExpr := fmt.Sprintf("(uint64(1) << %d)", fnum)
+		if f.Desc.IsMap() {
+			g.P("	if (x.dirty & ", bitExpr, ") != 0 {")
+			g.P("		for k := range x.", privName, " {")
+			g.P("			if !wire.ValidUTF8String(k) {")
+			g.P(fmt.Sprintf(`				return fmt.Errorf("omnibuf: field %s: map key contains invalid UTF-8")`, f.Desc.TextName()))
+			g.P("			}")
+			g.P("		}")
+			g.P("	}")
+			continue
+		}
+		if f.Desc.IsList() {
+			switch f.Desc.Kind() {
+			case protoreflect.StringKind:
+				g.P("	if (x.dirty & ", bitExpr, ") != 0 {")
+				g.P("		for _, s := range x.", privName, " {")
+				g.P("			if !wire.ValidUTF8String(s) {")
+				g.P(fmt.Sprintf(`				return fmt.Errorf("omnibuf: field %s: string element contains invalid UTF-8")`, f.Desc.TextName()))
+				g.P("			}")
+				g.P("		}")
+				g.P("	}")
+			case protoreflect.MessageKind:
+				if messageHasStringFields(f.Message, nil) {
+					g.P("	if (x.dirty & ", bitExpr, ") != 0 {")
+					g.P("		for _, elem := range x.", privName, " {")
+					g.P("			if elem != nil {")
+					g.P("				if err := elem.ValidateOmniBufUTF8(); err != nil {")
+					g.P("					return err")
+					g.P("				}")
+					g.P("			}")
+					g.P("		}")
+					g.P("	}")
+				}
+			}
+			continue
+		}
+		switch f.Desc.Kind() {
+		case protoreflect.StringKind:
+			g.P("	if (x.dirty & ", bitExpr, ") != 0 && !wire.ValidUTF8String(x.", privName, ") {")
+			g.P(fmt.Sprintf(`		return fmt.Errorf("omnibuf: field %s: string contains invalid UTF-8")`, f.Desc.TextName()))
+			g.P("	}")
+		case protoreflect.MessageKind:
+			if messageHasStringFields(f.Message, nil) {
+				g.P("	if (x.dirty & ", bitExpr, ") != 0 && x.", privName, " != nil {")
+				g.P("		if err := x.", privName, ".ValidateOmniBufUTF8(); err != nil {")
+				g.P("			return err")
+				g.P("		}")
+				g.P("	}")
+			}
+		}
+	}
+	g.P("	return nil")
+	g.P("}")
+	g.P()
 	g.P("// MarshalAppend re-serializes ", name, " using zero-decode wire splicing for unmodified fields.")
 	g.P("func (x *", name, ") MarshalAppend(dst []byte) []byte {")
 	g.P("	if x.dirty == 0 {")
 	g.P("		return wire.CopyPacket(dst, x.raw)")
 	g.P("	}")
-	g.P("	return wire.SpliceFields(dst[:0], x.raw, x.dirty, ", maxFnum, ", x.appendDirtyField)")
+	g.P("	return wire.SpliceFields(dst, x.raw, x.dirty, ", maxFnum, ", x.appendDirtyField)")
 	g.P("}")
 	g.P()
 	g.P("// TryMarshalAppend re-serializes ", name, " using zero-decode wire splicing and returns an error if x.raw is corrupt.")
@@ -1438,7 +1884,10 @@ func generateOpaqueMessage(g *protogen.GeneratedFile, msg *protogen.Message) {
 	g.P("		}")
 	g.P("		return wire.CopyPacket(dst, x.raw), nil")
 	g.P("	}")
-	g.P("	return wire.TrySpliceFields(dst[:0], x.raw, x.dirty, ", maxFnum, ", x.appendDirtyField)")
+	g.P("	if err := x.validateDirtyUTF8(); err != nil {")
+	g.P("		return nil, err")
+	g.P("	}")
+	g.P("	return wire.TrySpliceFields(dst, x.raw, x.dirty, ", maxFnum, ", x.appendDirtyField)")
 	g.P("}")
 	g.P()
 	g.P("// Marshal re-serializes ", name, " into a newly allocated packet, returning an error if x.raw is corrupt.")
@@ -1498,12 +1947,48 @@ func canGenerateOpaque(msg *protogen.Message) bool {
 	return true
 }
 
+func generatedFileUsesIter(file *protogen.File) bool {
+	for _, m := range file.Messages {
+		if !canGenerateOpaque(m) {
+			continue
+		}
+		for _, f := range m.Fields {
+			if f.Desc.IsList() && f.Desc.Kind() == protoreflect.MessageKind {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func generatedFileUsesMath(file *protogen.File) bool {
 	for _, m := range file.Messages {
 		for _, f := range m.Fields {
 			if f.Desc.Kind() == protoreflect.FloatKind || f.Desc.Kind() == protoreflect.DoubleKind {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func messageHasStringFields(msg *protogen.Message, visited map[protoreflect.FullName]bool) bool {
+	if msg == nil {
+		return false
+	}
+	if visited == nil {
+		visited = make(map[protoreflect.FullName]bool)
+	}
+	if visited[msg.Desc.FullName()] {
+		return false
+	}
+	visited[msg.Desc.FullName()] = true
+	for _, f := range msg.Fields {
+		if f.Desc.IsMap() || f.Desc.Kind() == protoreflect.StringKind {
+			return true
+		}
+		if f.Desc.Kind() == protoreflect.MessageKind && messageHasStringFields(f.Message, visited) {
+			return true
 		}
 	}
 	return false

@@ -32,7 +32,7 @@ func (o MarshalOptions) Marshal(v any) ([]byte, error) {
 	return o.MarshalAppend(nil, v)
 }
 
-// MarshalAppend appends the OmniBuf encoding of v to dst[:0] using the configured options.
+// MarshalAppend appends the OmniBuf encoding of v to dst using the configured options.
 func (o MarshalOptions) MarshalAppend(dst []byte, v any) ([]byte, error) {
 	if protohook.MarshalHook != nil {
 		if out, handled, err := protohook.MarshalHook(dst, v, o.Deterministic, o.SelfDescribing); handled {
@@ -142,6 +142,19 @@ func backpatchContainerLen(dst []byte, lenPos int) []byte {
 	return backpatchLargeContainerLen(dst, lenPos, uint64(subLen))
 }
 
+func backpatchContainerLen4(dst []byte, lenPos int) []byte {
+	subLen := uint64(len(dst) - (lenPos + 4))
+	if subLen <= 536870911 {
+		binary.LittleEndian.PutUint32(dst[lenPos:lenPos+4], uint32(subLen<<3)|4)
+		return dst
+	}
+	dst = append(dst, 0, 0, 0, 0, 0)
+	copy(dst[lenPos+9:], dst[lenPos+4:len(dst)-5])
+	dst[lenPos] = 0
+	binary.LittleEndian.PutUint64(dst[lenPos+1:lenPos+9], subLen)
+	return dst
+}
+
 //go:noinline
 func backpatchLargeContainerLen(dst []byte, lenPos int, subLen uint64) []byte {
 	if subLen <= 536870911 {
@@ -230,6 +243,10 @@ func skipValue(b []byte, pos int, wireType uint8) (int, error) {
 }
 
 func skipValueWithDepth(b []byte, pos int, wireType uint8, depth int) (int, error) {
+	return skipValueWithDepthChecked(b, pos, wireType, depth, false)
+}
+
+func skipValueWithDepthChecked(b []byte, pos int, wireType uint8, depth int, checkUTF8 bool) (int, error) {
 	if depth > MaxNestingDepth {
 		return 0, fmt.Errorf("omnibuf: nesting depth %d exceeds MaxNestingDepth (%d)", depth, MaxNestingDepth)
 	}
@@ -241,7 +258,7 @@ func skipValueWithDepth(b []byte, pos int, wireType uint8, depth int) (int, erro
 		if err != nil {
 			return 0, err
 		}
-		if err := validateMessageBytes(body, depth+1); err != nil {
+		if err := validateMessageBytesChecked(body, depth+1, checkUTF8); err != nil {
 			return 0, err
 		}
 		return end, nil
@@ -262,7 +279,7 @@ func skipValueWithDepth(b []byte, pos int, wireType uint8, depth int) (int, erro
 			if !ok {
 				return 0, fmt.Errorf("omnibuf: invalid array header")
 			}
-			if err := validateArrayBody(body, p, elemWT, count, depth+1); err != nil {
+			if err := validateArrayBodyChecked(body, p, elemWT, count, depth+1, checkUTF8); err != nil {
 				return 0, err
 			}
 		case wireMap:
@@ -275,11 +292,11 @@ func skipValueWithDepth(b []byte, pos int, wireType uint8, depth int) (int, erro
 			}
 			for range count {
 				var err error
-				p, err = validateContainerEntry(body, p, keyWT, depth+1)
+				p, err = validateContainerEntryChecked(body, p, keyWT, depth+1, checkUTF8)
 				if err != nil {
 					return 0, err
 				}
-				p, err = validateContainerEntry(body, p, valWT, depth+1)
+				p, err = validateContainerEntryChecked(body, p, valWT, depth+1, checkUTF8)
 				if err != nil {
 					return 0, err
 				}
@@ -293,6 +310,10 @@ func skipValueWithDepth(b []byte, pos int, wireType uint8, depth int) (int, erro
 		return end, nil
 	}
 
+	if checkUTF8 && wireType == wireString {
+		_, end, err := readStrSlice(b, pos)
+		return end, err
+	}
 	nextPos, ok := fastSkipValue(b, pos, wireType)
 	if !ok {
 		return 0, fmt.Errorf("omnibuf: truncated or invalid wireType %d at %d", wireType, pos)
@@ -300,7 +321,7 @@ func skipValueWithDepth(b []byte, pos int, wireType uint8, depth int) (int, erro
 	return nextPos, nil
 }
 
-func validateArrayBody(body []byte, p int, elemWT uint8, count, depth int) error {
+func validateArrayBodyChecked(body []byte, p int, elemWT uint8, count, depth int, checkUTF8 bool) error {
 	switch elemWT {
 	case wireBoolFalse:
 		if len(body)-p != count {
@@ -325,7 +346,7 @@ func validateArrayBody(body []byte, p int, elemWT uint8, count, depth int) error
 	}
 	for range count {
 		var err error
-		p, err = validateContainerEntry(body, p, elemWT, depth)
+		p, err = validateContainerEntryChecked(body, p, elemWT, depth, checkUTF8)
 		if err != nil {
 			return err
 		}
@@ -336,17 +357,21 @@ func validateArrayBody(body []byte, p int, elemWT uint8, count, depth int) error
 	return nil
 }
 
-func validateContainerEntry(body []byte, p int, wt uint8, depth int) (int, error) {
+func validateContainerEntryChecked(body []byte, p int, wt uint8, depth int, checkUTF8 bool) (int, error) {
 	if wt == wireBoolFalse {
 		if p >= len(body) || body[p] > 1 {
 			return 0, fmt.Errorf("omnibuf: invalid bool byte in container")
 		}
 		return p + 1, nil
 	}
-	return skipValueWithDepth(body, p, wt, depth)
+	return skipValueWithDepthChecked(body, p, wt, depth, checkUTF8)
 }
 
 func validateMessageBytes(data []byte, depth int) error {
+	return validateMessageBytesChecked(data, depth, false)
+}
+
+func validateMessageBytesChecked(data []byte, depth int, checkUTF8 bool) error {
 	if depth > MaxNestingDepth {
 		return fmt.Errorf("omnibuf: nesting depth %d exceeds MaxNestingDepth (%d)", depth, MaxNestingDepth)
 	}
@@ -368,7 +393,7 @@ func validateMessageBytes(data []byte, depth int) error {
 			pos = nextPos
 			continue
 		}
-		nextPos, err := skipValueWithDepth(data, pos, wt, depth)
+		nextPos, err := skipValueWithDepthChecked(data, pos, wt, depth, checkUTF8)
 		if err != nil {
 			return err
 		}

@@ -90,10 +90,12 @@ func (o MarshalOptions) marshalProtoReflectAppend(dst []byte, m protoreflect.Mes
 	if err := proto.CheckInitialized(m.Interface()); err != nil {
 		return nil, err
 	}
-	if cap(dst) < 256 {
+	if dst == nil {
 		dst = make([]byte, 0, 256)
-	} else {
-		dst = dst[:0]
+	} else if cap(dst)-len(dst) < 64 {
+		grown := make([]byte, len(dst), max(cap(dst)*2, len(dst)+256))
+		copy(grown, dst)
+		dst = grown
 	}
 	if o.SelfDescribing {
 		meta, cyclic := buildProtoReflectSchemaMeta(m.Descriptor(), 1, nil)
@@ -321,7 +323,7 @@ func appendProtoScalarPayload(dst []byte, k protoreflect.Kind, v protoreflect.Va
 		return wire.AppendVarint(dst, wire.EncodeZigZag(v.Int())), nil
 	case protoreflect.StringKind:
 		s := v.String()
-		if !wire.ValidUTF8([]byte(s)) {
+		if !wire.ValidUTF8String(s) {
 			return nil, fmt.Errorf("omnibuf: string contains invalid UTF-8 (use bytes for binary data)")
 		}
 		dst = wire.AppendVarint(dst, uint64(len(s)))
