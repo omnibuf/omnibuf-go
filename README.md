@@ -144,6 +144,12 @@ conformance-runner --tier=blind,struct ./bin/conformance-rs
 
 ---
 
+## Benchmarks
+
+Go benchmark results, methodology, and cross-language comparisons live at [omnibuf.com/benchmarks?lang=go](https://omnibuf.com/benchmarks?lang=go) (all languages at [omnibuf.com/benchmarks](https://omnibuf.com/benchmarks)). Run the local suite with `just bench` to regenerate [`testdata/benchmarks.json`](testdata/benchmarks.json).
+
+---
+
 ## Development
 
 ```bash
