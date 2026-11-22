@@ -86,4 +86,4 @@ jobs:
 
       - name: Check for breaking Protobuf schema changes (buf breaking)
         if: github.event_name == 'pull_request'
-        run: just buf-breaking ".git#branch=${GITHUB_BASE_REF:-main}"
+        run: just buf-breaking ".git#ref=refs/remotes/origin/${GITHUB_BASE_REF:-main}"
