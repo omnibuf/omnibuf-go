@@ -2,5 +2,7 @@ github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 github.com/omnibuf/omnibuf-go v0.2.1 h1:inuDAF2t65OLfBf4V/rWibkfkxzZzpT3ylN76ifJff0=
 github.com/omnibuf/omnibuf-go v0.2.1/go.mod h1:wrcpM54pcS4exzDj7xo7aa/ivD2GrFzmXV63FwMETNI=
+github.com/omnibuf/omnibuf-go v0.2.2 h1:z5oQAxWFEgTDC42Zb46f1dXjAvfSCyXjTEDUOJ26J5g=
+github.com/omnibuf/omnibuf-go v0.2.2/go.mod h1:wrcpM54pcS4exzDj7xo7aa/ivD2GrFzmXV63FwMETNI=
 google.golang.org/protobuf v1.36.12 h1:pJOKDDOyeXErUroCihFAd5LQuwXBSpVnKGrj5o/fwxc=
 google.golang.org/protobuf v1.36.12/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
