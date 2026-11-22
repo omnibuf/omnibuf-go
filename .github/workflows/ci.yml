@@ -14,7 +14,7 @@ concurrency:
 jobs:
   go-lint:
     name: Go (Format & Lint)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -32,7 +32,7 @@ jobs:
 
   go-test:
     name: Go ${{ matrix.go-version }} (Test & Fuzz)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -63,7 +63,7 @@ jobs:
 
   proto:
     name: Protobuf (Format, Lint, Build & Breaking)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
