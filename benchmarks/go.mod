@@ -8,7 +8,7 @@ require (
 	capnproto.org/go/capnp/v3 v3.1.0-alpha.2
 	github.com/google/flatbuffers v25.12.19+incompatible
 	github.com/hamba/avro/v2 v2.31.0
-	github.com/omnibuf/omnibuf-go v0.2.3
+	github.com/omnibuf/omnibuf-go v0.2.5
 	github.com/planetscale/vtprotobuf v0.6.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	google.golang.org/protobuf v1.36.12
