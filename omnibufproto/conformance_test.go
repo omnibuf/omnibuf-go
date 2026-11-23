@@ -2297,6 +2297,18 @@ func buildEdgeInvalidWireCases() []InvalidWireCase {
 	add("map_empty_body", "CorruptWireMap", "WireMap with byteLen 0 (missing KeyType, ValueType, Count)", mp(12))
 	add("map_header_only_two_bytes", "CorruptWireMap", "WireMap body with KeyType and ValueType but no Count", mp(12, WireString, WireUint))
 
+	// Malformed unknown containers and fixed-width array count/size mismatches.
+	add("unknown_wire_array_short_body", "CorruptWireArray", "Unknown field #999 WireArray with 1-byte body (missing Count)", arr(999, WireUint))
+	add("unknown_wire_map_short_body", "CorruptWireMap", "Unknown field #999 WireMap with 2-byte body (missing Count)", mp(999, WireString, WireUint))
+	add("unknown_wire_extended_empty_body", "CorruptWireExtended", "Unknown field #999 WireExtended with 0-byte body",
+		cat(appendTag(nil, 999, WireExtended), AppendVarint(nil, 0)))
+	add("fixed32_array_size_mismatch_short", "CorruptWireArray", "WireArray(WireFixed32) declaring count=2 with only 6 payload bytes",
+		arr(99, WireFixed32, 0x05, 1, 2, 3, 4, 5, 6))
+	add("fixed32_array_size_mismatch_trailing", "CorruptWireArray", "WireArray(WireFixed32) declaring count=1 with 8 payload bytes",
+		arr(99, WireFixed32, 0x03, 1, 2, 3, 4, 5, 6, 7, 8))
+	add("fixed64_array_size_mismatch_short", "CorruptWireArray", "WireArray(WireFixed64) declaring count=1 with only 4 payload bytes",
+		arr(99, WireFixed64, 0x03, 1, 2, 3, 4))
+
 	// Field #0 misuse anywhere in the packet.
 	add("field0_wrong_wire_type_mid_packet", "CorruptField0", "Field #0 with WireUint appearing after a valid field",
 		cat(AppendVarint(appendTag(nil, 1, WireUint), 1), []byte{0x01, 0x03}))

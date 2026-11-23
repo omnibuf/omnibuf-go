@@ -4685,6 +4685,42 @@
       "wire_hex": "3a03050a00"
     },
     {
+      "name": "unknown_wire_array_short_body",
+      "category": "CorruptWireArray",
+      "description": "Unknown field #999 WireArray with 1-byte body (missing Count)",
+      "wire_hex": "f6f90300"
+    },
+    {
+      "name": "unknown_wire_map_short_body",
+      "category": "CorruptWireMap",
+      "description": "Unknown field #999 WireMap with 2-byte body (missing Count)",
+      "wire_hex": "faf9050a00"
+    },
+    {
+      "name": "unknown_wire_extended_empty_body",
+      "category": "CorruptWireExtended",
+      "description": "Unknown field #999 WireExtended with 0-byte body",
+      "wire_hex": "fef901"
+    },
+    {
+      "name": "fixed32_array_size_mismatch_short",
+      "category": "CorruptWireArray",
+      "description": "WireArray(WireFixed32) declaring count=2 with only 6 payload bytes",
+      "wire_hex": "f618110405010203040506"
+    },
+    {
+      "name": "fixed32_array_size_mismatch_trailing",
+      "category": "CorruptWireArray",
+      "description": "WireArray(WireFixed32) declaring count=1 with 8 payload bytes",
+      "wire_hex": "f6181504030102030405060708"
+    },
+    {
+      "name": "fixed64_array_size_mismatch_short",
+      "category": "CorruptWireArray",
+      "description": "WireArray(WireFixed64) declaring count=1 with only 4 payload bytes",
+      "wire_hex": "f6180d050301020304"
+    },
+    {
       "name": "field0_wrong_wire_type_mid_packet",
       "category": "CorruptField0",
       "description": "Field #0 with WireUint appearing after a valid field",
