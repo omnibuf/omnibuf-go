@@ -46,6 +46,33 @@ func main() {
 }
 ```
 
+## gRPC & Connect RPC
+
+Two separate detached submodules provide framework codecs while keeping the core `omnibuf-go` module free of RPC dependencies:
+
+- **gRPC (`github.com/omnibuf/omnibuf-go/omnibufgrpc`):** Implements `google.golang.org/grpc/encoding.CodecV2` (`"omnibuf"` and `"x-omnibuf"`).
+- **Connect (`github.com/omnibuf/omnibuf-go/omnibufconnect`):** Implements `connectrpc.com/connect.Codec` (`"omnibuf"` and `"x-omnibuf"`).
+
+```go
+// gRPC
+import (
+	"github.com/omnibuf/omnibuf-go/omnibufgrpc"
+	"google.golang.org/grpc"
+)
+
+omnibufgrpc.Register()
+conn, err := grpc.NewClient(addr, grpc.WithDefaultCallOptions(omnibufgrpc.CallOption()))
+
+// Connect
+import (
+	"connectrpc.com/connect"
+	"github.com/omnibuf/omnibuf-go/omnibufconnect"
+)
+
+handler := connect.NewUnaryHandler(procedure, fn, omnibufconnect.HandlerOptions()...)
+client := connect.NewClient[Req, Res](httpClient, url, omnibufconnect.ClientOption())
+```
+
 ## Implementation
 
 - **Core module (`github.com/omnibuf/omnibuf-go`):** Pure Go standard library with zero external dependencies. Supports `omnibuf:"..."` struct tags (`name`, `wire`, `omitempty`, `-`), `DecodeBlind`, `LocateField`, and `SpliceFields`.
