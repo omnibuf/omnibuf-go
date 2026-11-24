@@ -1,4 +1,4 @@
-package omnibuf
+package omnibuf_test
 
 import (
 	"errors"
@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/omnibuf/omnibuf-go"
 	"github.com/omnibuf/omnibuf-go/wire"
 )
 
@@ -23,7 +24,7 @@ type mergeMsg struct {
 }
 
 func TestUnmarshalOptions_MaxBytesMaxDepthAndMerge(t *testing.T) {
-	p1, err := Marshal(&mergeMsg{
+	p1, err := omnibuf.Marshal(&mergeMsg{
 		ID:   10,
 		Name: "alpha",
 		Tags: []string{"t1"},
@@ -33,7 +34,7 @@ func TestUnmarshalOptions_MaxBytesMaxDepthAndMerge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal p1: %v", err)
 	}
-	p2, err := Marshal(&mergeMsg{
+	p2, err := omnibuf.Marshal(&mergeMsg{
 		Name: "beta",
 		Tags: []string{"t2"},
 		Meta: map[string]uint64{"k2": 2},
@@ -45,16 +46,16 @@ func TestUnmarshalOptions_MaxBytesMaxDepthAndMerge(t *testing.T) {
 
 	// MaxBytes cap
 	var dst mergeMsg
-	err = UnmarshalOptions{MaxBytes: len(p1) - 1}.Unmarshal(p1, &dst)
-	if !errors.Is(err, ErrMessageTooLarge) {
+	err = omnibuf.UnmarshalOptions{MaxBytes: len(p1) - 1}.Unmarshal(p1, &dst)
+	if !errors.Is(err, omnibuf.ErrMessageTooLarge) {
 		t.Fatalf("expected ErrMessageTooLarge, got %v", err)
 	}
-	if err := (UnmarshalOptions{MaxBytes: len(p1)}).Unmarshal(p1, &dst); err != nil {
+	if err := (omnibuf.UnmarshalOptions{MaxBytes: len(p1)}).Unmarshal(p1, &dst); err != nil {
 		t.Fatalf("exact MaxBytes failed: %v", err)
 	}
 
 	// Merge preserves existing fields, appends slices, merges maps and sub-messages
-	if err := UnmarshalMerge(p2, &dst); err != nil {
+	if err := omnibuf.UnmarshalMerge(p2, &dst); err != nil {
 		t.Fatalf("UnmarshalMerge failed: %v", err)
 	}
 	want := mergeMsg{
@@ -72,16 +73,16 @@ func TestUnmarshalOptions_MaxBytesMaxDepthAndMerge(t *testing.T) {
 	type deepNode struct {
 		Child *deepNode `omnibuf:"1,omitempty"`
 	}
-	deepPkt, err := Marshal(&deepNode{Child: &deepNode{Child: &deepNode{}}})
+	deepPkt, err := omnibuf.Marshal(&deepNode{Child: &deepNode{Child: &deepNode{}}})
 	if err != nil {
 		t.Fatalf("Marshal deep: %v", err)
 	}
 	var deepDst deepNode
-	err = UnmarshalOptions{MaxDepth: 1}.Unmarshal(deepPkt, &deepDst)
-	if !errors.Is(err, ErrMaxDepth) {
+	err = omnibuf.UnmarshalOptions{MaxDepth: 1}.Unmarshal(deepPkt, &deepDst)
+	if !errors.Is(err, omnibuf.ErrMaxDepth) {
 		t.Fatalf("expected ErrMaxDepth for MaxDepth=1, got %v", err)
 	}
-	if err := (UnmarshalOptions{MaxDepth: 2}).Unmarshal(deepPkt, &deepDst); err != nil {
+	if err := (omnibuf.UnmarshalOptions{MaxDepth: 2}).Unmarshal(deepPkt, &deepDst); err != nil {
 		t.Fatalf("expected MaxDepth=2 to succeed, got %v", err)
 	}
 }
@@ -91,19 +92,19 @@ func TestSentinelErrors(t *testing.T) {
 	type strMsg struct {
 		S string `omnibuf:"1"`
 	}
-	if _, err := Marshal(&strMsg{S: string([]byte{0xff, 0xfe})}); !errors.Is(err, ErrInvalidUTF8) {
+	if _, err := omnibuf.Marshal(&strMsg{S: string([]byte{0xff, 0xfe})}); !errors.Is(err, omnibuf.ErrInvalidUTF8) {
 		t.Fatalf("Marshal invalid UTF-8: got %v, want ErrInvalidUTF8", err)
 	}
 
 	enc := wire.NewEncoder(32)
 	enc.WriteString(1, string([]byte{0xff, 0xfe}))
 	var dst strMsg
-	if err := Unmarshal(enc.Bytes(), &dst); !errors.Is(err, ErrInvalidUTF8) {
+	if err := omnibuf.Unmarshal(enc.Bytes(), &dst); !errors.Is(err, omnibuf.ErrInvalidUTF8) {
 		t.Fatalf("Unmarshal invalid UTF-8: got %v, want ErrInvalidUTF8", err)
 	}
 
 	// ErrCorruptWire on truncated packet
-	if err := Unmarshal([]byte{0x02}, &dst); !errors.Is(err, ErrCorruptWire) {
+	if err := omnibuf.Unmarshal([]byte{0x02}, &dst); !errors.Is(err, omnibuf.ErrCorruptWire) {
 		t.Fatalf("Unmarshal truncated tag: got %v, want ErrCorruptWire", err)
 	}
 }
@@ -133,12 +134,12 @@ func TestIntuitiveWireStructTags(t *testing.T) {
 		M: map[string]int32{"k": -9},
 		N: map[string]float64{"p": 2.5},
 	}
-	raw, err := Marshal(&in)
+	raw, err := omnibuf.Marshal(&in)
 	if err != nil {
 		t.Fatalf("Marshal tagged: %v", err)
 	}
 	var out tagged
-	if err := Unmarshal(raw, &out); err != nil {
+	if err := omnibuf.Unmarshal(raw, &out); err != nil {
 		t.Fatalf("Unmarshal tagged: %v", err)
 	}
 	if !reflect.DeepEqual(in, out) {
@@ -157,63 +158,5 @@ func TestIntuitiveWireStructTags(t *testing.T) {
 	}
 	if v, ok := wire.ReadFloat64(raw, 4); !ok || v != math.Pi {
 		t.Fatalf("field 4 ReadFloat64 = (%v, %v), want (%v, true)", v, ok, math.Pi)
-	}
-}
-
-func TestDecodeBlind_SingleAndMergedSubMessages(t *testing.T) {
-	// Single-occurrence deeply nested submessage
-	enc := wire.NewEncoder(64)
-	enc.BeginSubMsg(1)
-	enc.BeginSubMsg(2)
-	enc.WriteString(3, "leaf")
-	enc.EndSubMsg()
-	enc.EndSubMsg()
-	got, err := DecodeBlind(enc.Bytes())
-	if err != nil {
-		t.Fatalf("DecodeBlind nested: %v", err)
-	}
-	want := map[string]any{
-		"field_1": map[string]any{
-			"field_2": map[string]any{
-				"field_3": "leaf",
-			},
-		},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("DecodeBlind nested = %#v, want %#v", got, want)
-	}
-
-	// Multi-occurrence merged submessages
-	enc2 := wire.NewEncoder(64)
-	enc2.BeginSubMsg(1)
-	enc2.WriteUint(1, 10)
-	enc2.EndSubMsg()
-	enc2.BeginSubMsg(1)
-	enc2.WriteString(2, "merged")
-	enc2.EndSubMsg()
-	got2, err := DecodeBlind(enc2.Bytes())
-	if err != nil {
-		t.Fatalf("DecodeBlind merged: %v", err)
-	}
-	want2 := map[string]any{
-		"field_1": map[string]any{
-			"field_1": uint64(10),
-			"field_2": "merged",
-		},
-	}
-	if !reflect.DeepEqual(got2, want2) {
-		t.Fatalf("DecodeBlind merged = %#v, want %#v", got2, want2)
-	}
-
-	// Truncated first segment must NOT be rescued by concatenating a second segment
-	var bad []byte
-	bad = appendVarint(bad, (1<<4)|uint64(wireSubMsg))
-	bad = appendVarint(bad, 1)
-	bad = append(bad, byte(((1<<4)|wireUint)<<1)|1) // tag with missing varint payload
-	bad = appendVarint(bad, (1<<4)|uint64(wireSubMsg))
-	bad = appendVarint(bad, 1)
-	bad = append(bad, 0x03) // would look like varint 1 if concatenated without per-segment validation
-	if _, err := DecodeBlind(bad); err == nil {
-		t.Fatal("DecodeBlind accepted truncated first submessage segment merged with second segment")
 	}
 }

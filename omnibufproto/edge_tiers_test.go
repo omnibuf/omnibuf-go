@@ -384,7 +384,7 @@ func reservedPositions() []reservedPosition {
 			return tagged(99, WireMap, AppendVarint(nil, 11), []byte{WireUint, WireUint}, reservedVarint(rb))
 		}},
 		{"field0_len", true, func(rb byte) []byte {
-			return append([]byte{byte(((0<<4)|WireSubMsg)<<1) | 1}, append(reservedVarint(rb), pad...)...)
+			return append([]byte{(((0 << 4) | WireSubMsg) << 1) | 1}, append(reservedVarint(rb), pad...)...)
 		}},
 		// Positions inside container bodies (header-hoppers need not parse these).
 		{"uint_array_element", false, func(rb byte) []byte {
@@ -485,7 +485,7 @@ func TestEdge_Field0ValidationAllTiers(t *testing.T) {
 		}
 		wt := wt
 		t.Run(fmt.Sprintf("wrong_wire_type_%d_mid_packet", wt), func(t *testing.T) {
-			raw := concat(f1, []byte{byte(wt<<1) | 1}, AppendVarint(nil, 1), []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+			raw := concat(f1, []byte{(wt << 1) | 1}, AppendVarint(nil, 1), []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 			requireAllTiersReject(t, raw)
 		})
 	}
@@ -494,17 +494,17 @@ func TestEdge_Field0ValidationAllTiers(t *testing.T) {
 		name string
 		body []byte
 	}{
-		{"truncated_type_name", []byte{byte(((1<<4)|WireString)<<1 | 1), 0x15, 'A'}},
-		{"type_name_wrong_wire_type", []byte{byte(((1<<4)|WireUint)<<1 | 1), 0x03}},
-		{"fields_map_wrong_value_type", []byte{byte(((2<<4)|WireMap)<<1 | 1), 0x07, WireUint, WireUint, 0x01}},
-		{"fields_map_zero_field_number", []byte{byte(((2<<4)|WireMap)<<1 | 1), 0x0D, WireUint, WireString, 0x03, 0x01, 0x03, 'x'}},
-		{"fields_map_trailing_bytes", []byte{byte(((2<<4)|WireMap)<<1 | 1), 0x0F, WireUint, WireString, 0x03, 0x03, 0x03, 'x', 0xFF}},
-		{"nested_field0", []byte{byte(((0<<4)|WireSubMsg)<<1 | 1), 0x01}},
-		{"invalid_utf8_type_name", []byte{byte(((1<<4)|WireString)<<1 | 1), 0x03, 0xFF}},
-		{"invalid_utf8_field_name", []byte{byte(((2<<4)|WireMap)<<1 | 1), 0x0D, WireUint, WireString, 0x03, 0x03, 0x03, 0xFF}},
+		{"truncated_type_name", []byte{(((1 << 4) | WireString) << 1) | 1, 0x15, 'A'}},
+		{"type_name_wrong_wire_type", []byte{(((1 << 4) | WireUint) << 1) | 1, 0x03}},
+		{"fields_map_wrong_value_type", []byte{(((2 << 4) | WireMap) << 1) | 1, 0x07, WireUint, WireUint, 0x01}},
+		{"fields_map_zero_field_number", []byte{(((2 << 4) | WireMap) << 1) | 1, 0x0D, WireUint, WireString, 0x03, 0x01, 0x03, 'x'}},
+		{"fields_map_trailing_bytes", []byte{(((2 << 4) | WireMap) << 1) | 1, 0x0F, WireUint, WireString, 0x03, 0x03, 0x03, 'x', 0xFF}},
+		{"nested_field0", []byte{(((0 << 4) | WireSubMsg) << 1) | 1, 0x01}},
+		{"invalid_utf8_type_name", []byte{(((1 << 4) | WireString) << 1) | 1, 0x03, 0xFF}},
+		{"invalid_utf8_field_name", []byte{(((2 << 4) | WireMap) << 1) | 1, 0x0D, WireUint, WireString, 0x03, 0x03, 0x03, 0xFF}},
 	}
 	for _, c := range corrupt {
-		meta := append([]byte{byte(((0<<4)|WireSubMsg)<<1) | 1}, AppendVarint(nil, uint64(len(c.body)))...)
+		meta := append([]byte{(((0 << 4) | WireSubMsg) << 1) | 1}, AppendVarint(nil, uint64(len(c.body)))...)
 		meta = append(meta, c.body...)
 		for _, layout := range []struct {
 			name string

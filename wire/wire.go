@@ -91,10 +91,6 @@ func DecodeVarint(b []byte) (v uint64, n int) {
 	return
 }
 
-func decodeVarintMulti(b []byte) (uint64, int) {
-	return DecodeVarint(b)
-}
-
 // ReadVarintAt decodes a Prefix-Varint from b[pos:] without constructing a sub-slice.
 // It performs no validation: callers MUST already know that b[pos:] holds a
 // complete, well-formed varint (use DecodeVarint for untrusted input).
@@ -224,7 +220,7 @@ func fastSkipValue(packet []byte, pos int, wt uint8) (int, bool) {
 
 //go:noinline
 func skipLargeContainer(packet []byte, pos int) (int, bool) {
-	bLen, bn := decodeVarintMulti(packet[pos:])
+	bLen, bn := DecodeVarint(packet[pos:])
 	if bn == 0 || bLen > uint64(len(packet)-(pos+bn)) {
 		return 0, false
 	}
@@ -292,7 +288,7 @@ func locateFieldMask(packet []byte, targetField uint16, expMask uint16) (valSlic
 			wt = uint8(u & 0x0F)
 			pos += 2
 		} else {
-			tag, tn := decodeVarintMulti(packet[pos:])
+			tag, tn := DecodeVarint(packet[pos:])
 			if tn == 0 || tag>>4 > 536870911 {
 				return nil, 0, false
 			}
@@ -349,7 +345,7 @@ func locateFieldMask(packet []byte, targetField uint16, expMask uint16) (valSlic
 				}
 				pos += 2 + int(binary.LittleEndian.Uint16(packet[pos:pos+2])>>2)
 			} else {
-				bLen, bn := decodeVarintMulti(packet[pos:])
+				bLen, bn := DecodeVarint(packet[pos:])
 				if bn == 0 || bLen > uint64(n-(pos+bn)) {
 					return nil, 0, false
 				}
@@ -400,7 +396,7 @@ func nextContainerField(packet []byte, pos int, targetField uint16, expWT uint8,
 			wt = uint8(u & 0x0F)
 			pos += 2
 		} else {
-			tag, tn := decodeVarintMulti(packet[pos:])
+			tag, tn := DecodeVarint(packet[pos:])
 			if tn == 0 || tag>>4 > 536870911 {
 				return nil, 0, false, false
 			}
@@ -816,10 +812,10 @@ func (e *Encoder) WriteField0Fields(fields map[uint32]string) {
 	}
 	slices.Sort(keys)
 
-	e.buf = append(e.buf, byte(((0<<4)|WireSubMsg)<<1)|1)
+	e.buf = append(e.buf, (((0<<4)|WireSubMsg)<<1)|1)
 	lenPos := len(e.buf)
 	e.buf = append(e.buf, 0, 0)
-	e.buf = append(e.buf, byte(((2<<4)|WireMap)<<1)|1)
+	e.buf = append(e.buf, (((2<<4)|WireMap)<<1)|1)
 	mLenPos := len(e.buf)
 	e.buf = append(e.buf, 0, 0, WireUint, WireString)
 	e.buf = AppendVarint(e.buf, uint64(len(keys)))
@@ -852,10 +848,10 @@ func (e *Encoder) WriteField0Schema(names []string) {
 	if count == 0 {
 		return
 	}
-	e.buf = append(e.buf, byte(((0<<4)|WireSubMsg)<<1)|1)
+	e.buf = append(e.buf, (((0<<4)|WireSubMsg)<<1)|1)
 	lenPos := len(e.buf)
 	e.buf = append(e.buf, 0, 0)
-	e.buf = append(e.buf, byte(((2<<4)|WireMap)<<1)|1)
+	e.buf = append(e.buf, (((2<<4)|WireMap)<<1)|1)
 	mLenPos := len(e.buf)
 	e.buf = append(e.buf, 0, 0, WireUint, WireString)
 	e.buf = AppendVarint(e.buf, uint64(count))

@@ -11,7 +11,7 @@ import (
 
 func TestFastSkipValueOverflowAnd32BitKinds(t *testing.T) {
 	// 1. fastSkipValue and wire.SkipValue must never succeed via signed int overflow when pos is near math.MaxInt.
-	for _, wt := range []uint8{wireUint, wireSint, wireString, wireFixed32, wireFixed64} {
+	for _, wt := range []uint8{wire.WireUint, wire.WireSint, wire.WireString, wire.WireFixed32, wire.WireFixed64} {
 		if next, ok := fastSkipValue(nil, math.MaxInt-1, wt); ok {
 			t.Fatalf("fastSkipValue overflowed to next=%d, ok=true for wt=%d", next, wt)
 		}

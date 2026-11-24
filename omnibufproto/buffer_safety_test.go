@@ -2,18 +2,196 @@ package omnibufproto_test
 
 import (
 	"bytes"
-	"fmt"
 	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 
-	_ "github.com/omnibuf/omnibuf-go/omnibufproto"
-
 	ob "github.com/omnibuf/omnibuf-go"
+	"github.com/omnibuf/omnibuf-go/omnibufproto"
 	"github.com/omnibuf/omnibuf-go/omnibufproto/internal/pb"
 	"github.com/omnibuf/omnibuf-go/wire"
 )
+
+func TestMarshalAppendAndCopyPacketPreserveDstPrefix(t *testing.T) {
+	prefix := []byte{0xAA, 0xBB, 0xCC, 0xDD}
+	makeDst := func(capacity int) []byte {
+		b := make([]byte, len(prefix), capacity)
+		copy(b, prefix)
+		return b
+	}
+
+	type simpleRecord struct {
+		ID uint32 `omnibuf:"1"`
+	}
+
+	samplePB := &pb.PeerUpdate{Asn: 64512, RouterId: "rtr-fra-01"}
+	sampleRaw, err := omnibufproto.Marshal(samplePB)
+	if err != nil {
+		t.Fatalf("precondition Marshal samplePB: %v", err)
+	}
+
+	for _, capSize := range []int{len(prefix), 1024} {
+		capName := "small_cap"
+		if capSize > len(prefix) {
+			capName = "large_cap"
+		}
+
+		t.Run("omnibuf_MarshalAppend_"+capName, func(t *testing.T) {
+			out, err := ob.MarshalAppend(makeDst(capSize), &simpleRecord{ID: 7})
+			if err != nil {
+				t.Fatalf("omnibuf.MarshalAppend: %v", err)
+			}
+			if !bytes.HasPrefix(out, prefix) {
+				t.Fatalf("omnibuf.MarshalAppend wiped prefix %x: got %x", prefix, out)
+			}
+		})
+
+		t.Run("omnibufproto_MarshalAppend_SelfDescribing_"+capName, func(t *testing.T) {
+			// Test both open-struct proto and protoreflect-dispatched proto (TestAllTypes has enums/oneofs).
+			outOpen, err := (omnibufproto.MarshalOptions{SelfDescribing: true}).MarshalAppend(makeDst(capSize), samplePB)
+			if err != nil {
+				t.Fatalf("MarshalOptions{SelfDescribing:true}.MarshalAppend(PeerUpdate): %v", err)
+			}
+			if !bytes.HasPrefix(outOpen, prefix) {
+				t.Errorf("MarshalOptions{SelfDescribing:true}.MarshalAppend(PeerUpdate) wiped prefix %x: got %x", prefix, outOpen)
+			}
+
+			outReflect, err := (omnibufproto.MarshalOptions{SelfDescribing: true}).MarshalAppend(makeDst(capSize), &pb.TestAllTypes{F1Uint32: 42})
+			if err != nil {
+				t.Fatalf("MarshalOptions{SelfDescribing:true}.MarshalAppend(TestAllTypes): %v", err)
+			}
+			if !bytes.HasPrefix(outReflect, prefix) {
+				t.Errorf("MarshalOptions{SelfDescribing:true}.MarshalAppend(TestAllTypes) wiped prefix %x: got %x", prefix, outReflect)
+			}
+		})
+
+		t.Run("wire_CopyPacket_"+capName, func(t *testing.T) {
+			out := wire.CopyPacket(makeDst(capSize), sampleRaw)
+			if !bytes.HasPrefix(out, prefix) || !bytes.Equal(out[len(prefix):], sampleRaw) {
+				t.Fatalf("wire.CopyPacket wiped prefix %x: got %x", prefix, out)
+			}
+		})
+
+		t.Run("OpaquePeerUpdate_MarshalAppend_clean_"+capName, func(t *testing.T) {
+			var op pb.OpaquePeerUpdate
+			if err := op.Unmarshal(sampleRaw); err != nil {
+				t.Fatalf("OpaquePeerUpdate.Unmarshal: %v", err)
+			}
+			out := op.MarshalAppend(makeDst(capSize))
+			if !bytes.HasPrefix(out, prefix) {
+				t.Fatalf("OpaquePeerUpdate.MarshalAppend (clean) wiped prefix %x: got %x", prefix, out)
+			}
+		})
+
+		t.Run("OpaquePeerUpdate_MarshalAppend_dirty_"+capName, func(t *testing.T) {
+			var op pb.OpaquePeerUpdate
+			if err := op.Unmarshal(sampleRaw); err != nil {
+				t.Fatalf("OpaquePeerUpdate.Unmarshal: %v", err)
+			}
+			op.SetAsn(65001)
+			out := op.MarshalAppend(makeDst(capSize))
+			if !bytes.HasPrefix(out, prefix) {
+				t.Fatalf("OpaquePeerUpdate.MarshalAppend (dirty) wiped prefix %x: got %x", prefix, out)
+			}
+		})
+	}
+}
+
+func TestOpaqueResetAndStringSliceTailZeroing(t *testing.T) {
+	t.Run("OpaquePeerUpdate_Unmarshal_clears_dirty_heap_fields", func(t *testing.T) {
+		var op pb.OpaquePeerUpdate
+		op.SetRouterId(strings.Repeat("dirty-router-", 4))
+		op.SetTags([]string{"dirty-tag-1", "dirty-tag-2"})
+		op.SetLocation(&pb.Location{City: "Frankfurt"})
+
+		if err := op.Unmarshal([]byte{}); err != nil {
+			t.Fatalf("OpaquePeerUpdate.Unmarshal(empty): %v", err)
+		}
+
+		rv := reflect.ValueOf(&op).Elem()
+		if gotRouter := rv.FieldByName("f_router_id").String(); gotRouter != "" {
+			t.Errorf("OpaquePeerUpdate retained dirty f_router_id = %q after Unmarshal(empty)", gotRouter)
+		}
+		if gotTagsLen := rv.FieldByName("f_tags").Len(); gotTagsLen != 0 {
+			t.Errorf("OpaquePeerUpdate retained dirty f_tags (len=%d) after Unmarshal(empty)", gotTagsLen)
+		}
+		if !rv.FieldByName("f_location").IsNil() {
+			t.Errorf("OpaquePeerUpdate retained dirty f_location pointer after Unmarshal(empty)")
+		}
+	})
+
+	t.Run("Unmarshal_shrinking_string_slice_zeros_tail", func(t *testing.T) {
+		type stringListMsg struct {
+			Items []string `omnibuf:"1"`
+		}
+		pkt4, err := ob.Marshal(&stringListMsg{Items: []string{"s0", "s1", "s2", "s3"}})
+		if err != nil {
+			t.Fatalf("Marshal 4 strings: %v", err)
+		}
+		pkt1, err := ob.Marshal(&stringListMsg{Items: []string{"only"}})
+		if err != nil {
+			t.Fatalf("Marshal 1 string: %v", err)
+		}
+
+		var dst stringListMsg
+		if err := ob.Unmarshal(pkt4, &dst); err != nil {
+			t.Fatalf("Unmarshal 4 strings: %v", err)
+		}
+		if err := ob.Unmarshal(pkt1, &dst); err != nil {
+			t.Fatalf("Unmarshal 1 string: %v", err)
+		}
+		if cap(dst.Items) < 4 {
+			t.Fatalf("precondition failed: expected reused slice cap >= 4, got %d", cap(dst.Items))
+		}
+		backing := dst.Items[:4]
+		for i := 1; i < 4; i++ {
+			if backing[i] != "" {
+				t.Errorf("omnibuf.Unmarshal left stale string header at backing[%d] = %q", i, backing[i])
+			}
+		}
+
+		pb4, err := omnibufproto.Marshal(&pb.PeerUpdate{Tags: []string{"t0", "t1", "t2", "t3"}})
+		if err != nil {
+			t.Fatalf("Marshal PeerUpdate 4 tags: %v", err)
+		}
+		pb1, err := omnibufproto.Marshal(&pb.PeerUpdate{Tags: []string{"only"}})
+		if err != nil {
+			t.Fatalf("Marshal PeerUpdate 1 tag: %v", err)
+		}
+		var pbDst pb.PeerUpdate
+		if err := omnibufproto.Unmarshal(pb4, &pbDst); err != nil {
+			t.Fatalf("Unmarshal PeerUpdate 4 tags: %v", err)
+		}
+		if err := omnibufproto.Unmarshal(pb1, &pbDst); err != nil {
+			t.Fatalf("Unmarshal PeerUpdate 1 tag: %v", err)
+		}
+		pbBacking := pbDst.Tags[:4]
+		for i := 1; i < 4; i++ {
+			if pbBacking[i] != "" {
+				t.Errorf("omnibufproto.Unmarshal left stale string header at pbDst.Tags[:4][%d] = %q", i, pbBacking[i])
+			}
+		}
+	})
+}
+
+func TestOpaqueMarshalRejectsCorruptPacket(t *testing.T) {
+	// Valid field #1 followed by truncated 2B varint at end of packet
+	var corrupt []byte
+	corrupt = appendTag(corrupt, 1, wire.WireUint)
+	corrupt = wire.AppendVarint(corrupt, 10)
+	corrupt = append(corrupt, 0x41, 0x02) // field #2 WireUint with truncated 2B varint
+
+	var op pb.OpaqueTestAllTypes
+	_ = op.Unmarshal(corrupt)
+	op.SetF1Uint32(99)
+	if _, err := op.Marshal(); err == nil {
+		t.Fatal("expected OpaqueTestAllTypes.Marshal to fail on trailing truncated field")
+	}
+	if _, err := op.TryMarshalAppend(nil); err == nil {
+		t.Fatal("expected OpaqueTestAllTypes.TryMarshalAppend to fail on trailing truncated field")
+	}
+}
 
 // A small, valid packet must not cause quadratic cumulative allocation when
 // repeated fields are fragmented into individual elements.
@@ -120,133 +298,6 @@ func TestFragmentedArrayAllocation(t *testing.T) {
 	}
 }
 
-func TestLargeDeterministicMap(t *testing.T) {
-	for _, count := range []int{16, 17, 4096} {
-		t.Run(fmt.Sprint(count), func(t *testing.T) {
-			values := make(map[string]uint64, count)
-			prefix := strings.Repeat("prefix-", 32)
-			for i := range count {
-				values[fmt.Sprintf("%s%08d", prefix, i)] = uint64(i)
-			}
-			type message struct {
-				Values map[string]uint64 `omnibuf:"12"`
-			}
-			want := wire.NewEncoder(0)
-			want.WriteMapStringUintDeterministic(12, values)
-			packet := want.Finish()
-			got, ok := wire.ReadMapStringUint(packet, 12, false)
-			if !ok || !reflect.DeepEqual(got, values) {
-				t.Fatal("map round trip failed")
-			}
-			// Both independent encoders must preserve identical sorted wire output.
-			for range 3 {
-				encoded, err := ob.MarshalOptions{Deterministic: true}.Marshal(&message{values})
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !bytes.Equal(encoded, packet) {
-					t.Fatal("table deterministic map differs")
-				}
-			}
-		})
-	}
-}
-
-// A shared schema must not be copied for each array element, including when
-// elements supply small local overrides of a large inherited schema.
-func TestBlindSharedSchemaAllocation(t *testing.T) {
-	for _, local := range []bool{false, true} {
-		t.Run(fmt.Sprintf("local=%v", local), func(t *testing.T) {
-			var small uint64
-			for _, count := range []int{256, 1024} {
-				fields := make(map[uint32]string, count)
-				for i := 1; i <= count; i++ {
-					fields[uint32(i)] = fmt.Sprintf("name_%d", i)
-				}
-				meta := &ob.SchemaMeta{Children: map[uint32]*ob.SchemaMeta{1: {Fields: fields}}}
-				packet := meta.AppendField0(nil, true)
-				body := wire.AppendVarint([]byte{wire.WireSubMsg}, uint64(count))
-				for i := range count {
-					elem := []byte{33, 1} // field 1, uint 0
-					if local && i%2 == 0 {
-						// Metadata after the value must still rename it, without
-						// changing the inherited schema for the next sibling.
-						elem = (&ob.SchemaMeta{Fields: map[uint32]string{1: "local"}}).AppendField0(elem, true)
-					}
-					body = wire.AppendVarint(body, uint64(len(elem)))
-					body = append(body, elem...)
-				}
-				packet = wire.AppendVarint(packet, 1<<4|uint64(wire.WireArray))
-				packet = wire.AppendVarint(packet, uint64(len(body)))
-				packet = append(packet, body...)
-				runtime.GC()
-				var before, after runtime.MemStats
-				runtime.ReadMemStats(&before)
-				out, err := ob.DecodeBlind(packet)
-				runtime.ReadMemStats(&after)
-				if err != nil {
-					t.Fatal(err)
-				}
-				children := out["field_1"].([]map[string]any)
-				if len(children) != count {
-					t.Fatal("wrong child count")
-				}
-				for i, child := range children {
-					name := "name_1"
-					if local && i%2 == 0 {
-						name = "local"
-					}
-					if value, ok := child[name]; !ok || value != uint64(0) || len(child) != 1 {
-						t.Fatalf("child %d: %v", i, child)
-					}
-				}
-				allocated := after.TotalAlloc - before.TotalAlloc
-				if count == 256 {
-					small = allocated
-				} else if allocated > 8<<20 || allocated > small*6 {
-					t.Fatalf("schema allocation is not linear: small=%d large=%d", small, allocated)
-				}
-			}
-		})
-	}
-}
-
-func TestBlindSchemaOverlayNestedMerges(t *testing.T) {
-	inherited := &ob.SchemaMeta{Children: map[uint32]*ob.SchemaMeta{1: {
-		Fields:   map[uint32]string{1: "nested"},
-		Children: map[uint32]*ob.SchemaMeta{1: {Fields: map[uint32]string{1: "original", 2: "retained"}}},
-	}}}
-	// Two local metadata blocks merge before overlaying the inherited child.
-	first := &ob.SchemaMeta{Children: map[uint32]*ob.SchemaMeta{1: {Fields: map[uint32]string{1: "replaced"}}}}
-	last := &ob.SchemaMeta{Children: map[uint32]*ob.SchemaMeta{1: {Fields: map[uint32]string{1: ""}}}}
-	grandchild := []byte{33, 3, 65, 5} // uint fields 1=1 and 2=2
-	child := wire.AppendVarint(nil, 1<<4|uint64(wire.WireSubMsg))
-	child = wire.AppendVarint(child, uint64(len(grandchild)))
-	child = append(child, grandchild...)
-	localChild := first.AppendField0(append([]byte(nil), child...), true)
-	localChild = last.AppendField0(localChild, true)
-	body := wire.AppendVarint([]byte{wire.WireSubMsg}, 2)
-	for _, elem := range [][]byte{localChild, child} {
-		body = wire.AppendVarint(body, uint64(len(elem)))
-		body = append(body, elem...)
-	}
-	packet := inherited.AppendField0(nil, true)
-	packet = wire.AppendVarint(packet, 1<<4|uint64(wire.WireArray))
-	packet = wire.AppendVarint(packet, uint64(len(body)))
-	packet = append(packet, body...)
-	got, err := ob.DecodeBlind(packet)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]any{"field_1": []map[string]any{
-		{"nested": map[string]any{"field_1": uint64(1), "retained": uint64(2)}},
-		{"nested": map[string]any{"original": uint64(1), "retained": uint64(2)}},
-	}}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-}
-
 func TestUnknownFieldDepthAndReservedTagsAndSpliceValidation(t *testing.T) {
 	// 1. Unknown nested WireArray exceeding MaxNestingDepth must be rejected across all schema-aware tiers.
 	deepUnknown := []byte{0x21, 0x05} // field #1 uint = 2 inside deepest array
@@ -301,39 +352,6 @@ func TestUnknownFieldDepthAndReservedTagsAndSpliceValidation(t *testing.T) {
 	gotSlice := wire.AppendUint32Arr(orig, corruptField2, 1)
 	if len(gotSlice) != 2 || gotSlice[0] != 11 || gotSlice[1] != 22 {
 		t.Fatalf("AppendUint32Arr failed to preserve orig slice: got %v", gotSlice)
-	}
-}
-
-func TestWireEncoderStackGrowthBeyond64(t *testing.T) {
-	enc := wire.NewEncoder(256)
-	const levels = 40 // 40 SubMsgArr + 40 SubMsgElem = 80 stack slots (> 64)
-	for range levels {
-		enc.BeginSubMsgArr(1)
-		enc.BeginSubMsgElem()
-	}
-	enc.BeginSubMsg(2)
-	enc.WriteUint(1, 777)
-	enc.EndSubMsg()
-	for range levels {
-		enc.EndSubMsgElem()
-		enc.EndSubMsgArr()
-	}
-	pkt := enc.Finish()
-	cur := pkt
-	for i := range levels {
-		elem, ok := wire.ReadSubMsgArrElem(cur, 1, 0)
-		if !ok {
-			t.Fatalf("failed reading submsg array elem at level %d", i)
-		}
-		cur = elem
-	}
-	inner, ok := wire.ReadSubMsg(cur, 2)
-	if !ok {
-		t.Fatal("failed reading inner submsg at leaf")
-	}
-	v, ok := wire.ReadUint(inner, 1)
-	if !ok || v != 777 {
-		t.Fatalf("expected inner uint 777, got %d (ok=%v)", v, ok)
 	}
 }
 

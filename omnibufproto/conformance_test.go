@@ -1939,17 +1939,17 @@ func buildInvalidWireCases() []InvalidWireCase {
 
 	// 16. Self-describing Field #0 (0x19) with corrupt fields map (wrong ValueType 0x00 instead of 0x0A)
 	field0CorruptFieldsMap := []byte{
-		byte(((0<<4)|WireSubMsg)<<1) | 1, 0x0B, // Field #0 (WireSubMsg), len = 5
-		byte(((2<<4)|WireMap)<<1) | 1, 0x07, 0x00, 0x00, 0x01, // SchemaMeta Field #2 (WireMap), len=3, invalid (0x00, 0x00), count=0
+		(((0 << 4) | WireSubMsg) << 1) | 1, 0x0B, // Field #0 (WireSubMsg), len = 5
+		(((2 << 4) | WireMap) << 1) | 1, 0x07, 0x00, 0x00, 0x01, // SchemaMeta Field #2 (WireMap), len=3, invalid (0x00, 0x00), count=0
 	}
 
 	// 17. Self-describing Field #0 (0x19) with truncated string inside children map
 	field0CorruptChildrenMap := []byte{
-		byte(((0<<4)|WireSubMsg)<<1) | 1, 0x15, // Field #0 (WireSubMsg), len = 10
-		byte(((3<<4)|WireMap)<<1) | 1, 0x11, WireUint, WireSubMsg, 0x03, // SchemaMeta Field #3 (WireMap), len=8, (uint->submsg), count=1
-		0x13,                                        // child key = 9
-		0x07,                                        // child submsg len = 3
-		byte(((1<<4)|WireString)<<1) | 1, 0x15, 'A', // child type_name claims len 10 (0x15), only 1 byte follows!
+		(((0 << 4) | WireSubMsg) << 1) | 1, 0x15, // Field #0 (WireSubMsg), len = 10
+		(((3 << 4) | WireMap) << 1) | 1, 0x11, WireUint, WireSubMsg, 0x03, // SchemaMeta Field #3 (WireMap), len=8, (uint->submsg), count=1
+		0x13,                                          // child key = 9
+		0x07,                                          // child submsg len = 3
+		(((1 << 4) | WireString) << 1) | 1, 0x15, 'A', // child type_name claims len 10 (0x15), only 1 byte follows!
 	}
 
 	// 18. 40-Level Deeply Nested WireSubMsg Bomb (exceeds MaxNestingDepth = 32)
@@ -2314,9 +2314,9 @@ func buildEdgeInvalidWireCases() []InvalidWireCase {
 		cat(AppendVarint(appendTag(nil, 1, WireUint), 1), []byte{0x01, 0x03}))
 	add("field0_corrupt_after_valid_field0", "CorruptField0", "A valid Field #0 followed later by a Field #0 whose SchemaMeta is truncated",
 		cat((&SchemaMeta{TypeName: "T"}).AppendField0(nil, true), AppendVarint(appendTag(nil, 1, WireUint), 1),
-			[]byte{0x19, 0x07, byte(((1<<4)|WireString)<<1 | 1), 0x15, 'A'}))
+			[]byte{0x19, 0x07, (((1 << 4) | WireString) << 1) | 1, 0x15, 'A'}))
 	add("field0_corrupt_inside_submsg", "CorruptField0", "Nested WireSubMsg containing a Field #0 with a wrong-type SchemaMeta fields map",
-		cat(appendTag(nil, 8, WireSubMsg), AppendVarint(nil, 7), []byte{0x19, 0x0B, byte(((2<<4)|WireMap)<<1 | 1), 0x07, WireUint, WireUint, 0x01}))
+		cat(appendTag(nil, 8, WireSubMsg), AppendVarint(nil, 7), []byte{0x19, 0x0B, (((2 << 4) | WireMap) << 1) | 1, 0x07, WireUint, WireUint, 0x01}))
 
 	// Nesting: arrays and maps count toward the 32-level limit.
 	nested := []byte{WireUint, 0x01} // innermost empty WireArray(WireUint) body

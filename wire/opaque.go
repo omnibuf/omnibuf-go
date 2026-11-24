@@ -64,7 +64,7 @@ func SpliceFields(dst, raw []byte, dirtyMask uint64, maxField uint16, appendDirt
 			wt = uint8(u & 0x0F)
 			pos += 2
 		} else {
-			tag, tn := decodeVarintMulti(raw[pos:])
+			tag, tn := DecodeVarint(raw[pos:])
 			if tn == 0 || tag>>4 > 536870911 {
 				break
 			}
@@ -164,7 +164,7 @@ func TrySpliceFields(dst, raw []byte, dirtyMask uint64, maxField uint16, appendD
 			wt = uint8(u & 0x0F)
 			pos += 2
 		} else {
-			tag, tn := decodeVarintMulti(raw[pos:])
+			tag, tn := DecodeVarint(raw[pos:])
 			if tn == 0 || tag>>4 > 536870911 {
 				return nil, fmt.Errorf("omnibuf: invalid or truncated tag during splice at %d", fieldStart)
 			}

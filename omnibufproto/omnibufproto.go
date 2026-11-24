@@ -159,7 +159,7 @@ func tryMarshalHook(dst []byte, v any, deterministic, selfDescribing bool) ([]by
 	return dst, false, nil
 }
 
-func tryUnmarshalHook(packet []byte, v any, maxBytes, maxDepth int, merge, zeroCopy bool) (bool, error) {
+func tryUnmarshalHook(packet []byte, v any, maxBytes, maxDepth int, merge, _ bool) (bool, error) {
 	if pm, ok := v.(proto.Message); ok {
 		if isNilOrInvalidProto(pm) {
 			return true, fmt.Errorf("omnibuf: Unmarshal requires non-nil proto.Message")

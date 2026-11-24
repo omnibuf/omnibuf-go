@@ -99,133 +99,15 @@ func MarshalDeterministic(v any) ([]byte, error) {
 	return MarshalOptions{Deterministic: true}.Marshal(v)
 }
 
-// Explicit 4-bit Wire Types (0..15) encoded in the low 4 bits of the field tag:
-// Tag = (FieldNumber << 4) | WireType
-const (
-	wireUint      uint8 = 0
-	wireSint      uint8 = 1
-	wireBoolFalse uint8 = 2
-	wireBoolTrue  uint8 = 3
-	wireFixed32   uint8 = 4
-	wireFixed64   uint8 = 5
-	wireSfixed32  uint8 = 6
-	wireSfixed64  uint8 = 7
-	wireFloat32   uint8 = 8
-	wireFloat64   uint8 = 9
-	wireString    uint8 = 10
-	wireBytes     uint8 = 11
-	wireSubMsg    uint8 = 12
-	wireArray     uint8 = 13
-	wireMap       uint8 = 14
-	wireExtended  uint8 = 15
-)
-
 // MaxNestingDepth is the maximum allowed sub-message / array nesting depth (prevents stack-overflow bombs).
 const MaxNestingDepth = 32
 
 const maxProtobufFieldNumber = 536870911
 
-func encodeZigZag(n int64) uint64 {
-	return uint64((n << 1) ^ (n >> 63))
-}
-
-func decodeZigZag(u uint64) int64 {
-	return int64(u>>1) ^ -int64(u&1)
-}
-
-func appendVarint(dst []byte, v uint64) []byte {
-	if v <= 127 {
-		return append(dst, byte(v<<1)|1)
-	}
-	return appendVarintMulti(dst, v)
-}
-
-//go:noinline
-func appendVarintMulti(dst []byte, v uint64) []byte {
-	if v <= 16383 {
-		u := uint16(v<<2) | 2
-		return append(dst, byte(u), byte(u>>8))
-	}
-	if v <= 536870911 {
-		u := uint32(v<<3) | 4
-		return append(dst, byte(u), byte(u>>8), byte(u>>16), byte(u>>24))
-	}
-	return append(dst,
-		0x00,
-		byte(v), byte(v>>8), byte(v>>16), byte(v>>24),
-		byte(v>>32), byte(v>>40), byte(v>>48), byte(v>>56),
-	)
-}
-
-// Keep this hot path inlineable; just go-inline-check guards the compiler decision.
-func decodeVarint(b []byte) (v uint64, n int) {
-	if len(b) == 0 {
-		return
-	}
-	b0 := b[0]
-	if b0&1 != 0 {
-		return uint64(b0 >> 1), 1
-	}
-	if b0&2 != 0 && len(b) >= 2 {
-		return uint64(binary.LittleEndian.Uint16(b) >> 2), 2
-	}
-	if b0&4 != 0 && len(b) >= 4 {
-		return uint64(binary.LittleEndian.Uint32(b) >> 3), 4
-	}
-	// A nine-byte varint must start with zero; other low-three-bit-zero prefixes are reserved.
-	if b0 == 0 && len(b) >= 9 {
-		return binary.LittleEndian.Uint64(b[1:]), 9
-	}
-	return
-}
-
-func decodeVarintMulti(b []byte) (uint64, int) {
-	return decodeVarint(b)
-}
-
-func backpatchContainerLen(dst []byte, lenPos int) []byte {
-	subLen := len(dst) - (lenPos + 2)
-	if uint(subLen) <= 16383 {
-		u := uint16(subLen<<2) | 2
-		dst[lenPos] = byte(u)
-		dst[lenPos+1] = byte(u >> 8)
-		return dst
-	}
-	return backpatchLargeContainerLen(dst, lenPos, uint64(subLen))
-}
-
-func backpatchContainerLen4(dst []byte, lenPos int) []byte {
-	subLen := uint64(len(dst) - (lenPos + 4))
-	if subLen <= 536870911 {
-		binary.LittleEndian.PutUint32(dst[lenPos:lenPos+4], uint32(subLen<<3)|4)
-		return dst
-	}
-	dst = append(dst, 0, 0, 0, 0, 0)
-	copy(dst[lenPos+9:], dst[lenPos+4:len(dst)-5])
-	dst[lenPos] = 0
-	binary.LittleEndian.PutUint64(dst[lenPos+1:lenPos+9], subLen)
-	return dst
-}
-
-//go:noinline
-func backpatchLargeContainerLen(dst []byte, lenPos int, subLen uint64) []byte {
-	if subLen <= 536870911 {
-		dst = append(dst, 0, 0)
-		copy(dst[lenPos+4:], dst[lenPos+2:len(dst)-2])
-		binary.LittleEndian.PutUint32(dst[lenPos:lenPos+4], uint32(subLen<<3)|4)
-		return dst
-	}
-	dst = append(dst, 0, 0, 0, 0, 0, 0, 0)
-	copy(dst[lenPos+9:], dst[lenPos+2:len(dst)-7])
-	dst[lenPos] = 0
-	binary.LittleEndian.PutUint64(dst[lenPos+1:lenPos+9], subLen)
-	return dst
-}
-
 func fastSkipValue(packet []byte, pos int, wt uint8) (int, bool) {
 	n := len(packet)
 	switch wt {
-	case wireUint, wireSint:
+	case wire.WireUint, wire.WireSint:
 		if uint(pos) >= uint(n) {
 			return 0, false
 		}
@@ -240,9 +122,9 @@ func fastSkipValue(packet []byte, pos int, wt uint8) (int, bool) {
 			return pos + 9, n-pos >= 9
 		}
 		return 0, false
-	case wireBoolFalse, wireBoolTrue:
+	case wire.WireBoolFalse, wire.WireBoolTrue:
 		return pos, uint(pos) <= uint(n)
-	case wireString, wireBytes, wireSubMsg, wireArray, wireMap, wireExtended:
+	case wire.WireString, wire.WireBytes, wire.WireSubMsg, wire.WireArray, wire.WireMap, wire.WireExtended:
 		if uint(pos) >= uint(n) {
 			return 0, false
 		}
@@ -259,12 +141,12 @@ func fastSkipValue(packet []byte, pos int, wt uint8) (int, bool) {
 			return pos + 2 + l, n-pos-2 >= l
 		}
 		return skipLargeContainer(packet, pos)
-	case wireFixed32, wireFloat32, wireSfixed32:
+	case wire.WireFixed32, wire.WireFloat32, wire.WireSfixed32:
 		if uint(pos) > uint(n) || n-pos < 4 {
 			return 0, false
 		}
 		return pos + 4, true
-	case wireFixed64, wireFloat64, wireSfixed64:
+	case wire.WireFixed64, wire.WireFloat64, wire.WireSfixed64:
 		if uint(pos) > uint(n) || n-pos < 8 {
 			return 0, false
 		}
@@ -276,7 +158,7 @@ func fastSkipValue(packet []byte, pos int, wt uint8) (int, bool) {
 
 //go:noinline
 func skipLargeContainer(packet []byte, pos int) (int, bool) {
-	bLen, bn := decodeVarintMulti(packet[pos:])
+	bLen, bn := wire.DecodeVarint(packet[pos:])
 	if bn == 0 || bLen > uint64(len(packet)-(pos+bn)) {
 		return 0, false
 	}
@@ -310,7 +192,7 @@ func skipValueWithMaxDepthChecked(b []byte, pos int, wireType uint8, depth, maxD
 	if pos < 0 || pos > len(b) {
 		return 0, fmt.Errorf("%w: position %d out of bounds", ErrCorruptWire, pos)
 	}
-	if wireType == wireSubMsg {
+	if wireType == wire.WireSubMsg {
 		body, end, err := readLenSlice(b, pos, 0)
 		if err != nil {
 			return 0, err
@@ -320,15 +202,15 @@ func skipValueWithMaxDepthChecked(b []byte, pos int, wireType uint8, depth, maxD
 		}
 		return end, nil
 	}
-	if wireType == wireArray || wireType == wireMap || wireType == wireExtended {
-		length, ln := decodeVarint(b[pos:])
+	if wireType == wire.WireArray || wireType == wire.WireMap || wireType == wire.WireExtended {
+		length, ln := wire.DecodeVarint(b[pos:])
 		if ln == 0 || length < 1 || length > uint64(len(b)-pos-ln) {
 			return 0, fmt.Errorf("%w: invalid container length", ErrCorruptWire)
 		}
 		end := pos + ln + int(length)
 		body := b[pos+ln : end]
 		switch wireType {
-		case wireArray:
+		case wire.WireArray:
 			if depth+1 > maxDepth {
 				return 0, fmt.Errorf("%w: nesting depth %d exceeds %d", ErrMaxDepth, depth+1, maxDepth)
 			}
@@ -339,7 +221,7 @@ func skipValueWithMaxDepthChecked(b []byte, pos int, wireType uint8, depth, maxD
 			if err := validateArrayBodyWithMaxDepthChecked(body, p, elemWT, count, depth+1, maxDepth, checkUTF8); err != nil {
 				return 0, err
 			}
-		case wireMap:
+		case wire.WireMap:
 			if depth+1 > maxDepth {
 				return 0, fmt.Errorf("%w: nesting depth %d exceeds %d", ErrMaxDepth, depth+1, maxDepth)
 			}
@@ -361,13 +243,13 @@ func skipValueWithMaxDepthChecked(b []byte, pos int, wireType uint8, depth, maxD
 			if p != len(body) {
 				return 0, fmt.Errorf("%w: trailing map bytes", ErrCorruptWire)
 			}
-		case wireExtended:
+		case wire.WireExtended:
 			// ByteLen >= 1 (checked above) already guarantees the 1-byte ExtType header is present.
 		}
 		return end, nil
 	}
 
-	if checkUTF8 && wireType == wireString {
+	if checkUTF8 && wireType == wire.WireString {
 		_, end, err := readStrSlice(b, pos)
 		return end, err
 	}
@@ -380,7 +262,7 @@ func skipValueWithMaxDepthChecked(b []byte, pos int, wireType uint8, depth, maxD
 
 func validateArrayBodyWithMaxDepthChecked(body []byte, p int, elemWT uint8, count, depth, maxDepth int, checkUTF8 bool) error {
 	switch elemWT {
-	case wireBoolFalse:
+	case wire.WireBoolFalse:
 		if len(body)-p != count {
 			return fmt.Errorf("%w: invalid bool array length", ErrCorruptWire)
 		}
@@ -390,12 +272,12 @@ func validateArrayBodyWithMaxDepthChecked(body []byte, p int, elemWT uint8, coun
 			}
 		}
 		return nil
-	case wireFixed32, wireSfixed32, wireFloat32:
+	case wire.WireFixed32, wire.WireSfixed32, wire.WireFloat32:
 		if len(body)-p != count*4 {
 			return fmt.Errorf("%w: invalid 32-bit array length", ErrCorruptWire)
 		}
 		return nil
-	case wireFixed64, wireSfixed64, wireFloat64:
+	case wire.WireFixed64, wire.WireSfixed64, wire.WireFloat64:
 		if len(body)-p != count*8 {
 			return fmt.Errorf("%w: invalid 64-bit array length", ErrCorruptWire)
 		}
@@ -419,7 +301,7 @@ func validateContainerEntryChecked(body []byte, p int, wt uint8, depth int, chec
 }
 
 func validateContainerEntryWithMaxDepthChecked(body []byte, p int, wt uint8, depth, maxDepth int, checkUTF8 bool) (int, error) {
-	if wt == wireBoolFalse {
+	if wt == wire.WireBoolFalse {
 		if p >= len(body) || body[p] > 1 {
 			return 0, fmt.Errorf("%w: invalid bool byte in container", ErrCorruptWire)
 		}
@@ -439,7 +321,7 @@ func validateMessageBytesWithMaxDepthChecked(data []byte, depth, maxDepth int, c
 	pos := 0
 	n := len(data)
 	for pos < n {
-		tag, tn := decodeVarint(data[pos:])
+		tag, tn := wire.DecodeVarint(data[pos:])
 		if tn == 0 || tag>>4 > maxProtobufFieldNumber {
 			return fmt.Errorf("%w: invalid or truncated tag", ErrCorruptWire)
 		}
@@ -482,7 +364,7 @@ func nextContainerField(packet []byte, pos int, targetField uint16, expWT uint8,
 			wt = uint8(u & 0x0F)
 			pos += 2
 		} else {
-			tag, tn := decodeVarintMulti(packet[pos:])
+			tag, tn := wire.DecodeVarint(packet[pos:])
 			if tn == 0 || tag>>4 > maxProtobufFieldNumber {
 				return nil, 0, false, false
 			}
@@ -492,7 +374,7 @@ func nextContainerField(packet []byte, pos int, targetField uint16, expWT uint8,
 		}
 
 		if fnum == 0 {
-			if wt != wireSubMsg {
+			if wt != wire.WireSubMsg {
 				return nil, 0, false, false
 			}
 			if targetField != 0 {
@@ -508,7 +390,7 @@ func nextContainerField(packet []byte, pos int, targetField uint16, expWT uint8,
 			if wt != expWT {
 				return nil, 0, false, false
 			}
-			bLen, bn := decodeVarint(packet[pos:])
+			bLen, bn := wire.DecodeVarint(packet[pos:])
 			if bn == 0 || bLen < minLen || bLen > uint64(n-(pos+bn)) {
 				return nil, 0, false, false
 			}
@@ -552,7 +434,7 @@ func decodeStr(b []byte, zeroCopy bool) string {
 }
 
 func readLenSlice(data []byte, pos int, minLen uint64) (body []byte, nextPos int, err error) {
-	bLen, bn := decodeVarint(data[pos:])
+	bLen, bn := wire.DecodeVarint(data[pos:])
 	if bn == 0 {
 		return nil, 0, fmt.Errorf("%w: truncated length varint at %d", ErrCorruptWire, pos)
 	}
@@ -579,11 +461,11 @@ func readStrSlice(data []byte, pos int) (body []byte, nextPos int, err error) {
 
 func countSubMsgArrElems(body []byte) (int, bool) {
 	e, count, p, ok := parseArrayHeader(body)
-	if !ok || e != wireSubMsg {
+	if !ok || e != wire.WireSubMsg {
 		return 0, false
 	}
 	for i := 0; i < count; i++ {
-		l, n := decodeVarint(body[p:])
+		l, n := wire.DecodeVarint(body[p:])
 		if n == 0 || l > uint64(len(body)-p-n) {
 			return 0, false
 		}

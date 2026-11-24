@@ -140,7 +140,7 @@ func ReadSubMsg(packet []byte, fieldNum uint16) ([]byte, bool) {
 			wt = uint8(u & 0x0F)
 			pos += 2
 		} else {
-			tag, tn := decodeVarintMulti(packet[pos:])
+			tag, tn := DecodeVarint(packet[pos:])
 			if tn == 0 || tag>>4 > 536870911 {
 				return nil, false
 			}
@@ -202,7 +202,7 @@ func ReadSubMsg(packet []byte, fieldNum uint16) ([]byte, bool) {
 				}
 				pos += 2 + int(binary.LittleEndian.Uint16(packet[pos:pos+2])>>2)
 			} else {
-				bLen, bn := decodeVarintMulti(packet[pos:])
+				bLen, bn := DecodeVarint(packet[pos:])
 				if bn == 0 || bLen > uint64(n-(pos+bn)) {
 					return nil, false
 				}

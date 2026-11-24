@@ -12,13 +12,11 @@ import (
 	"google.golang.org/protobuf/types/pluginpb"
 )
 
-// TestAuditGO1_OutOfOrderFieldNumbersInOpaqueSplice isolates GO-1:
-// When a .proto message declares fields out of ascending field-number order
-// (e.g. `string title = 10; uint32 severity = 2;`), generateOpaqueMessage sets
-// `maxFnum` from the last declared field (`2`) instead of the maximum field
-// number (`10`). As a result, SpliceFields and TrySpliceFields stop scanning
-// newly dirtied bits at `2` and silently drop field `#10`.
-func TestAuditGO1_OutOfOrderFieldNumbersInOpaqueSplice(t *testing.T) {
+// TestOpaqueSpliceOutOfOrderFieldNumbers verifies that when a .proto message
+// declares fields out of ascending field-number order, the generated Opaque
+// type tracks the true maximum field number so SpliceFields and TrySpliceFields
+// do not drop mutated high-numbered fields.
+func TestOpaqueSpliceOutOfOrderFieldNumbers(t *testing.T) {
 	opt := descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL
 	fdp := &descriptorpb.FileDescriptorProto{
 		Syntax:  proto.String("proto3"),

@@ -424,7 +424,7 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 		}
 		switch f.Desc.Kind() {
 		case protoreflect.BoolKind:
-			constMinBytes += 1
+			constMinBytes++
 		case protoreflect.Fixed32Kind, protoreflect.Sfixed32Kind, protoreflect.FloatKind:
 			constMinBytes += 5
 		case protoreflect.Fixed64Kind, protoreflect.Sfixed64Kind, protoreflect.DoubleKind:

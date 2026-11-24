@@ -50,32 +50,32 @@ func appendFixed64ArrBody(d []uint64, b []byte, elem uint8) ([]uint64, bool) {
 
 // encodeStringArrAs encodes []string as a WireArray of elem (WireString or WireBytes).
 func encodeStringArrAs(d []byte, v []string, elem uint8) []byte {
-	if elem == wireString {
+	if elem == wire.WireString {
 		return wire.EncodeStringArr(d, v)
 	}
 	p := len(d)
 	d = append(d, 0, 0, elem)
-	d = appendVarint(d, uint64(len(v)))
+	d = wire.AppendVarint(d, uint64(len(v)))
 	for _, x := range v {
-		d = appendVarint(d, uint64(len(x)))
+		d = wire.AppendVarint(d, uint64(len(x)))
 		d = append(d, x...)
 	}
-	return backpatchContainerLen(d, p)
+	return wire.BackpatchContainerLen(d, p)
 }
 
 // encodeBytesArrAs encodes [][]byte as a WireArray of elem (WireBytes or WireString).
 func encodeBytesArrAs(d []byte, v [][]byte, elem uint8) []byte {
-	if elem == wireBytes {
+	if elem == wire.WireBytes {
 		return wire.EncodeBytesArr(d, v)
 	}
 	p := len(d)
 	d = append(d, 0, 0, elem)
-	d = appendVarint(d, uint64(len(v)))
+	d = wire.AppendVarint(d, uint64(len(v)))
 	for _, x := range v {
-		d = appendVarint(d, uint64(len(x)))
+		d = wire.AppendVarint(d, uint64(len(x)))
 		d = append(d, x...)
 	}
-	return backpatchContainerLen(d, p)
+	return wire.BackpatchContainerLen(d, p)
 }
 
 // appendLenDelimArrBody decodes a WireArray body whose elements are
@@ -87,14 +87,14 @@ func appendLenDelimArrBody[T any](dst []T, body []byte, elem uint8, conv func([]
 	}
 	dst, start := growSliceOmni(dst, c)
 	for i := 0; i < c; i++ {
-		l, n := decodeVarint(body[p:])
+		l, n := wire.DecodeVarint(body[p:])
 		if n == 0 || l > uint64(len(body)-p-n) {
 			return nil, false
 		}
 		p += n
 		end := p + int(l)
 		b := body[p:end:end]
-		if elem == wireString && !wire.ValidUTF8(b) {
+		if elem == wire.WireString && !wire.ValidUTF8(b) {
 			return nil, false
 		}
 		dst[start+i] = conv(b)
@@ -115,14 +115,14 @@ func growSliceOmni[T any](dst []T, add int) ([]T, int) {
 }
 
 func appendStringArrBodyAs(d []string, b []byte, zero bool, elem uint8) ([]string, bool) {
-	if elem == wireString {
+	if elem == wire.WireString {
 		return wire.AppendStringArrBody(d, b, zero)
 	}
 	return appendLenDelimArrBody(d, b, elem, func(x []byte) string { return decodeStr(x, zero) })
 }
 
 func appendBytesArrBodyAs(d [][]byte, b []byte, zero bool, elem uint8) ([][]byte, bool) {
-	if elem == wireBytes {
+	if elem == wire.WireBytes {
 		return wire.AppendBytesArrBody(d, b, zero)
 	}
 	return appendLenDelimArrBody(d, b, elem, func(x []byte) []byte {
