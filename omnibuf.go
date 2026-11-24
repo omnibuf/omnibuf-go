@@ -303,14 +303,6 @@ func skipValue(b []byte, pos int, wireType uint8) (int, error) {
 	return skipValueWithMaxDepthChecked(b, pos, wireType, 0, MaxNestingDepth, false)
 }
 
-func skipValueWithDepth(b []byte, pos int, wireType uint8, depth int) (int, error) {
-	return skipValueWithMaxDepthChecked(b, pos, wireType, depth, MaxNestingDepth, false)
-}
-
-func skipValueWithDepthChecked(b []byte, pos int, wireType uint8, depth int, checkUTF8 bool) (int, error) {
-	return skipValueWithMaxDepthChecked(b, pos, wireType, depth, MaxNestingDepth, checkUTF8)
-}
-
 func skipValueWithMaxDepthChecked(b []byte, pos int, wireType uint8, depth, maxDepth int, checkUTF8 bool) (int, error) {
 	if depth > maxDepth {
 		return 0, fmt.Errorf("%w: nesting depth %d exceeds %d", ErrMaxDepth, depth, maxDepth)
