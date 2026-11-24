@@ -39,7 +39,7 @@ OmniBuf works directly with plain Go structs using `omnibuf:"..."` struct tags a
 
 ### 1. Plain Go Structs (`omnibuf` Struct Tags)
 
-Tag exported struct fields with a field number (`1..65535`) and optional key-value settings (`name=<name>`, `wire=<type>`, `omitempty`, or `-` to ignore):
+Tag exported struct fields with a field number (`1..536,870,911`, excluding Protobuf's reserved `19000..19999` range) and optional key-value settings (`name=<name>`, `wire=<type>`, `omitempty`, or `-` to ignore). Unknown fields are validated and skipped during `Unmarshal` rather than stored on the struct; use `SpliceFields` to preserve unknown fields when updating packets in place.
 
 ```go
 package main

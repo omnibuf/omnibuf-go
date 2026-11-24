@@ -752,6 +752,9 @@ type Encoder struct {
 
 // NewEncoder creates an Encoder with the specified initial buffer capacity.
 func NewEncoder(capacity int) *Encoder {
+	if capacity < 0 {
+		capacity = 0
+	}
 	return &Encoder{
 		buf: make([]byte, 0, capacity),
 	}

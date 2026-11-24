@@ -7,4 +7,4 @@ var MarshalHook func(dst []byte, v any, deterministic, selfDescribing bool) ([]b
 
 // UnmarshalHook allows the optional omnibufproto submodule to register
 // proto.Message and protoreflect.Message deserialization.
-var UnmarshalHook func(packet []byte, v any) (bool, error)
+var UnmarshalHook func(packet []byte, v any, maxBytes, maxDepth int, merge, zeroCopy bool) (bool, error)

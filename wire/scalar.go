@@ -38,7 +38,14 @@ func (e *Encoder) WriteFixed32(fieldNum uint16, v uint32) {
 	e.buf = append(e.buf, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
 }
 
-// WriteFloat32 writes a 4-byte IEEE-754 float32 field (WireFixed32).
+// WriteSfixed32 writes a 4-byte little-endian signed int32 field (WireSfixed32).
+func (e *Encoder) WriteSfixed32(fieldNum uint16, v int32) {
+	e.writeTag(fieldNum, WireSfixed32)
+	u := uint32(v)
+	e.buf = append(e.buf, byte(u), byte(u>>8), byte(u>>16), byte(u>>24))
+}
+
+// WriteFloat32 writes a 4-byte IEEE-754 float32 field (WireFloat32).
 func (e *Encoder) WriteFloat32(fieldNum uint16, v float32) {
 	e.writeTag(fieldNum, WireFloat32)
 	e.buf = binary.LittleEndian.AppendUint32(e.buf, math.Float32bits(v))
@@ -53,7 +60,17 @@ func (e *Encoder) WriteFixed64(fieldNum uint16, v uint64) {
 	)
 }
 
-// WriteFloat64 writes an 8-byte IEEE-754 float64 field (WireFixed64).
+// WriteSfixed64 writes an 8-byte little-endian signed int64 field (WireSfixed64).
+func (e *Encoder) WriteSfixed64(fieldNum uint16, v int64) {
+	e.writeTag(fieldNum, WireSfixed64)
+	u := uint64(v)
+	e.buf = append(e.buf,
+		byte(u), byte(u>>8), byte(u>>16), byte(u>>24),
+		byte(u>>32), byte(u>>40), byte(u>>48), byte(u>>56),
+	)
+}
+
+// WriteFloat64 writes an 8-byte IEEE-754 float64 field (WireFloat64).
 func (e *Encoder) WriteFloat64(fieldNum uint16, v float64) {
 	e.writeTag(fieldNum, WireFloat64)
 	e.buf = binary.LittleEndian.AppendUint64(e.buf, math.Float64bits(v))

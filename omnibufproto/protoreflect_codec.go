@@ -7,6 +7,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"sync"
 
 	"github.com/omnibuf/omnibuf-go"
 	"github.com/omnibuf/omnibuf-go/wire"
@@ -14,14 +15,63 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
+type protoDescCacheEntry struct {
+	sortedFields []protoreflect.FieldDescriptor
+	metaOnce     sync.Once
+	schemaMeta   *omnibuf.SchemaMeta
+	field0Wire   []byte
+	cyclicSchema bool
+}
+
+var protoDescCache sync.Map // map[protoreflect.MessageDescriptor]*protoDescCacheEntry
+
+func getProtoDescCache(md protoreflect.MessageDescriptor) *protoDescCacheEntry {
+	if c, ok := protoDescCache.Load(md); ok {
+		return c.(*protoDescCacheEntry)
+	}
+	fields := md.Fields()
+	n := fields.Len()
+	sorted := make([]protoreflect.FieldDescriptor, n)
+	inOrder := true
+	var prev protoreflect.FieldNumber
+	for i := range n {
+		fd := fields.Get(i)
+		sorted[i] = fd
+		if i > 0 && fd.Number() < prev {
+			inOrder = false
+		}
+		prev = fd.Number()
+	}
+	if !inOrder {
+		slices.SortFunc(sorted, func(a, b protoreflect.FieldDescriptor) int {
+			return cmp.Compare(a.Number(), b.Number())
+		})
+	}
+	entry := &protoDescCacheEntry{
+		sortedFields: sorted,
+	}
+	actual, _ := protoDescCache.LoadOrStore(md, entry)
+	return actual.(*protoDescCacheEntry)
+}
+
+func (e *protoDescCacheEntry) getField0Wire(md protoreflect.MessageDescriptor) ([]byte, bool) {
+	e.metaOnce.Do(func() {
+		e.schemaMeta, e.cyclicSchema = buildProtoReflectSchemaMeta(md, 1, nil)
+		if !e.cyclicSchema && e.schemaMeta != nil {
+			e.field0Wire = e.schemaMeta.AppendField0(nil, true)
+		}
+	})
+	return e.field0Wire, e.cyclicSchema
+}
+
 func readLenSlice(data []byte, pos int, minLen uint64) ([]byte, int, error) {
 	bLen, bn := wire.DecodeVarint(data[pos:])
 	if bn == 0 {
-		return nil, 0, fmt.Errorf("omnibuf: truncated length varint at %d", pos)
+		return nil, 0, fmt.Errorf("%w: truncated length varint at %d", omnibuf.ErrCorruptWire, pos)
 	}
 	pos += bn
 	if bLen < minLen || bLen > uint64(len(data)-pos) {
-		return nil, 0, fmt.Errorf("omnibuf: invalid byteLen %d at %d", bLen, pos)
+		return nil, 0, fmt.Errorf("%w: invalid byteLen %d at %d", omnibuf.ErrCorruptWire, bLen, pos)
 	}
 	end := pos + int(bLen)
 	return data[pos:end:end], end, nil
@@ -33,16 +83,16 @@ func readStrSlice(data []byte, pos int) ([]byte, int, error) {
 		return nil, 0, err
 	}
 	if !wire.ValidUTF8(body) {
-		return nil, 0, fmt.Errorf("omnibuf: invalid UTF-8 in WireString at %d", pos)
+		return nil, 0, fmt.Errorf("%w at %d", omnibuf.ErrInvalidUTF8, pos)
 	}
 	return body, nextPos, nil
 }
 
-func validateField0(data []byte, pos int, wt uint8, depth int) (int, error) {
+func validateField0WithMaxDepth(data []byte, pos int, wt uint8, depth, maxDepth int) (int, error) {
 	if wt != wire.WireSubMsg {
-		return 0, fmt.Errorf("omnibuf: invalid Field #0 wire type %d", wt)
+		return 0, fmt.Errorf("%w: invalid Field #0 wire type %d", omnibuf.ErrCorruptWire, wt)
 	}
-	return omnibuf.ValidateField0(data, pos, depth)
+	return omnibuf.ValidateField0WithMaxDepth(data, pos, depth, maxDepth)
 }
 
 func mergeSchemaMeta(base, next *omnibuf.SchemaMeta) *omnibuf.SchemaMeta {
@@ -95,11 +145,14 @@ func (o MarshalOptions) marshalProtoReflectAppend(dst []byte, m protoreflect.Mes
 		dst = grown
 	}
 	if o.SelfDescribing {
-		meta, cyclic := buildProtoReflectSchemaMeta(m.Descriptor(), 1, nil)
+		entry := getProtoDescCache(m.Descriptor())
+		f0, cyclic := entry.getField0Wire(m.Descriptor())
 		if cyclic {
-			meta = buildProtoReflectValueSchemaMeta(m, 1)
+			meta := buildProtoReflectValueSchemaMeta(m, 1)
+			dst = meta.AppendField0(dst, o.Deterministic)
+		} else {
+			dst = append(dst, f0...)
 		}
-		dst = meta.AppendField0(dst, o.Deterministic)
 	}
 	bodyOpts := o
 	bodyOpts.SelfDescribing = false
@@ -328,7 +381,7 @@ func appendProtoScalarPayload(dst []byte, k protoreflect.Kind, v protoreflect.Va
 	case protoreflect.StringKind:
 		s := v.String()
 		if !wire.ValidUTF8String(s) {
-			return nil, fmt.Errorf("omnibuf: string contains invalid UTF-8 (use bytes for binary data)")
+			return nil, fmt.Errorf("%w (use bytes for binary data)", omnibuf.ErrInvalidUTF8)
 		}
 		dst = wire.AppendVarint(dst, uint64(len(s)))
 		return append(dst, s...), nil
@@ -419,7 +472,7 @@ func decodeProtoScalarPayload(data []byte, pos int, k protoreflect.Kind) (protor
 
 func encodeProtoReflectMsg(dst []byte, m protoreflect.Message, opts MarshalOptions, depth int) ([]byte, error) {
 	if depth > omnibuf.MaxNestingDepth {
-		return nil, fmt.Errorf("omnibuf: nesting depth %d exceeds omnibuf.MaxNestingDepth (%d)", depth, omnibuf.MaxNestingDepth)
+		return nil, fmt.Errorf("%w: nesting depth %d exceeds omnibuf.MaxNestingDepth (%d)", omnibuf.ErrMaxDepth, depth, omnibuf.MaxNestingDepth)
 	}
 	md := m.Descriptor()
 	if md.ExtensionRanges().Len() > 0 {
@@ -435,11 +488,9 @@ func encodeProtoReflectMsg(dst []byte, m protoreflect.Message, opts MarshalOptio
 			return nil, fmt.Errorf("omnibuf: protobuf extensions are not supported (%s)", extFD.FullName())
 		}
 	}
-	fields := md.Fields()
-	nFields := fields.Len()
+	entry := getProtoDescCache(md)
 
-	for i := range nFields {
-		fd := fields.Get(i)
+	for _, fd := range entry.sortedFields {
 		fnum := uint32(fd.Number())
 		if fd.HasPresence() && !m.Has(fd) {
 			continue
@@ -448,7 +499,7 @@ func encodeProtoReflectMsg(dst []byte, m protoreflect.Message, opts MarshalOptio
 
 		if fd.IsMap() {
 			if depth+1 > omnibuf.MaxNestingDepth {
-				return nil, fmt.Errorf("omnibuf: nesting depth %d exceeds omnibuf.MaxNestingDepth (%d)", depth+1, omnibuf.MaxNestingDepth)
+				return nil, fmt.Errorf("%w: nesting depth %d exceeds omnibuf.MaxNestingDepth (%d)", omnibuf.ErrMaxDepth, depth+1, omnibuf.MaxNestingDepth)
 			}
 			mp := val.Map()
 			keyWT, err := protoScalarWireType(fd.MapKey().Kind())
@@ -567,21 +618,27 @@ func encodeProtoReflectMsg(dst []byte, m protoreflect.Message, opts MarshalOptio
 	return dst, nil
 }
 
-func unmarshalProtoReflect(data []byte, m protoreflect.Message) error {
+func unmarshalProtoReflectWithOptions(data []byte, m protoreflect.Message, maxBytes, maxDepth int, merge bool) error {
+	if maxBytes > 0 && len(data) > maxBytes {
+		return fmt.Errorf("%w: %d > %d", omnibuf.ErrMessageTooLarge, len(data), maxBytes)
+	}
 	if m == nil || !m.IsValid() {
 		return fmt.Errorf("omnibuf: Unmarshal requires non-nil protoreflect.Message")
 	}
-	// Like proto.Unmarshal, decoding replaces the destination message:
-	// decodeProtoReflectMsg (merge=false) clears every field absent from data.
-	if err := decodeProtoReflectMsg(data, m, 0, false); err != nil {
+	if maxDepth <= 0 {
+		maxDepth = omnibuf.MaxNestingDepth
+	}
+	// Like proto.Unmarshal, decoding replaces the destination message when merge is false:
+	// decodeProtoReflectMsg clears every field absent from data.
+	if err := decodeProtoReflectMsg(data, m, 0, maxDepth, merge); err != nil {
 		return err
 	}
 	return proto.CheckInitialized(m.Interface())
 }
 
-func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge bool) error {
-	if depth > omnibuf.MaxNestingDepth {
-		return fmt.Errorf("omnibuf: nesting depth %d exceeds omnibuf.MaxNestingDepth (%d)", depth, omnibuf.MaxNestingDepth)
+func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth, maxDepth int, merge bool) error {
+	if depth > maxDepth {
+		return fmt.Errorf("%w: nesting depth %d exceeds %d", omnibuf.ErrMaxDepth, depth, maxDepth)
 	}
 	fields := m.Descriptor().Fields()
 	n := len(data)
@@ -591,14 +648,14 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 	for pos < n {
 		tag, tn := wire.DecodeVarint(data[pos:])
 		if tn == 0 || tag>>4 > (1<<29)-1 {
-			return fmt.Errorf("omnibuf: truncated or invalid tag at %d", pos)
+			return fmt.Errorf("%w: truncated or invalid tag at %d", omnibuf.ErrCorruptWire, pos)
 		}
 		pos += tn
 		fnum := uint32(tag >> 4)
 		wt := uint8(tag & 0x0F)
 
 		if fnum == 0 {
-			nextPos, err := validateField0(data, pos, wt, depth)
+			nextPos, err := validateField0WithMaxDepth(data, pos, wt, depth, maxDepth)
 			if err != nil {
 				return err
 			}
@@ -608,7 +665,7 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 
 		fd := fields.ByNumber(protoreflect.FieldNumber(fnum))
 		if fd == nil {
-			nextPos, err := omnibuf.ValidateValue(data, pos, wt, depth)
+			nextPos, err := omnibuf.ValidateValueWithMaxDepth(data, pos, wt, depth, maxDepth)
 			if err != nil {
 				return err
 			}
@@ -618,15 +675,15 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 
 		if fd.IsMap() {
 			if wt != wire.WireMap {
-				nextPos, err := omnibuf.ValidateValue(data, pos, wt, depth)
+				nextPos, err := omnibuf.ValidateValueWithMaxDepth(data, pos, wt, depth, maxDepth)
 				if err != nil {
 					return err
 				}
 				pos = nextPos
 				continue
 			}
-			if depth+1 > omnibuf.MaxNestingDepth {
-				return fmt.Errorf("omnibuf: nesting depth %d exceeds omnibuf.MaxNestingDepth (%d)", depth+1, omnibuf.MaxNestingDepth)
+			if depth+1 > maxDepth {
+				return fmt.Errorf("%w: nesting depth %d exceeds %d", omnibuf.ErrMaxDepth, depth+1, maxDepth)
 			}
 			alreadySeen := seen[fnum] || merge
 			seen[fnum] = true
@@ -636,15 +693,15 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 			}
 			keyWT, valWT, count, p, ok := wire.ParseMapHeader(body)
 			if !ok {
-				return fmt.Errorf("omnibuf: invalid wire.WireMap header at %d", pos)
+				return fmt.Errorf("%w: invalid wire.WireMap header at %d", omnibuf.ErrCorruptWire, pos)
 			}
 			expKeyWT, err := protoScalarWireType(fd.MapKey().Kind())
 			if err != nil || keyWT != expKeyWT {
-				return fmt.Errorf("omnibuf: wire.WireMap key wire type mismatch at %d", pos)
+				return fmt.Errorf("%w: wire.WireMap key wire type mismatch at %d", omnibuf.ErrCorruptWire, pos)
 			}
 			expValWT, err := protoScalarWireType(fd.MapValue().Kind())
 			if err != nil || valWT != expValWT {
-				return fmt.Errorf("omnibuf: wire.WireMap val wire type mismatch at %d", pos)
+				return fmt.Errorf("%w: wire.WireMap val wire type mismatch at %d", omnibuf.ErrCorruptWire, pos)
 			}
 			mp := m.Mutable(fd).Map()
 			if !alreadySeen {
@@ -658,7 +715,7 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 				if err != nil {
 					return err
 				}
-				mv, nextP2, err := decodeMapEntryVal(body, nextP, fd.MapValue(), mp, depth+1)
+				mv, nextP2, err := decodeMapEntryVal(body, nextP, fd.MapValue(), mp, depth+1, maxDepth)
 				if err != nil {
 					return err
 				}
@@ -666,7 +723,7 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 				mp.Set(kv.MapKey(), mv)
 			}
 			if p != len(body) {
-				return fmt.Errorf("omnibuf: wire.WireMap trailing bytes at %d", p)
+				return fmt.Errorf("%w: wire.WireMap trailing bytes at %d", omnibuf.ErrCorruptWire, p)
 			}
 			pos = nextPos
 			continue
@@ -674,15 +731,15 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 
 		if fd.IsList() {
 			if wt != wire.WireArray {
-				nextPos, err := omnibuf.ValidateValue(data, pos, wt, depth)
+				nextPos, err := omnibuf.ValidateValueWithMaxDepth(data, pos, wt, depth, maxDepth)
 				if err != nil {
 					return err
 				}
 				pos = nextPos
 				continue
 			}
-			if depth+1 > omnibuf.MaxNestingDepth {
-				return fmt.Errorf("omnibuf: nesting depth %d exceeds omnibuf.MaxNestingDepth (%d)", depth+1, omnibuf.MaxNestingDepth)
+			if depth+1 > maxDepth {
+				return fmt.Errorf("%w: nesting depth %d exceeds %d", omnibuf.ErrMaxDepth, depth+1, maxDepth)
 			}
 			alreadySeen := seen[fnum] || merge
 			seen[fnum] = true
@@ -693,7 +750,7 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 			elem, count, p, ok := wire.ParseArrayHeader(body)
 			expected, err := protoScalarWireType(fd.Kind())
 			if !ok || err != nil || elem != expected {
-				return fmt.Errorf("omnibuf: invalid array element type on %s", fd.FullName())
+				return fmt.Errorf("%w: invalid array element type on %s", omnibuf.ErrCorruptWire, fd.FullName())
 			}
 			list := m.Mutable(fd).List()
 			if !alreadySeen {
@@ -706,7 +763,7 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 						return err
 					}
 					v := list.NewElement().Message()
-					if err := decodeProtoReflectMsg(sub, v, depth+2, false); err != nil {
+					if err := decodeProtoReflectMsg(sub, v, depth+2, maxDepth, false); err != nil {
 						return err
 					}
 					list.Append(protoreflect.ValueOfMessage(v))
@@ -721,7 +778,7 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 				}
 			}
 			if p != len(body) {
-				return fmt.Errorf("omnibuf: array count/length mismatch")
+				return fmt.Errorf("%w: array count/length mismatch", omnibuf.ErrCorruptWire)
 			}
 			pos = next
 			continue
@@ -730,7 +787,7 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 		// Singular field:
 		if fd.Kind() == protoreflect.BoolKind {
 			if wt != wire.WireBoolFalse && wt != wire.WireBoolTrue {
-				nextPos, err := omnibuf.ValidateValue(data, pos, wt, depth)
+				nextPos, err := omnibuf.ValidateValueWithMaxDepth(data, pos, wt, depth, maxDepth)
 				if err != nil {
 					return err
 				}
@@ -749,7 +806,7 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 		if wt != expWT {
 			// Known field with a different wire type: validated and skipped
 			// like an unknown field (Protobuf semantics, shared by all tiers).
-			nextPos, err := omnibuf.ValidateValue(data, pos, wt, depth)
+			nextPos, err := omnibuf.ValidateValueWithMaxDepth(data, pos, wt, depth, maxDepth)
 			if err != nil {
 				return err
 			}
@@ -766,7 +823,7 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 				return err
 			}
 			subMsg := m.Mutable(fd).Message()
-			if err := decodeProtoReflectMsg(subBytes, subMsg, depth+1, alreadySeen); err != nil {
+			if err := decodeProtoReflectMsg(subBytes, subMsg, depth+1, maxDepth, alreadySeen); err != nil {
 				return err
 			}
 			pos = nextPos
@@ -827,15 +884,15 @@ func appendMapEntryVal(dst []byte, vd protoreflect.FieldDescriptor, v protorefle
 	}
 }
 
-func decodeMapEntryVal(body []byte, p int, vd protoreflect.FieldDescriptor, mp protoreflect.Map, depth int) (protoreflect.Value, int, error) {
+func decodeMapEntryVal(body []byte, p int, vd protoreflect.FieldDescriptor, mp protoreflect.Map, depth, maxDepth int) (protoreflect.Value, int, error) {
 	switch vd.Kind() {
 	case protoreflect.BoolKind:
 		if len(body)-p < 1 {
-			return protoreflect.Value{}, 0, fmt.Errorf("omnibuf: truncated wire.WireMap bool val at %d", p)
+			return protoreflect.Value{}, 0, fmt.Errorf("%w: truncated wire.WireMap bool val at %d", omnibuf.ErrCorruptWire, p)
 		}
 		b := body[p]
 		if b != 0 && b != 1 {
-			return protoreflect.Value{}, 0, fmt.Errorf("omnibuf: invalid wire.WireMap bool val %d at %d", b, p)
+			return protoreflect.Value{}, 0, fmt.Errorf("%w: invalid wire.WireMap bool val %d at %d", omnibuf.ErrCorruptWire, b, p)
 		}
 		return protoreflect.ValueOfBool(b == 1), p + 1, nil
 	case protoreflect.MessageKind:
@@ -844,7 +901,7 @@ func decodeMapEntryVal(body []byte, p int, vd protoreflect.FieldDescriptor, mp p
 			return protoreflect.Value{}, 0, err
 		}
 		subMsg := mp.NewValue().Message()
-		if err := decodeProtoReflectMsg(subBytes, subMsg, depth+1, false); err != nil {
+		if err := decodeProtoReflectMsg(subBytes, subMsg, depth+1, maxDepth, false); err != nil {
 			return protoreflect.Value{}, 0, err
 		}
 		return protoreflect.ValueOfMessage(subMsg), nextP, nil

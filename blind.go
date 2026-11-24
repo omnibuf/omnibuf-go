@@ -133,8 +133,12 @@ func ReadField0SchemaMeta(packet []byte) (*SchemaMeta, bool) {
 }
 
 func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
-	if depth > MaxNestingDepth {
-		return nil, fmt.Errorf("omnibuf: SchemaMeta nesting depth %d exceeds MaxNestingDepth (%d)", depth, MaxNestingDepth)
+	return decodeSchemaMetaWithMaxDepth(data, depth, MaxNestingDepth)
+}
+
+func decodeSchemaMetaWithMaxDepth(data []byte, depth, maxDepth int) (*SchemaMeta, error) {
+	if depth > maxDepth {
+		return nil, fmt.Errorf("%w: SchemaMeta nesting depth %d exceeds %d", ErrMaxDepth, depth, maxDepth)
 	}
 	meta := &SchemaMeta{}
 	pos := 0
@@ -142,7 +146,7 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 	for pos < n {
 		tag, tn := decodeVarint(data[pos:])
 		if tn == 0 || tag>>4 > maxProtobufFieldNumber {
-			return nil, fmt.Errorf("omnibuf: truncated or invalid tag in Field #0 SchemaMeta at %d", pos)
+			return nil, fmt.Errorf("%w: truncated or invalid tag in Field #0 SchemaMeta at %d", ErrCorruptWire, pos)
 		}
 		pos += tn
 		fnum := tag >> 4
@@ -150,7 +154,7 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 		switch fnum {
 		case 1: // type_name (string)
 			if wt != wireString {
-				return nil, fmt.Errorf("omnibuf: SchemaMeta field #1 (type_name) must be wireString, got %d", wt)
+				return nil, fmt.Errorf("%w: SchemaMeta field #1 (type_name) must be wireString, got %d", ErrCorruptWire, wt)
 			}
 			s, nextPos, err := readStrSlice(data, pos)
 			if err != nil {
@@ -160,10 +164,10 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 			pos = nextPos
 		case 2: // field names
 			if wt != wireMap {
-				return nil, fmt.Errorf("omnibuf: SchemaMeta field #2 (fields) must be wireMap, got %d", wt)
+				return nil, fmt.Errorf("%w: SchemaMeta field #2 (fields) must be wireMap, got %d", ErrCorruptWire, wt)
 			}
-			if depth+1 > MaxNestingDepth {
-				return nil, fmt.Errorf("omnibuf: SchemaMeta fields map nesting depth %d exceeds MaxNestingDepth (%d)", depth+1, MaxNestingDepth)
+			if depth+1 > maxDepth {
+				return nil, fmt.Errorf("%w: SchemaMeta fields map nesting depth %d exceeds %d", ErrMaxDepth, depth+1, maxDepth)
 			}
 			body, nextPos, err := readLenSlice(data, pos, 3)
 			if err != nil {
@@ -172,7 +176,7 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 			pos = nextPos
 			keyWT, valWT, count, p, ok := parseMapHeader(body)
 			if !ok || keyWT != wireUint || valWT != wireString {
-				return nil, fmt.Errorf("omnibuf: invalid SchemaMeta fields map header")
+				return nil, fmt.Errorf("%w: invalid SchemaMeta fields map header", ErrCorruptWire)
 			}
 			if meta.Fields == nil {
 				meta.Fields = make(map[uint32]string, min(count, 4096))
@@ -181,7 +185,7 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 			for range count {
 				k64, kn := decodeVarint(body[p:])
 				if kn == 0 || k64 == 0 || k64 > maxProtobufFieldNumber {
-					return nil, fmt.Errorf("omnibuf: invalid SchemaMeta field number %d at %d", k64, p)
+					return nil, fmt.Errorf("%w: invalid SchemaMeta field number %d at %d", ErrCorruptWire, k64, p)
 				}
 				p += kn
 				nameBytes, nextP, err := readStrSlice(body, p)
@@ -192,14 +196,14 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 				p = nextP
 			}
 			if p != len(body) {
-				return nil, fmt.Errorf("omnibuf: SchemaMeta fields map trailing bytes (parsed %d, body %d)", p, len(body))
+				return nil, fmt.Errorf("%w: SchemaMeta fields map trailing bytes (parsed %d, body %d)", ErrCorruptWire, p, len(body))
 			}
 		case 3: // children (map<uint32, SchemaMeta>)
 			if wt != wireMap {
-				return nil, fmt.Errorf("omnibuf: SchemaMeta field #3 (children) must be wireMap, got %d", wt)
+				return nil, fmt.Errorf("%w: SchemaMeta field #3 (children) must be wireMap, got %d", ErrCorruptWire, wt)
 			}
-			if depth+1 > MaxNestingDepth {
-				return nil, fmt.Errorf("omnibuf: SchemaMeta children map nesting depth %d exceeds MaxNestingDepth (%d)", depth+1, MaxNestingDepth)
+			if depth+1 > maxDepth {
+				return nil, fmt.Errorf("%w: SchemaMeta children map nesting depth %d exceeds %d", ErrMaxDepth, depth+1, maxDepth)
 			}
 			body, nextPos, err := readLenSlice(data, pos, 3)
 			if err != nil {
@@ -208,20 +212,20 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 			pos = nextPos
 			keyWT, valWT, count, p, ok := parseMapHeader(body)
 			if !ok || keyWT != wireUint || valWT != wireSubMsg {
-				return nil, fmt.Errorf("omnibuf: invalid SchemaMeta children map header")
+				return nil, fmt.Errorf("%w: invalid SchemaMeta children map header", ErrCorruptWire)
 			}
 			mapChildren := make(map[uint32]*SchemaMeta, min(count, 4096))
 			for range count {
 				k64, kn := decodeVarint(body[p:])
 				if kn == 0 || k64 == 0 || k64 > maxProtobufFieldNumber {
-					return nil, fmt.Errorf("omnibuf: invalid SchemaMeta child field number %d at %d", k64, p)
+					return nil, fmt.Errorf("%w: invalid SchemaMeta child field number %d at %d", ErrCorruptWire, k64, p)
 				}
 				p += kn
 				childBytes, nextP, err := readLenSlice(body, p, 0)
 				if err != nil {
 					return nil, err
 				}
-				childMeta, err := decodeSchemaMeta(childBytes, depth+2)
+				childMeta, err := decodeSchemaMetaWithMaxDepth(childBytes, depth+2, maxDepth)
 				if err != nil {
 					return nil, err
 				}
@@ -230,7 +234,7 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 				p = nextP
 			}
 			if p != len(body) {
-				return nil, fmt.Errorf("omnibuf: SchemaMeta children map trailing bytes (parsed %d, body %d)", p, len(body))
+				return nil, fmt.Errorf("%w: SchemaMeta children map trailing bytes (parsed %d, body %d)", ErrCorruptWire, p, len(body))
 			}
 			if len(mapChildren) > 0 {
 				if meta.Children == nil {
@@ -243,9 +247,9 @@ func decodeSchemaMeta(data []byte, depth int) (*SchemaMeta, error) {
 			}
 		default:
 			if fnum == 0 {
-				return nil, fmt.Errorf("omnibuf: invalid field #0 inside SchemaMeta")
+				return nil, fmt.Errorf("%w: invalid field #0 inside SchemaMeta", ErrCorruptWire)
 			}
-			nextPos, err := skipValueWithDepthChecked(data, pos, wt, depth, true)
+			nextPos, err := skipValueWithMaxDepthChecked(data, pos, wt, depth, maxDepth, true)
 			if err != nil {
 				return nil, err
 			}
@@ -393,9 +397,16 @@ func DecodeBlind(packet []byte) (map[string]any, error) {
 	return decodeBlindWithSchema(packet, nil, 0)
 }
 
+type blindSubMsgAcc struct {
+	first  []byte
+	merged []byte
+	schema *blindSchema
+	count  int
+}
+
 func decodeBlindWithSchema(data []byte, inherited *blindSchema, depth int) (map[string]any, error) {
 	if depth > MaxNestingDepth {
-		return nil, fmt.Errorf("omnibuf: nesting depth %d exceeds MaxNestingDepth (%d)", depth, MaxNestingDepth)
+		return nil, fmt.Errorf("%w: nesting depth %d exceeds MaxNestingDepth (%d)", ErrMaxDepth, depth, MaxNestingDepth)
 	}
 	n := len(data)
 	if n == 0 {
@@ -409,13 +420,13 @@ func decodeBlindWithSchema(data []byte, inherited *blindSchema, depth int) (map[
 	for scan := 0; scan < n; {
 		tag, tn := decodeVarint(data[scan:])
 		if tn == 0 || tag>>4 > (1<<29)-1 {
-			return nil, fmt.Errorf("omnibuf: invalid tag at %d", scan)
+			return nil, fmt.Errorf("%w: invalid tag at %d", ErrCorruptWire, scan)
 		}
 		scan += tn
 		wt := uint8(tag & 15)
 		if tag>>4 == 0 {
 			if wt != wireSubMsg {
-				return nil, fmt.Errorf("omnibuf: invalid Field #0 wire type %d", wt)
+				return nil, fmt.Errorf("%w: invalid Field #0 wire type %d", ErrCorruptWire, wt)
 			}
 			body, next, err := readLenSlice(data, scan, 0)
 			if err != nil {
@@ -430,7 +441,7 @@ func decodeBlindWithSchema(data []byte, inherited *blindSchema, depth int) (map[
 		} else {
 			next, ok := fastSkipValue(data, scan, wt)
 			if !ok {
-				return nil, fmt.Errorf("omnibuf: invalid field payload at %d", scan)
+				return nil, fmt.Errorf("%w: invalid field payload at %d", ErrCorruptWire, scan)
 			}
 			scan = next
 		}
@@ -441,8 +452,7 @@ func decodeBlindWithSchema(data []byte, inherited *blindSchema, depth int) (map[
 	}
 	pos := 0
 	out := make(map[string]any, 8)
-	subPackets := make(map[string][]byte)
-	subSchemas := make(map[string]*blindSchema)
+	var subPackets map[string]*blindSubMsgAcc
 	// shapes records each field's recursive wire shape (wire type plus nested
 	// array element types and map key/value types). Repeated occurrences of a
 	// field number MUST agree; changing a field's value type is rejected.
@@ -536,11 +546,29 @@ func decodeBlindWithSchema(data []byte, inherited *blindSchema, depth int) (map[
 			if err != nil {
 				return nil, err
 			}
-			if err := validateMessageBytes(subBytes, depth+1); err != nil {
-				return nil, err
+			if subPackets == nil {
+				subPackets = make(map[string]*blindSubMsgAcc, 4)
 			}
-			subPackets[name] = append(subPackets[name], subBytes...)
-			subSchemas[name] = childSchema
+			if acc, exists := subPackets[name]; !exists {
+				subPackets[name] = &blindSubMsgAcc{
+					first:  subBytes,
+					schema: childSchema,
+					count:  1,
+				}
+			} else {
+				if acc.count == 1 {
+					if err := validateMessageBytes(acc.first, depth+1); err != nil {
+						return nil, err
+					}
+					acc.merged = make([]byte, 0, len(acc.first)+len(subBytes))
+					acc.merged = append(acc.merged, acc.first...)
+				}
+				if err := validateMessageBytes(subBytes, depth+1); err != nil {
+					return nil, err
+				}
+				acc.merged = append(acc.merged, subBytes...)
+				acc.count++
+			}
 
 			pos = nextPos
 		case wireArray:
@@ -638,8 +666,12 @@ func decodeBlindWithSchema(data []byte, inherited *blindSchema, depth int) (map[
 		}
 	}
 
-	for name, packet := range subPackets {
-		value, err := decodeBlindWithSchema(packet, subSchemas[name], depth+1)
+	for name, acc := range subPackets {
+		packet := acc.first
+		if acc.count > 1 {
+			packet = acc.merged
+		}
+		value, err := decodeBlindWithSchema(packet, acc.schema, depth+1)
 		if err != nil {
 			return nil, err
 		}
@@ -937,22 +969,35 @@ func decodeMapValBlind(body []byte, p int, valWT uint8, childSchema *blindSchema
 // depth and returns the position after it. It is used by generated decoders so
 // that Field #0 is validated in place rather than by rescanning the packet.
 func ValidateField0(data []byte, pos, depth int) (int, error) {
-	if pos < 0 || pos > len(data) {
-		return 0, fmt.Errorf("omnibuf: Field #0 position %d out of bounds", pos)
+	return ValidateField0WithMaxDepth(data, pos, depth, MaxNestingDepth)
+}
+
+// ValidateField0WithMaxDepth validates the Field #0 SchemaMeta payload starting at
+// data[pos] enforcing maxDepth.
+func ValidateField0WithMaxDepth(data []byte, pos, depth, maxDepth int) (int, error) {
+	if maxDepth <= 0 {
+		maxDepth = MaxNestingDepth
 	}
-	return validateField0(data, pos, wireSubMsg, depth)
+	if pos < 0 || pos > len(data) {
+		return 0, fmt.Errorf("%w: Field #0 position %d out of bounds", ErrCorruptWire, pos)
+	}
+	return validateField0WithMaxDepth(data, pos, wireSubMsg, depth, maxDepth)
 }
 
 // validateField0 validates metadata even in schema-aware decoders.
 func validateField0(data []byte, pos int, wt uint8, depth int) (int, error) {
+	return validateField0WithMaxDepth(data, pos, wt, depth, MaxNestingDepth)
+}
+
+func validateField0WithMaxDepth(data []byte, pos int, wt uint8, depth, maxDepth int) (int, error) {
 	if wt != wireSubMsg {
-		return 0, fmt.Errorf("omnibuf: invalid Field #0 wire type %d", wt)
+		return 0, fmt.Errorf("%w: invalid Field #0 wire type %d", ErrCorruptWire, wt)
 	}
 	body, next, err := readLenSlice(data, pos, 0)
 	if err != nil {
 		return 0, err
 	}
-	if _, err := decodeSchemaMeta(body, depth+1); err != nil {
+	if _, err := decodeSchemaMetaWithMaxDepth(body, depth+1, maxDepth); err != nil {
 		return 0, err
 	}
 	return next, nil

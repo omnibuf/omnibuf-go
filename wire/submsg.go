@@ -35,6 +35,9 @@ func (e *Encoder) BeginSubMsg(fieldNum uint16) {
 
 // EndSubMsg finishes the current nested sub-message and backpatches its byte length.
 func (e *Encoder) EndSubMsg() {
+	if e.depth == 0 {
+		return
+	}
 	e.depth--
 	var lenPos int
 	if uint(e.depth) < uint(len(e.lenStack)) {
@@ -60,6 +63,9 @@ func (e *Encoder) BeginSubMsgArr(fieldNum uint16) {
 
 // BeginSubMsgElem starts the next element inside an open WireArray by reserving its 2-byte length prefix.
 func (e *Encoder) BeginSubMsgElem() {
+	if e.depth == 0 {
+		return
+	}
 	parent := e.depth - 1
 	if uint(parent) < uint(len(e.countStack)) {
 		e.countStack[parent]++
@@ -77,6 +83,9 @@ func (e *Encoder) BeginSubMsgElem() {
 
 // EndSubMsgElem finishes the current element inside an open WireArray and backpatches its length.
 func (e *Encoder) EndSubMsgElem() {
+	if e.depth == 0 {
+		return
+	}
 	e.depth--
 	var lenPos int
 	if uint(e.depth) < uint(len(e.lenStack)) {
@@ -89,6 +98,9 @@ func (e *Encoder) EndSubMsgElem() {
 
 // EndSubMsgArr backpatches the total byte length of the open WireArray.
 func (e *Encoder) EndSubMsgArr() {
+	if e.depth == 0 {
+		return
+	}
 	e.depth--
 	var lenPos, count int
 	if uint(e.depth) < uint(len(e.lenStack)) {

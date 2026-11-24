@@ -8,6 +8,7 @@ package omnibuf
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sort"
 	"unsafe"
@@ -15,6 +16,57 @@ import (
 	"github.com/omnibuf/omnibuf-go/internal/protohook"
 	"github.com/omnibuf/omnibuf-go/wire"
 )
+
+// Sentinel errors returned by OmniBuf encoders, decoders, and validators.
+var (
+	// ErrMaxDepth is returned when message or container nesting exceeds the configured depth limit.
+	ErrMaxDepth = errors.New("omnibuf: nesting depth limit exceeded")
+
+	// ErrInvalidUTF8 is returned when a WireString payload contains invalid UTF-8 bytes.
+	ErrInvalidUTF8 = errors.New("omnibuf: invalid UTF-8 in WireString")
+
+	// ErrCorruptWire is returned when an OmniBuf packet is truncated or structurally malformed.
+	ErrCorruptWire = errors.New("omnibuf: corrupt wire packet")
+
+	// ErrMessageTooLarge is returned when an input packet exceeds UnmarshalOptions.MaxBytes.
+	ErrMessageTooLarge = errors.New("omnibuf: message exceeds maximum allowed byte size")
+)
+
+// UnmarshalOptions configures OmniBuf wire decoding.
+type UnmarshalOptions struct {
+	// MaxBytes rejects packets larger than MaxBytes bytes with ErrMessageTooLarge.
+	// Zero disables the size cap.
+	MaxBytes int
+
+	// MaxDepth overrides the maximum allowed sub-message / container nesting depth.
+	// Zero defaults to MaxNestingDepth (32).
+	MaxDepth int
+
+	// Merge preserves existing fields in the destination struct when they are absent
+	// from the packet, merging sub-messages, appending slices, and merging maps (Spec §2).
+	Merge bool
+
+	// ZeroCopy returns unsafe string and byte-slice views backed by the packet buffer.
+	// Do not modify or reuse the packet buffer while decoded values are still in use.
+	ZeroCopy bool
+}
+
+func (o UnmarshalOptions) effectiveMaxDepth() int {
+	if o.MaxDepth > 0 {
+		return o.MaxDepth
+	}
+	return MaxNestingDepth
+}
+
+// Unmarshal decodes packet into v using the configured options.
+func (o UnmarshalOptions) Unmarshal(packet []byte, v any) error {
+	return unmarshalTableWithOptions(packet, v, o)
+}
+
+// UnmarshalMerge decodes packet into v while preserving existing fields not present in packet.
+func UnmarshalMerge(packet []byte, v any) error {
+	return UnmarshalOptions{Merge: true}.Unmarshal(packet, v)
+}
 
 // MarshalOptions configures OmniBuf wire encoding.
 type MarshalOptions struct {
@@ -235,30 +287,43 @@ func skipLargeContainer(packet []byte, pos int) (int, bool) {
 // ValidateValue validates a single field payload starting at data[pos] with wire type wt
 // at the given container nesting depth, enforcing MaxNestingDepth and full inner validation.
 func ValidateValue(data []byte, pos int, wt uint8, depth int) (int, error) {
-	return skipValueWithDepth(data, pos, wt, depth)
+	return skipValueWithMaxDepthChecked(data, pos, wt, depth, MaxNestingDepth, false)
+}
+
+// ValidateValueWithMaxDepth validates a single field payload starting at data[pos] with wire type wt
+// at the given container nesting depth, enforcing maxDepth and full inner validation.
+func ValidateValueWithMaxDepth(data []byte, pos int, wt uint8, depth, maxDepth int) (int, error) {
+	if maxDepth <= 0 {
+		maxDepth = MaxNestingDepth
+	}
+	return skipValueWithMaxDepthChecked(data, pos, wt, depth, maxDepth, false)
 }
 
 func skipValue(b []byte, pos int, wireType uint8) (int, error) {
-	return skipValueWithDepth(b, pos, wireType, 0)
+	return skipValueWithMaxDepthChecked(b, pos, wireType, 0, MaxNestingDepth, false)
 }
 
 func skipValueWithDepth(b []byte, pos int, wireType uint8, depth int) (int, error) {
-	return skipValueWithDepthChecked(b, pos, wireType, depth, false)
+	return skipValueWithMaxDepthChecked(b, pos, wireType, depth, MaxNestingDepth, false)
 }
 
 func skipValueWithDepthChecked(b []byte, pos int, wireType uint8, depth int, checkUTF8 bool) (int, error) {
-	if depth > MaxNestingDepth {
-		return 0, fmt.Errorf("omnibuf: nesting depth %d exceeds MaxNestingDepth (%d)", depth, MaxNestingDepth)
+	return skipValueWithMaxDepthChecked(b, pos, wireType, depth, MaxNestingDepth, checkUTF8)
+}
+
+func skipValueWithMaxDepthChecked(b []byte, pos int, wireType uint8, depth, maxDepth int, checkUTF8 bool) (int, error) {
+	if depth > maxDepth {
+		return 0, fmt.Errorf("%w: nesting depth %d exceeds %d", ErrMaxDepth, depth, maxDepth)
 	}
 	if pos < 0 || pos > len(b) {
-		return 0, fmt.Errorf("omnibuf: position %d out of bounds", pos)
+		return 0, fmt.Errorf("%w: position %d out of bounds", ErrCorruptWire, pos)
 	}
 	if wireType == wireSubMsg {
 		body, end, err := readLenSlice(b, pos, 0)
 		if err != nil {
 			return 0, err
 		}
-		if err := validateMessageBytesChecked(body, depth+1, checkUTF8); err != nil {
+		if err := validateMessageBytesWithMaxDepthChecked(body, depth+1, maxDepth, checkUTF8); err != nil {
 			return 0, err
 		}
 		return end, nil
@@ -266,43 +331,43 @@ func skipValueWithDepthChecked(b []byte, pos int, wireType uint8, depth int, che
 	if wireType == wireArray || wireType == wireMap || wireType == wireExtended {
 		length, ln := decodeVarint(b[pos:])
 		if ln == 0 || length < 1 || length > uint64(len(b)-pos-ln) {
-			return 0, fmt.Errorf("omnibuf: invalid container length")
+			return 0, fmt.Errorf("%w: invalid container length", ErrCorruptWire)
 		}
 		end := pos + ln + int(length)
 		body := b[pos+ln : end]
 		switch wireType {
 		case wireArray:
-			if depth+1 > MaxNestingDepth {
-				return 0, fmt.Errorf("omnibuf: nesting depth %d exceeds MaxNestingDepth (%d)", depth+1, MaxNestingDepth)
+			if depth+1 > maxDepth {
+				return 0, fmt.Errorf("%w: nesting depth %d exceeds %d", ErrMaxDepth, depth+1, maxDepth)
 			}
 			elemWT, count, p, ok := parseArrayHeader(body)
 			if !ok {
-				return 0, fmt.Errorf("omnibuf: invalid array header")
+				return 0, fmt.Errorf("%w: invalid array header", ErrCorruptWire)
 			}
-			if err := validateArrayBodyChecked(body, p, elemWT, count, depth+1, checkUTF8); err != nil {
+			if err := validateArrayBodyWithMaxDepthChecked(body, p, elemWT, count, depth+1, maxDepth, checkUTF8); err != nil {
 				return 0, err
 			}
 		case wireMap:
-			if depth+1 > MaxNestingDepth {
-				return 0, fmt.Errorf("omnibuf: nesting depth %d exceeds MaxNestingDepth (%d)", depth+1, MaxNestingDepth)
+			if depth+1 > maxDepth {
+				return 0, fmt.Errorf("%w: nesting depth %d exceeds %d", ErrMaxDepth, depth+1, maxDepth)
 			}
 			keyWT, valWT, count, p, ok := parseMapHeader(body)
 			if !ok {
-				return 0, fmt.Errorf("omnibuf: invalid map header")
+				return 0, fmt.Errorf("%w: invalid map header", ErrCorruptWire)
 			}
 			for range count {
 				var err error
-				p, err = validateContainerEntryChecked(body, p, keyWT, depth+1, checkUTF8)
+				p, err = validateContainerEntryWithMaxDepthChecked(body, p, keyWT, depth+1, maxDepth, checkUTF8)
 				if err != nil {
 					return 0, err
 				}
-				p, err = validateContainerEntryChecked(body, p, valWT, depth+1, checkUTF8)
+				p, err = validateContainerEntryWithMaxDepthChecked(body, p, valWT, depth+1, maxDepth, checkUTF8)
 				if err != nil {
 					return 0, err
 				}
 			}
 			if p != len(body) {
-				return 0, fmt.Errorf("omnibuf: trailing map bytes")
+				return 0, fmt.Errorf("%w: trailing map bytes", ErrCorruptWire)
 			}
 		case wireExtended:
 			// ByteLen >= 1 (checked above) already guarantees the 1-byte ExtType header is present.
@@ -316,84 +381,88 @@ func skipValueWithDepthChecked(b []byte, pos int, wireType uint8, depth int, che
 	}
 	nextPos, ok := fastSkipValue(b, pos, wireType)
 	if !ok {
-		return 0, fmt.Errorf("omnibuf: truncated or invalid wireType %d at %d", wireType, pos)
+		return 0, fmt.Errorf("%w: truncated or invalid wireType %d at %d", ErrCorruptWire, wireType, pos)
 	}
 	return nextPos, nil
 }
 
-func validateArrayBodyChecked(body []byte, p int, elemWT uint8, count, depth int, checkUTF8 bool) error {
+func validateArrayBodyWithMaxDepthChecked(body []byte, p int, elemWT uint8, count, depth, maxDepth int, checkUTF8 bool) error {
 	switch elemWT {
 	case wireBoolFalse:
 		if len(body)-p != count {
-			return fmt.Errorf("omnibuf: invalid bool array length")
+			return fmt.Errorf("%w: invalid bool array length", ErrCorruptWire)
 		}
 		for i := range count {
 			if body[p+i] > 1 {
-				return fmt.Errorf("omnibuf: invalid bool byte in array")
+				return fmt.Errorf("%w: invalid bool byte in array", ErrCorruptWire)
 			}
 		}
 		return nil
 	case wireFixed32, wireSfixed32, wireFloat32:
 		if len(body)-p != count*4 {
-			return fmt.Errorf("omnibuf: invalid 32-bit array length")
+			return fmt.Errorf("%w: invalid 32-bit array length", ErrCorruptWire)
 		}
 		return nil
 	case wireFixed64, wireSfixed64, wireFloat64:
 		if len(body)-p != count*8 {
-			return fmt.Errorf("omnibuf: invalid 64-bit array length")
+			return fmt.Errorf("%w: invalid 64-bit array length", ErrCorruptWire)
 		}
 		return nil
 	}
 	for range count {
 		var err error
-		p, err = validateContainerEntryChecked(body, p, elemWT, depth, checkUTF8)
+		p, err = validateContainerEntryWithMaxDepthChecked(body, p, elemWT, depth, maxDepth, checkUTF8)
 		if err != nil {
 			return err
 		}
 	}
 	if p != len(body) {
-		return fmt.Errorf("omnibuf: trailing array bytes")
+		return fmt.Errorf("%w: trailing array bytes", ErrCorruptWire)
 	}
 	return nil
 }
 
 func validateContainerEntryChecked(body []byte, p int, wt uint8, depth int, checkUTF8 bool) (int, error) {
+	return validateContainerEntryWithMaxDepthChecked(body, p, wt, depth, MaxNestingDepth, checkUTF8)
+}
+
+func validateContainerEntryWithMaxDepthChecked(body []byte, p int, wt uint8, depth, maxDepth int, checkUTF8 bool) (int, error) {
 	if wt == wireBoolFalse {
 		if p >= len(body) || body[p] > 1 {
-			return 0, fmt.Errorf("omnibuf: invalid bool byte in container")
+			return 0, fmt.Errorf("%w: invalid bool byte in container", ErrCorruptWire)
 		}
 		return p + 1, nil
 	}
-	return skipValueWithDepthChecked(body, p, wt, depth, checkUTF8)
+	return skipValueWithMaxDepthChecked(body, p, wt, depth, maxDepth, checkUTF8)
 }
 
 func validateMessageBytes(data []byte, depth int) error {
-	return validateMessageBytesChecked(data, depth, false)
+	return validateMessageBytesWithMaxDepthChecked(data, depth, MaxNestingDepth, false)
 }
 
-func validateMessageBytesChecked(data []byte, depth int, checkUTF8 bool) error {
-	if depth > MaxNestingDepth {
-		return fmt.Errorf("omnibuf: nesting depth %d exceeds MaxNestingDepth (%d)", depth, MaxNestingDepth)
+func validateMessageBytesWithMaxDepthChecked(data []byte, depth, maxDepth int, checkUTF8 bool) error {
+	if depth > maxDepth {
+		return fmt.Errorf("%w: nesting depth %d exceeds %d", ErrMaxDepth, depth, maxDepth)
 	}
 	pos := 0
 	n := len(data)
 	for pos < n {
 		tag, tn := decodeVarint(data[pos:])
 		if tn == 0 || tag>>4 > maxProtobufFieldNumber {
-			return fmt.Errorf("omnibuf: invalid or truncated tag")
+			return fmt.Errorf("%w: invalid or truncated tag", ErrCorruptWire)
 		}
 		pos += tn
 		fnum := tag >> 4
 		wt := uint8(tag & 0x0F)
 		if fnum == 0 {
-			nextPos, err := validateField0(data, pos, wt, depth)
+			nextPos, err := validateField0WithMaxDepth(data, pos, wt, depth, maxDepth)
 			if err != nil {
 				return err
 			}
 			pos = nextPos
 			continue
 		}
-		nextPos, err := skipValueWithDepthChecked(data, pos, wt, depth, checkUTF8)
+		nextPos, err := skipValueWithMaxDepthChecked(data, pos, wt, depth, maxDepth, checkUTF8)
 		if err != nil {
 			return err
 		}
@@ -493,11 +562,11 @@ func decodeStr(b []byte, zeroCopy bool) string {
 func readLenSlice(data []byte, pos int, minLen uint64) (body []byte, nextPos int, err error) {
 	bLen, bn := decodeVarint(data[pos:])
 	if bn == 0 {
-		return nil, 0, fmt.Errorf("omnibuf: truncated length varint at %d", pos)
+		return nil, 0, fmt.Errorf("%w: truncated length varint at %d", ErrCorruptWire, pos)
 	}
 	pos += bn
 	if bLen < minLen || bLen > uint64(len(data)-pos) {
-		return nil, 0, fmt.Errorf("omnibuf: invalid byteLen %d at %d", bLen, pos)
+		return nil, 0, fmt.Errorf("%w: invalid byteLen %d at %d", ErrCorruptWire, bLen, pos)
 	}
 	end := pos + int(bLen)
 	return data[pos:end:end], end, nil
@@ -511,7 +580,7 @@ func readStrSlice(data []byte, pos int) (body []byte, nextPos int, err error) {
 		return nil, 0, err
 	}
 	if !wire.ValidUTF8(body) {
-		return nil, 0, fmt.Errorf("omnibuf: invalid UTF-8 in WireString at %d", pos)
+		return nil, 0, fmt.Errorf("%w at %d", ErrInvalidUTF8, pos)
 	}
 	return body, nextPos, nil
 }

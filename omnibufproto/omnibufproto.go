@@ -159,20 +159,20 @@ func tryMarshalHook(dst []byte, v any, deterministic, selfDescribing bool) ([]by
 	return dst, false, nil
 }
 
-func tryUnmarshalHook(packet []byte, v any) (bool, error) {
+func tryUnmarshalHook(packet []byte, v any, maxBytes, maxDepth int, merge, zeroCopy bool) (bool, error) {
 	if pm, ok := v.(proto.Message); ok {
 		if isNilOrInvalidProto(pm) {
 			return true, fmt.Errorf("omnibuf: Unmarshal requires non-nil proto.Message")
 		}
 		if needsProtoReflection(pm) {
-			return true, unmarshalProtoReflect(packet, pm.ProtoReflect())
+			return true, unmarshalProtoReflectWithOptions(packet, pm.ProtoReflect(), maxBytes, maxDepth, merge)
 		}
 	}
 	if pr, ok := v.(protoreflect.Message); ok {
 		if isNilValue(pr) {
 			return true, fmt.Errorf("omnibuf: Unmarshal requires non-nil protoreflect.Message")
 		}
-		return true, unmarshalProtoReflect(packet, pr)
+		return true, unmarshalProtoReflectWithOptions(packet, pr, maxBytes, maxDepth, merge)
 	}
 	return false, nil
 }
@@ -251,46 +251,68 @@ func MarshalDeterministic(v any) ([]byte, error) {
 	return MarshalOptions{Deterministic: true}.Marshal(v)
 }
 
-// Unmarshal decodes an OmniBuf packet into v (any proto.Message, protoreflect.Message, or struct pointer).
-func Unmarshal(packet []byte, v any) error {
-	if fast, ok := v.(generatedUnmarshaler); ok && isDirectNonNilGeneratedPtr(v) {
-		return fast.UnmarshalOmniBuf(packet, false)
+// UnmarshalOptions configures OmniBuf wire decoding for Protocol Buffers messages.
+type UnmarshalOptions struct {
+	// MaxBytes rejects packets larger than MaxBytes bytes with omnibuf.ErrMessageTooLarge.
+	// Zero disables the size cap.
+	MaxBytes int
+
+	// MaxDepth overrides the maximum allowed sub-message / container nesting depth.
+	// Zero defaults to omnibuf.MaxNestingDepth (32).
+	MaxDepth int
+
+	// Merge preserves existing fields in the destination message when absent from
+	// the packet, merging sub-messages, appending lists, and merging maps (Spec §2).
+	Merge bool
+
+	// ZeroCopy uses zero-copy string views when supported.
+	ZeroCopy bool
+}
+
+// Unmarshal decodes an OmniBuf packet into v using the configured options.
+func (o UnmarshalOptions) Unmarshal(packet []byte, v any) error {
+	if o.MaxBytes > 0 && len(packet) > o.MaxBytes {
+		return fmt.Errorf("%w: %d > %d", omnibuf.ErrMessageTooLarge, len(packet), o.MaxBytes)
+	}
+	useDefaultDepth := o.MaxDepth <= 0 || o.MaxDepth == omnibuf.MaxNestingDepth
+	if !o.Merge && useDefaultDepth {
+		if fast, ok := v.(generatedUnmarshaler); ok && isDirectNonNilGeneratedPtr(v) {
+			return fast.UnmarshalOmniBuf(packet, o.ZeroCopy)
+		}
 	}
 	if pr, ok := v.(protoreflect.Message); ok {
 		if isNilValue(pr) {
 			return fmt.Errorf("omnibuf: Unmarshal requires non-nil protoreflect.Message")
 		}
-		return unmarshalProtoReflect(packet, pr)
+		return unmarshalProtoReflectWithOptions(packet, pr, o.MaxBytes, o.MaxDepth, o.Merge)
 	}
 	if pm, ok := v.(proto.Message); ok {
 		if isNilOrInvalidProto(pm) {
 			return fmt.Errorf("omnibuf: Unmarshal requires non-nil proto.Message")
 		}
 		if needsProtoReflection(pm) {
-			return unmarshalProtoReflect(packet, pm.ProtoReflect())
+			return unmarshalProtoReflectWithOptions(packet, pm.ProtoReflect(), o.MaxBytes, o.MaxDepth, o.Merge)
 		}
 	}
-	return omnibuf.Unmarshal(packet, v)
+	return omnibuf.UnmarshalOptions{
+		MaxBytes: o.MaxBytes,
+		MaxDepth: o.MaxDepth,
+		Merge:    o.Merge,
+		ZeroCopy: o.ZeroCopy,
+	}.Unmarshal(packet, v)
+}
+
+// Unmarshal decodes an OmniBuf packet into v (any proto.Message, protoreflect.Message, or struct pointer).
+func Unmarshal(packet []byte, v any) error {
+	return UnmarshalOptions{}.Unmarshal(packet, v)
 }
 
 // UnmarshalZeroCopy decodes an OmniBuf packet into v using zero-copy string views when supported.
 func UnmarshalZeroCopy(packet []byte, v any) error {
-	if fast, ok := v.(generatedUnmarshaler); ok && isDirectNonNilGeneratedPtr(v) {
-		return fast.UnmarshalOmniBuf(packet, true)
-	}
-	if pr, ok := v.(protoreflect.Message); ok {
-		if isNilValue(pr) {
-			return fmt.Errorf("omnibuf: Unmarshal requires non-nil protoreflect.Message")
-		}
-		return unmarshalProtoReflect(packet, pr)
-	}
-	if pm, ok := v.(proto.Message); ok {
-		if isNilOrInvalidProto(pm) {
-			return fmt.Errorf("omnibuf: Unmarshal requires non-nil proto.Message")
-		}
-		if needsProtoReflection(pm) {
-			return unmarshalProtoReflect(packet, pm.ProtoReflect())
-		}
-	}
-	return omnibuf.UnmarshalZeroCopy(packet, v)
+	return UnmarshalOptions{ZeroCopy: true}.Unmarshal(packet, v)
+}
+
+// UnmarshalMerge decodes an OmniBuf packet into v while preserving existing fields not present in packet.
+func UnmarshalMerge(packet []byte, v any) error {
+	return UnmarshalOptions{Merge: true}.Unmarshal(packet, v)
 }

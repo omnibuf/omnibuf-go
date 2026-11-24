@@ -32,20 +32,20 @@ func encodeFixed64Arr(d []byte, v []uint64, elem uint8) []byte {
 func appendBoolArrBody(d []bool, b []byte) ([]bool, bool)        { return wire.AppendBoolArrBody(d, b) }
 func appendUintArrBody[T intOrUint](d []T, b []byte) ([]T, bool) { return wire.AppendUintArrBody(d, b) }
 func appendSintArrBody[T intOrUint](d []T, b []byte) ([]T, bool) { return wire.AppendSintArrBody(d, b) }
-func appendFixed32CastArrBody[T intOrUint](d []T, b []byte) ([]T, bool) {
-	return wire.AppendFixed32ArrBody(d, b)
+func appendFixed32CastArrBody[T intOrUint](d []T, b []byte, elem uint8) ([]T, bool) {
+	return wire.AppendFixed32ArrBodyAs(d, b, elem)
 }
 func appendSfixed32CastArrBody[T intOrUint](d []T, b []byte) ([]T, bool) {
-	return wire.AppendFixed32ArrBody(d, b)
+	return wire.AppendSfixed32ArrBody(d, b)
 }
-func appendFixed64CastArrBody[T intOrUint](d []T, b []byte) ([]T, bool) {
-	return wire.AppendFixed64ArrBody(d, b)
+func appendFixed64CastArrBody[T intOrUint](d []T, b []byte, elem uint8) ([]T, bool) {
+	return wire.AppendFixed64ArrBodyAs(d, b, elem)
 }
-func appendFixed32ArrBody(d []uint32, b []byte) ([]uint32, bool) {
-	return wire.AppendFixed32ArrBody(d, b)
+func appendFixed32ArrBody(d []uint32, b []byte, elem uint8) ([]uint32, bool) {
+	return wire.AppendFixed32ArrBodyAs(d, b, elem)
 }
-func appendFixed64ArrBody(d []uint64, b []byte) ([]uint64, bool) {
-	return wire.AppendFixed64ArrBody(d, b)
+func appendFixed64ArrBody(d []uint64, b []byte, elem uint8) ([]uint64, bool) {
+	return wire.AppendFixed64ArrBodyAs(d, b, elem)
 }
 
 // encodeStringArrAs encodes []string as a WireArray of elem (WireString or WireBytes).

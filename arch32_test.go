@@ -56,7 +56,7 @@ func TestFastSkipValueOverflowAnd32BitKinds(t *testing.T) {
 	*(*uint32)(unsafe.Add(unsafe.Pointer(&raw[0]), 4)) = 0xdeadbeef
 	// Encode field #1 (sint = -5 -> zigzag 9 -> prefix varint 0x13)
 	pkt := []byte{0x23, 0x13}
-	if err := sc32.decodeStruct(pkt, unsafe.Pointer(&raw[0]), false, 0, true); err != nil {
+	if err := sc32.decodeStruct(pkt, unsafe.Pointer(&raw[0]), false, 0, MaxNestingDepth, true); err != nil {
 		t.Fatalf("sc32.decodeStruct failed: %v", err)
 	}
 	if got := *(*int32)(unsafe.Pointer(&raw[0])); got != -5 {
