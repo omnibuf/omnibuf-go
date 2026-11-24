@@ -2,12 +2,5 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "github>omnibuf/.github"
-  ],
-  "packageRules": [
-    {
-      "description": "omnibufconnect targets connectrpc.com/connect v1",
-      "matchPackageNames": ["connectrpc.com/connect"],
-      "allowedVersions": "<2.0.0"
-    }
   ]
 }

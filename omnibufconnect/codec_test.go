@@ -1,6 +1,7 @@
 package omnibufconnect
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -9,7 +10,8 @@ import (
 	"sync"
 	"testing"
 
-	"connectrpc.com/connect"
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
 	"github.com/omnibuf/omnibuf-go"
 )
 
@@ -25,7 +27,7 @@ type pingResponse struct {
 	ASN     uint32 `omnibuf:"3,name=asn"`
 }
 
-func TestConnectUnaryRoundTrip_HTTP(t *testing.T) {
+func TestConnectV2UnaryRoundTrip_HTTP(t *testing.T) {
 	const procedure = "/omnibuf.test.v1.PingService/Ping"
 
 	var (
@@ -34,20 +36,31 @@ func TestConnectUnaryRoundTrip_HTTP(t *testing.T) {
 		seenBody        []byte
 	)
 
-	handler := connect.NewUnaryHandler(
-		procedure,
-		func(_ context.Context, req *connect.Request[pingRequest]) (*connect.Response[pingResponse], error) {
-			return connect.NewResponse(&pingResponse{
-				OK:      true,
-				Message: "pong:" + req.Msg.RouterID,
-				ASN:     req.Msg.ASN,
-			}), nil
-		},
-		HandlerOptions()...,
-	)
+	spec := connect.Spec{
+		StreamType: connect.StreamTypeUnary,
+		Procedure:  procedure,
+	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc(procedure, func(w http.ResponseWriter, r *http.Request) {
+	server := connect.NewServer()
+	server.Register(connect.Method{
+		Spec: spec,
+		Handler: func(_ context.Context, _ connect.Spec, stream connect.ServerStream) error {
+			var req pingRequest
+			if err := stream.Receive(&req); err != nil {
+				return err
+			}
+			return stream.Send(&pingResponse{
+				OK:      true,
+				Message: "pong:" + req.RouterID,
+				ASN:     req.ASN,
+			})
+		},
+	})
+
+	connectMux := http.NewServeMux()
+	connecthttp.Mount(connectMux, server, ServerOptions()...)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -57,28 +70,26 @@ func TestConnectUnaryRoundTrip_HTTP(t *testing.T) {
 		seenContentType = r.Header.Get("Content-Type")
 		seenBody = append([]byte(nil), body...)
 		mu.Unlock()
-		r.Body = io.NopCloser(bytesReader(body))
-		handler.ServeHTTP(w, r)
-	})
-
-	srv := httptest.NewServer(mux)
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		connectMux.ServeHTTP(w, r)
+	}))
 	t.Cleanup(srv.Close)
 
 	cases := []struct {
 		name            string
-		opt             connect.ClientOption
+		opts            []connecthttp.Option
 		wantContentType string
 		wantField0      bool
 	}{
 		{
 			name:            "compact",
-			opt:             ClientOption(),
+			opts:            ClientOptions(),
 			wantContentType: "application/omnibuf",
 			wantField0:      false,
 		},
 		{
 			name:            "self-describing",
-			opt:             SelfDescribingClientOption(),
+			opts:            SelfDescribingClientOptions(),
 			wantContentType: "application/x-omnibuf",
 			wantField0:      true,
 		},
@@ -86,29 +97,26 @@ func TestConnectUnaryRoundTrip_HTTP(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			client := connect.NewClient[pingRequest, pingResponse](
-				srv.Client(),
-				srv.URL+procedure,
-				tc.opt,
-			)
+			transport := connecthttp.NewTransport(srv.Client(), srv.URL, tc.opts...)
+			client := connect.NewClient(transport)
 
-			req := connect.NewRequest(&pingRequest{
+			req := &pingRequest{
 				ASN:      64512,
 				RouterID: "edge-rtr-fra-01",
 				Tags:     map[string]string{"env": "prod"},
-			})
-			res, err := client.CallUnary(context.Background(), req)
-			if err != nil {
+			}
+			var res pingResponse
+			if err := client.CallUnary(context.Background(), spec, req, &res); err != nil {
 				t.Fatalf("CallUnary (%s): %v", tc.name, err)
 			}
 
-			want := &pingResponse{
+			want := pingResponse{
 				OK:      true,
 				Message: "pong:edge-rtr-fra-01",
 				ASN:     64512,
 			}
-			if !reflect.DeepEqual(res.Msg, want) {
-				t.Fatalf("res.Msg = %+v, want %+v", res.Msg, want)
+			if !reflect.DeepEqual(res, want) {
+				t.Fatalf("res = %+v, want %+v", res, want)
 			}
 
 			mu.Lock()
@@ -132,20 +140,25 @@ func TestConnectUnaryRoundTrip_HTTP(t *testing.T) {
 	}
 }
 
-type byteSliceReader struct {
-	b []byte
-	i int
-}
-
-func bytesReader(b []byte) io.Reader {
-	return &byteSliceReader{b: b}
-}
-
-func (r *byteSliceReader) Read(p []byte) (int, error) {
-	if r.i >= len(r.b) {
-		return 0, io.EOF
+func TestMarshalWriteStableDeterministic(t *testing.T) {
+	c := New()
+	msg := &pingRequest{
+		ASN:      64512,
+		RouterID: "edge-rtr-fra-01",
+		Tags:     map[string]string{"z": "last", "a": "first", "m": "mid"},
 	}
-	n := copy(p, r.b[r.i:])
-	r.i += n
-	return n, nil
+
+	var first bytes.Buffer
+	if err := c.MarshalWriteStable(context.Background(), &first, msg); err != nil {
+		t.Fatalf("MarshalWriteStable: %v", err)
+	}
+	for i := range 20 {
+		var next bytes.Buffer
+		if err := c.MarshalWriteStable(context.Background(), &next, msg); err != nil {
+			t.Fatalf("MarshalWriteStable iter %d: %v", i, err)
+		}
+		if !bytes.Equal(first.Bytes(), next.Bytes()) {
+			t.Fatalf("non-deterministic output on iter %d", i)
+		}
+	}
 }

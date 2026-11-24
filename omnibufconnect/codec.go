@@ -1,8 +1,12 @@
-// Package omnibufconnect provides a connectrpc.com/connect.Codec backed by omnibufproto.
+// Package omnibufconnect provides a connectrpc.com/connect/v2 Codec and StableCodec backed by omnibufproto.
 package omnibufconnect
 
 import (
-	"connectrpc.com/connect"
+	"context"
+	"io"
+
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
 	"github.com/omnibuf/omnibuf-go/omnibufproto"
 )
 
@@ -18,7 +22,7 @@ const (
 	ContentType = "application/omnibuf"
 )
 
-// Codec implements connectrpc.com/connect.Codec using omnibufproto.
+// Codec implements connectrpc.com/connect/v2.Codec and StableCodec using omnibufproto.
 type Codec struct {
 	// MarshalOptions configures OmniBuf wire encoding.
 	MarshalOptions omnibufproto.MarshalOptions
@@ -27,14 +31,17 @@ type Codec struct {
 	UnmarshalOptions omnibufproto.UnmarshalOptions
 }
 
-var _ connect.Codec = (*Codec)(nil)
+var (
+	_ connect.Codec       = (*Codec)(nil)
+	_ connect.StableCodec = (*Codec)(nil)
+)
 
-// New returns a compact OmniBuf Connect codec named "omnibuf".
+// New returns a compact OmniBuf Connect v2 codec named "omnibuf".
 func New() *Codec {
 	return &Codec{}
 }
 
-// NewSelfDescribing returns a self-describing OmniBuf Connect codec named "x-omnibuf".
+// NewSelfDescribing returns a self-describing OmniBuf Connect v2 codec named "x-omnibuf".
 func NewSelfDescribing() *Codec {
 	return &Codec{
 		MarshalOptions: omnibufproto.MarshalOptions{
@@ -43,23 +50,30 @@ func NewSelfDescribing() *Codec {
 	}
 }
 
-// HandlerOptions returns Connect handler options registering both compact ("omnibuf")
-// and self-describing ("x-omnibuf") OmniBuf codecs.
-func HandlerOptions() []connect.HandlerOption {
-	return []connect.HandlerOption{
-		connect.WithCodec(New()),
-		connect.WithCodec(NewSelfDescribing()),
+// ServerOptions returns connecthttp options registering both compact ("omnibuf")
+// and self-describing ("x-omnibuf") OmniBuf codecs on a Connect v2 server.
+func ServerOptions() []connecthttp.Option {
+	return []connecthttp.Option{
+		connecthttp.WithCodecs(New(), NewSelfDescribing()),
 	}
 }
 
-// ClientOption returns a Connect client option selecting the compact "omnibuf" codec.
-func ClientOption() connect.ClientOption {
-	return connect.WithCodec(New())
+// ClientOptions returns connecthttp transport options registering both OmniBuf
+// codecs and selecting compact ("omnibuf") for outbound requests.
+func ClientOptions() []connecthttp.Option {
+	return []connecthttp.Option{
+		connecthttp.WithCodecs(New(), NewSelfDescribing()),
+		connecthttp.WithSendCodec(NameCompact),
+	}
 }
 
-// SelfDescribingClientOption returns a Connect client option selecting the "x-omnibuf" codec.
-func SelfDescribingClientOption() connect.ClientOption {
-	return connect.WithCodec(NewSelfDescribing())
+// SelfDescribingClientOptions returns connecthttp transport options registering
+// both OmniBuf codecs and selecting self-describing ("x-omnibuf") for outbound requests.
+func SelfDescribingClientOptions() []connecthttp.Option {
+	return []connecthttp.Option{
+		connecthttp.WithCodecs(New(), NewSelfDescribing()),
+		connecthttp.WithSendCodec(NameSelfDescribing),
+	}
 }
 
 // Name returns the Connect codec name ("omnibuf" or "x-omnibuf").
@@ -75,38 +89,51 @@ func (c *Codec) IsBinary() bool {
 	return true
 }
 
-// Marshal encodes v into OmniBuf wire bytes.
-func (c *Codec) Marshal(v any) ([]byte, error) {
-	return c.marshalOptions().Marshal(v)
+// MarshalWrite encodes msg in OmniBuf wire format and writes it to dst.
+func (c *Codec) MarshalWrite(_ context.Context, dst io.Writer, msg any) error {
+	opts := omnibufproto.MarshalOptions{}
+	if c != nil {
+		opts = c.MarshalOptions
+	}
+	return marshalWrite(dst, opts, msg)
 }
 
-// MarshalAppend appends the OmniBuf wire encoding of v to dst.
-func (c *Codec) MarshalAppend(dst []byte, v any) ([]byte, error) {
-	return c.marshalOptions().MarshalAppend(dst, v)
-}
-
-// MarshalStable encodes v deterministically with sorted map keys.
-func (c *Codec) MarshalStable(v any) ([]byte, error) {
-	opts := c.marshalOptions()
+// MarshalWriteStable encodes msg deterministically in OmniBuf wire format and writes it to dst.
+func (c *Codec) MarshalWriteStable(_ context.Context, dst io.Writer, msg any) error {
+	opts := omnibufproto.MarshalOptions{}
+	if c != nil {
+		opts = c.MarshalOptions
+	}
 	opts.Deterministic = true
-	return opts.Marshal(v)
+	return marshalWrite(dst, opts, msg)
 }
 
-// Unmarshal decodes an OmniBuf payload into v.
-func (c *Codec) Unmarshal(data []byte, v any) error {
-	return c.unmarshalOptions().Unmarshal(data, v)
+type availableBufferWriter interface {
+	AvailableBuffer() []byte
 }
 
-func (c *Codec) marshalOptions() omnibufproto.MarshalOptions {
-	if c == nil {
-		return omnibufproto.MarshalOptions{}
+func marshalWrite(dst io.Writer, opts omnibufproto.MarshalOptions, msg any) error {
+	var scratch []byte
+	if abw, ok := dst.(availableBufferWriter); ok {
+		scratch = abw.AvailableBuffer()
 	}
-	return c.MarshalOptions
+	raw, err := opts.MarshalAppend(scratch, msg)
+	if err != nil {
+		return err
+	}
+	_, err = dst.Write(raw)
+	return err
 }
 
-func (c *Codec) unmarshalOptions() omnibufproto.UnmarshalOptions {
-	if c == nil {
-		return omnibufproto.UnmarshalOptions{}
+// UnmarshalRead reads a bounded OmniBuf message from src and decodes it into msg.
+func (c *Codec) UnmarshalRead(_ context.Context, src io.Reader, msg any) error {
+	raw, err := io.ReadAll(src)
+	if err != nil {
+		return err
 	}
-	return c.UnmarshalOptions
+	opts := omnibufproto.UnmarshalOptions{}
+	if c != nil {
+		opts = c.UnmarshalOptions
+	}
+	return opts.Unmarshal(raw, msg)
 }

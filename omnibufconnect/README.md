@@ -1,6 +1,6 @@
 # omnibufconnect
 
-OmniBuf `connect.Codec` for `connectrpc.com/connect`.
+OmniBuf `connect.Codec` and `connect.StableCodec` for `connectrpc.com/connect/v2`.
 
 ## Install
 
@@ -16,16 +16,22 @@ package main
 import (
 	"net/http"
 
-	"connectrpc.com/connect"
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
 	"github.com/omnibuf/omnibuf-go/omnibufconnect"
 )
 
-func setup(newHandler func(...connect.HandlerOption) (string, http.Handler)) {
+func setup(server *connect.Server) *connect.Client {
 	// Server: accept both "omnibuf" and "x-omnibuf".
-	path, handler := newHandler(omnibufconnect.HandlerOptions()...)
-	http.Handle(path, handler)
+	mux := http.NewServeMux()
+	connecthttp.Mount(mux, server, omnibufconnect.ServerOptions()...)
 
-	// Client: pass omnibufconnect.ClientOption() or omnibufconnect.SelfDescribingClientOption().
-	_ = omnibufconnect.ClientOption()
+	// Client: send compact "omnibuf" (or use SelfDescribingClientOptions() for "x-omnibuf").
+	transport := connecthttp.NewTransport(
+		http.DefaultClient,
+		"https://api.example.com",
+		omnibufconnect.ClientOptions()...,
+	)
+	return connect.NewClient(transport)
 }
 ```

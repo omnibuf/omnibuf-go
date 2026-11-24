@@ -48,10 +48,10 @@ func main() {
 
 ## gRPC & Connect RPC
 
-Two separate detached submodules provide framework codecs while keeping the core `omnibuf-go` module free of RPC dependencies:
+Two separate Go submodules provide framework codecs without adding RPC dependencies to core `omnibuf-go`:
 
 - **gRPC (`github.com/omnibuf/omnibuf-go/omnibufgrpc`):** Implements `google.golang.org/grpc/encoding.CodecV2` (`"omnibuf"` and `"x-omnibuf"`).
-- **Connect (`github.com/omnibuf/omnibuf-go/omnibufconnect`):** Implements `connectrpc.com/connect.Codec` (`"omnibuf"` and `"x-omnibuf"`).
+- **Connect (`github.com/omnibuf/omnibuf-go/omnibufconnect`):** Implements `connectrpc.com/connect/v2.Codec` and `StableCodec` (`"omnibuf"` and `"x-omnibuf"`).
 
 ```go
 // gRPC
@@ -63,14 +63,16 @@ import (
 omnibufgrpc.Register()
 conn, err := grpc.NewClient(addr, grpc.WithDefaultCallOptions(omnibufgrpc.CallOption()))
 
-// Connect
+// Connect v2
 import (
-	"connectrpc.com/connect"
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
 	"github.com/omnibuf/omnibuf-go/omnibufconnect"
 )
 
-handler := connect.NewUnaryHandler(procedure, fn, omnibufconnect.HandlerOptions()...)
-client := connect.NewClient[Req, Res](httpClient, url, omnibufconnect.ClientOption())
+connecthttp.Mount(mux, server, omnibufconnect.ServerOptions()...)
+transport := connecthttp.NewTransport(httpClient, baseURL, omnibufconnect.ClientOptions()...)
+client := connect.NewClient(transport)
 ```
 
 ## Implementation
