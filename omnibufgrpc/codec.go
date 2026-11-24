@@ -1,7 +1,4 @@
 // Package omnibufgrpc provides a gRPC encoding.CodecV2 backed by omnibufproto.
-//
-// This submodule is detached from github.com/omnibuf/omnibuf-go so core users
-// incur zero dependency on google.golang.org/grpc.
 package omnibufgrpc
 
 import (

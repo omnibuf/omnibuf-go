@@ -1,7 +1,4 @@
 // Package omnibufconnect provides a connectrpc.com/connect.Codec backed by omnibufproto.
-//
-// This submodule is detached from github.com/omnibuf/omnibuf-go so core users
-// incur zero dependency on connectrpc.com/connect.
 package omnibufconnect
 
 import (
