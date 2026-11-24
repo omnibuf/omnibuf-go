@@ -87,9 +87,6 @@ func (o MarshalOptions) marshalProtoReflectAppend(dst []byte, m protoreflect.Mes
 	if m == nil || !m.IsValid() {
 		return nil, fmt.Errorf("omnibuf: Marshal requires non-nil protoreflect.Message")
 	}
-	if err := proto.CheckInitialized(m.Interface()); err != nil {
-		return nil, err
-	}
 	if dst == nil {
 		dst = make([]byte, 0, 256)
 	} else if cap(dst)-len(dst) < 64 {
@@ -106,7 +103,14 @@ func (o MarshalOptions) marshalProtoReflectAppend(dst []byte, m protoreflect.Mes
 	}
 	bodyOpts := o
 	bodyOpts.SelfDescribing = false
-	return encodeProtoReflectMsg(dst, m, bodyOpts)
+	out, err := encodeProtoReflectMsg(dst, m, bodyOpts, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := proto.CheckInitialized(m.Interface()); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func buildProtoReflectSchemaMeta(md protoreflect.MessageDescriptor, schemaDepth int, active map[protoreflect.FullName]bool) (*omnibuf.SchemaMeta, bool) {
@@ -413,7 +417,10 @@ func decodeProtoScalarPayload(data []byte, pos int, k protoreflect.Kind) (protor
 	}
 }
 
-func encodeProtoReflectMsg(dst []byte, m protoreflect.Message, opts MarshalOptions) ([]byte, error) {
+func encodeProtoReflectMsg(dst []byte, m protoreflect.Message, opts MarshalOptions, depth int) ([]byte, error) {
+	if depth > omnibuf.MaxNestingDepth {
+		return nil, fmt.Errorf("omnibuf: nesting depth %d exceeds omnibuf.MaxNestingDepth (%d)", depth, omnibuf.MaxNestingDepth)
+	}
 	md := m.Descriptor()
 	if md.ExtensionRanges().Len() > 0 {
 		var extFD protoreflect.FieldDescriptor
@@ -440,6 +447,9 @@ func encodeProtoReflectMsg(dst []byte, m protoreflect.Message, opts MarshalOptio
 		val := m.Get(fd)
 
 		if fd.IsMap() {
+			if depth+1 > omnibuf.MaxNestingDepth {
+				return nil, fmt.Errorf("omnibuf: nesting depth %d exceeds omnibuf.MaxNestingDepth (%d)", depth+1, omnibuf.MaxNestingDepth)
+			}
 			mp := val.Map()
 			keyWT, err := protoScalarWireType(fd.MapKey().Kind())
 			if err != nil {
@@ -465,7 +475,7 @@ func encodeProtoReflectMsg(dst []byte, m protoreflect.Message, opts MarshalOptio
 					if err != nil {
 						return nil, err
 					}
-					dst, err = appendMapEntryVal(dst, fd.MapValue(), mp.Get(k), opts)
+					dst, err = appendMapEntryVal(dst, fd.MapValue(), mp.Get(k), opts, depth+1)
 					if err != nil {
 						return nil, err
 					}
@@ -477,7 +487,7 @@ func encodeProtoReflectMsg(dst []byte, m protoreflect.Message, opts MarshalOptio
 					if mapErr != nil {
 						return false
 					}
-					dst, mapErr = appendMapEntryVal(dst, fd.MapValue(), v, opts)
+					dst, mapErr = appendMapEntryVal(dst, fd.MapValue(), v, opts, depth+1)
 					return mapErr == nil
 				})
 				if mapErr != nil {
@@ -489,6 +499,9 @@ func encodeProtoReflectMsg(dst []byte, m protoreflect.Message, opts MarshalOptio
 		}
 
 		if fd.IsList() {
+			if depth+1 > omnibuf.MaxNestingDepth {
+				return nil, fmt.Errorf("omnibuf: nesting depth %d exceeds omnibuf.MaxNestingDepth (%d)", depth+1, omnibuf.MaxNestingDepth)
+			}
 			list := val.List()
 			elem, err := protoScalarWireType(fd.Kind())
 			if err != nil {
@@ -502,7 +515,7 @@ func encodeProtoReflectMsg(dst []byte, m protoreflect.Message, opts MarshalOptio
 				if elem == wire.WireSubMsg {
 					p := len(dst)
 					dst = append(dst, 0, 0)
-					dst, err = encodeProtoReflectMsg(dst, list.Get(j).Message(), opts)
+					dst, err = encodeProtoReflectMsg(dst, list.Get(j).Message(), opts, depth+2)
 					if err != nil {
 						return nil, err
 					}
@@ -528,7 +541,7 @@ func encodeProtoReflectMsg(dst []byte, m protoreflect.Message, opts MarshalOptio
 			lenPos := len(dst)
 			dst = append(dst, 0, 0)
 			var err error
-			dst, err = encodeProtoReflectMsg(dst, val.Message(), opts)
+			dst, err = encodeProtoReflectMsg(dst, val.Message(), opts, depth+1)
 			if err != nil {
 				return nil, err
 			}
@@ -793,7 +806,7 @@ func decodeProtoReflectMsg(data []byte, m protoreflect.Message, depth int, merge
 	return nil
 }
 
-func appendMapEntryVal(dst []byte, vd protoreflect.FieldDescriptor, v protoreflect.Value, opts MarshalOptions) ([]byte, error) {
+func appendMapEntryVal(dst []byte, vd protoreflect.FieldDescriptor, v protoreflect.Value, opts MarshalOptions, depth int) ([]byte, error) {
 	switch vd.Kind() {
 	case protoreflect.BoolKind:
 		if v.Bool() {
@@ -804,7 +817,7 @@ func appendMapEntryVal(dst []byte, vd protoreflect.FieldDescriptor, v protorefle
 		lenPos := len(dst)
 		dst = append(dst, 0, 0)
 		var err error
-		dst, err = encodeProtoReflectMsg(dst, v.Message(), opts)
+		dst, err = encodeProtoReflectMsg(dst, v.Message(), opts, depth+1)
 		if err != nil {
 			return nil, err
 		}

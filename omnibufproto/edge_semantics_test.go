@@ -651,9 +651,24 @@ func TestEdge_NestingLimitCountsArraysAndMaps(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			raw, err := Marshal(treeChain(c.depth, c.leaf))
-			if err != nil {
-				t.Fatal(err)
+			marshalRaw, marshalErr := Marshal(treeChain(c.depth, c.leaf))
+			if c.accept {
+				if marshalErr != nil {
+					t.Fatalf("expected Marshal accept: %v", marshalErr)
+				}
+			} else if marshalErr == nil {
+				t.Fatalf("expected Marshal reject at depth %d", c.depth)
+			}
+			raw := marshalRaw
+			if !c.accept {
+				leafRaw, err := Marshal(c.leaf)
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw = leafRaw
+				for i := 0; i < c.depth; i++ {
+					raw = concat(appendTag(nil, 4, WireSubMsg), AppendVarint(nil, uint64(len(raw))), raw)
+				}
 			}
 			var dst TreeNode
 			tableErr := Unmarshal(raw, &dst)

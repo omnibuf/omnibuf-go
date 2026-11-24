@@ -1234,7 +1234,10 @@ func marshalTableAppend(dst []byte, v any, opts MarshalOptions) ([]byte, error) 
 		}
 	}
 	st := encState{deterministic: opts.Deterministic}
-	dst = sc.encodeStruct(dst, ptr, &st)
+	dst = sc.encodeStruct(dst, ptr, &st, 0)
+	if st.depthErr {
+		return nil, fmt.Errorf("omnibuf: nesting depth exceeds MaxNestingDepth (%d)", MaxNestingDepth)
+	}
 	if st.badUTF8 != "" {
 		return nil, fmt.Errorf("omnibuf: field %s: string contains invalid UTF-8 (use WireBytes / wire=bytes for binary data)", st.badUTF8)
 	}
@@ -1247,6 +1250,7 @@ func marshalTableAppend(dst []byte, v any, opts MarshalOptions) ([]byte, error) 
 type encState struct {
 	deterministic bool
 	badUTF8       string // name of the first field holding invalid UTF-8
+	depthErr      bool   // true if nesting depth exceeded MaxNestingDepth
 }
 
 func (st *encState) checkString(fc *fieldCodec, s string) {
@@ -1396,7 +1400,11 @@ func isStructEmpty(sc *structCodec, base unsafe.Pointer) bool {
 	return true
 }
 
-func (sc *structCodec) encodeStruct(dst []byte, base unsafe.Pointer, st *encState) []byte {
+func (sc *structCodec) encodeStruct(dst []byte, base unsafe.Pointer, st *encState, depth int) []byte {
+	if depth > MaxNestingDepth {
+		st.depthErr = true
+		return dst
+	}
 	fields := sc.fields
 	for i := range fields {
 		fc := &fields[i]
@@ -1422,6 +1430,10 @@ func (sc *structCodec) encodeStruct(dst []byte, base unsafe.Pointer, st *encStat
 		}
 		if omitEmpty && isFieldEmpty(&fields[i], unsafe.Add(base, fields[i].offset)) {
 			continue
+		}
+		if (fc.wireType == wireArray || fc.wireType == wireMap) && depth+1 > MaxNestingDepth {
+			st.depthErr = true
+			return dst
 		}
 		if fc.kind == kindBool {
 			wt := wireBoolFalse
@@ -1645,11 +1657,17 @@ func (sc *structCodec) encodeStruct(dst []byte, base unsafe.Pointer, st *encStat
 			lenPos := len(dst)
 			if fc.subCodec.minWireSize(fPtr, 0) > wire.Max2BContainerLen {
 				dst = append(dst, 0, 0, 0, 0)
-				dst = fc.subCodec.encodeStruct(dst, fPtr, st)
+				dst = fc.subCodec.encodeStruct(dst, fPtr, st, depth+1)
+				if st.depthErr {
+					return dst
+				}
 				dst = backpatchContainerLen4(dst, lenPos)
 			} else {
 				dst = append(dst, 0, 0)
-				dst = fc.subCodec.encodeStruct(dst, fPtr, st)
+				dst = fc.subCodec.encodeStruct(dst, fPtr, st, depth+1)
+				if st.depthErr {
+					return dst
+				}
 				dst = backpatchContainerLen(dst, lenPos)
 			}
 		case kindStructPtr:
@@ -1657,11 +1675,17 @@ func (sc *structCodec) encodeStruct(dst []byte, base unsafe.Pointer, st *encStat
 			lenPos := len(dst)
 			if fc.subCodec.minWireSize(subPtr, 0) > wire.Max2BContainerLen {
 				dst = append(dst, 0, 0, 0, 0)
-				dst = fc.subCodec.encodeStruct(dst, subPtr, st)
+				dst = fc.subCodec.encodeStruct(dst, subPtr, st, depth+1)
+				if st.depthErr {
+					return dst
+				}
 				dst = backpatchContainerLen4(dst, lenPos)
 			} else {
 				dst = append(dst, 0, 0)
-				dst = fc.subCodec.encodeStruct(dst, subPtr, st)
+				dst = fc.subCodec.encodeStruct(dst, subPtr, st, depth+1)
+				if st.depthErr {
+					return dst
+				}
 				dst = backpatchContainerLen(dst, lenPos)
 			}
 		case kindStructValSlice:
@@ -1683,11 +1707,17 @@ func (sc *structCodec) encodeStruct(dst []byte, base unsafe.Pointer, st *encStat
 				eLenPos := len(dst)
 				if fc.subCodec.minWireSize(elemPtr, 0) > wire.Max2BContainerLen {
 					dst = append(dst, 0, 0, 0, 0)
-					dst = fc.subCodec.encodeStruct(dst, elemPtr, st)
+					dst = fc.subCodec.encodeStruct(dst, elemPtr, st, depth+2)
+					if st.depthErr {
+						return dst
+					}
 					dst = backpatchContainerLen4(dst, eLenPos)
 				} else {
 					dst = append(dst, 0, 0)
-					dst = fc.subCodec.encodeStruct(dst, elemPtr, st)
+					dst = fc.subCodec.encodeStruct(dst, elemPtr, st, depth+2)
+					if st.depthErr {
+						return dst
+					}
 					dst = backpatchContainerLen(dst, eLenPos)
 				}
 			}
@@ -1716,12 +1746,18 @@ func (sc *structCodec) encodeStruct(dst []byte, base unsafe.Pointer, st *encStat
 				eLenPos := len(dst)
 				if ptrs[j] != nil && fc.subCodec.minWireSize(ptrs[j], 0) > wire.Max2BContainerLen {
 					dst = append(dst, 0, 0, 0, 0)
-					dst = fc.subCodec.encodeStruct(dst, ptrs[j], st)
+					dst = fc.subCodec.encodeStruct(dst, ptrs[j], st, depth+2)
+					if st.depthErr {
+						return dst
+					}
 					dst = backpatchContainerLen4(dst, eLenPos)
 				} else {
 					dst = append(dst, 0, 0)
 					if ptrs[j] != nil {
-						dst = fc.subCodec.encodeStruct(dst, ptrs[j], st)
+						dst = fc.subCodec.encodeStruct(dst, ptrs[j], st, depth+2)
+						if st.depthErr {
+							return dst
+						}
 					}
 					dst = backpatchContainerLen(dst, eLenPos)
 				}
@@ -1738,7 +1774,10 @@ func (sc *structCodec) encodeStruct(dst []byte, base unsafe.Pointer, st *encStat
 			}
 			dst = encodeMapStringUint(dst, m, st.deterministic)
 		case kindMap:
-			dst = encodeGenericMap(dst, fc, fPtr, st)
+			dst = encodeGenericMap(dst, fc, fPtr, st, depth+1)
+			if st.depthErr {
+				return dst
+			}
 		}
 	}
 	return dst
@@ -1772,7 +1811,7 @@ func sortReflectMapKeys(keys []reflect.Value) {
 	})
 }
 
-func appendReflectMapEntryPayload(dst []byte, fc *fieldCodec, rv reflect.Value, wt uint8, subCodec *structCodec, st *encState) []byte {
+func appendReflectMapEntryPayload(dst []byte, fc *fieldCodec, rv reflect.Value, wt uint8, subCodec *structCodec, st *encState, depth int) []byte {
 	switch wt {
 	case wireString, wireBytes:
 		if rv.Kind() == reflect.String {
@@ -1838,12 +1877,18 @@ func appendReflectMapEntryPayload(dst []byte, fc *fieldCodec, rv reflect.Value, 
 		dst = append(dst, 0, 0)
 		if rv.Kind() == reflect.Pointer {
 			if !rv.IsNil() {
-				dst = subCodec.encodeStruct(dst, rv.UnsafePointer(), st)
+				dst = subCodec.encodeStruct(dst, rv.UnsafePointer(), st, depth+1)
+				if st.depthErr {
+					return dst
+				}
 			}
 		} else {
 			cp := reflect.New(rv.Type())
 			cp.Elem().Set(rv)
-			dst = subCodec.encodeStruct(dst, cp.UnsafePointer(), st)
+			dst = subCodec.encodeStruct(dst, cp.UnsafePointer(), st, depth+1)
+			if st.depthErr {
+				return dst
+			}
 		}
 		return backpatchContainerLen(dst, lenPos)
 	default:
@@ -1851,7 +1896,7 @@ func appendReflectMapEntryPayload(dst []byte, fc *fieldCodec, rv reflect.Value, 
 	}
 }
 
-func encodeGenericMap(dst []byte, fc *fieldCodec, fPtr unsafe.Pointer, st *encState) []byte {
+func encodeGenericMap(dst []byte, fc *fieldCodec, fPtr unsafe.Pointer, st *encState, depth int) []byte {
 	rv := reflect.NewAt(fc.sliceType, fPtr).Elem()
 	lenPos := len(dst)
 	dst = append(dst, 0, 0, fc.mapKeyWT, fc.mapValWT)
@@ -1860,14 +1905,20 @@ func encodeGenericMap(dst []byte, fc *fieldCodec, fPtr unsafe.Pointer, st *encSt
 		keys := rv.MapKeys()
 		sortReflectMapKeys(keys)
 		for _, k := range keys {
-			dst = appendReflectMapEntryPayload(dst, fc, k, fc.mapKeyWT, nil, st)
-			dst = appendReflectMapEntryPayload(dst, fc, rv.MapIndex(k), fc.mapValWT, fc.subCodec, st)
+			dst = appendReflectMapEntryPayload(dst, fc, k, fc.mapKeyWT, nil, st, depth)
+			dst = appendReflectMapEntryPayload(dst, fc, rv.MapIndex(k), fc.mapValWT, fc.subCodec, st, depth)
+			if st.depthErr {
+				return dst
+			}
 		}
 	} else {
 		iter := rv.MapRange()
 		for iter.Next() {
-			dst = appendReflectMapEntryPayload(dst, fc, iter.Key(), fc.mapKeyWT, nil, st)
-			dst = appendReflectMapEntryPayload(dst, fc, iter.Value(), fc.mapValWT, fc.subCodec, st)
+			dst = appendReflectMapEntryPayload(dst, fc, iter.Key(), fc.mapKeyWT, nil, st, depth)
+			dst = appendReflectMapEntryPayload(dst, fc, iter.Value(), fc.mapValWT, fc.subCodec, st, depth)
+			if st.depthErr {
+				return dst
+			}
 		}
 	}
 	return backpatchContainerLen(dst, lenPos)

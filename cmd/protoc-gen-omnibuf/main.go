@@ -275,6 +275,9 @@ func generateFile(gen *protogen.Plugin, file *protogen.File) {
 	g.P("// source: ", file.Desc.Path())
 	g.P()
 	g.P("package ", file.GoPackageName)
+	if len(file.Messages) == 0 {
+		return
+	}
 	g.P()
 	g.P("import (")
 	g.P(`	"encoding/binary"`)
@@ -285,9 +288,7 @@ func generateFile(gen *protogen.Plugin, file *protogen.File) {
 	if generatedFileUsesMath(file) {
 		g.P(`	"math"`)
 	}
-	if len(file.Messages) > 0 {
-		g.P(`	"unsafe"`)
-	}
+	g.P(`	"unsafe"`)
 	g.P()
 	g.P(`	"github.com/omnibuf/omnibuf-go"`)
 	g.P(`	"github.com/omnibuf/omnibuf-go/wire"`)
@@ -1941,12 +1942,31 @@ func validateGeneratedFile(file *protogen.File) error {
 	return nil
 }
 func canGenerateOpaque(msg *protogen.Message) bool {
+	return canGenerateOpaqueVisited(msg, make(map[protoreflect.FullName]bool))
+}
+
+func canGenerateOpaqueVisited(msg *protogen.Message, visited map[protoreflect.FullName]bool) bool {
+	if msg == nil {
+		return false
+	}
+	fullName := msg.Desc.FullName()
+	if visited[fullName] {
+		return true
+	}
 	if len(msg.Fields) == 0 {
 		return false
 	}
 	for _, f := range msg.Fields {
 		if f.Desc.Number() > 63 {
 			return false
+		}
+	}
+	visited[fullName] = true
+	for _, f := range msg.Fields {
+		if !f.Desc.IsMap() && f.Desc.Kind() == protoreflect.MessageKind {
+			if !canGenerateOpaqueVisited(f.Message, visited) {
+				return false
+			}
 		}
 	}
 	return true
