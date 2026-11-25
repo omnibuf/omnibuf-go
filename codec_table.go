@@ -1216,10 +1216,11 @@ func marshalTableAppend(dst []byte, v any, opts MarshalOptions) ([]byte, error) 
 	}
 	ptr := rv.UnsafePointer()
 	if dst == nil {
-		minCap := max(512, sc.minWireSize(ptr, 0)+64)
-		dst = make([]byte, 0, minCap)
-	} else if cap(dst)-len(dst) < 512 {
-		minCap := max(512, sc.minWireSize(ptr, 0)+64)
+		minSize := sc.minWireSize(ptr, 0)
+		dst = make([]byte, 0, max(64, minSize+minSize/4))
+	} else if cap(dst)-len(dst) < 64 {
+		minSize := sc.minWireSize(ptr, 0)
+		minCap := max(64, minSize+minSize/4)
 		grown := make([]byte, len(dst), max(cap(dst)*2, len(dst)+minCap))
 		copy(grown, dst)
 		dst = grown
