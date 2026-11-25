@@ -10,7 +10,7 @@ default:
 test:
     go test -race -v ./...
     cd omnibufproto && go test -race -v ./...
-    cd cmd/protoc-gen-omnibuf && go test -race -v ./...
+    cd cmd/protoc-gen-omnibuf-go && go test -race -v ./...
     cd benchmarks && go test -race -v ./...
 
 # Build and run the conformance test runner binary against an adapter binary (defaults to Go adapter ./bin/conformance-go)
@@ -43,7 +43,7 @@ fuzz time="10s":
 go-lint: go-inline-check
     golangci-lint run ./...
     cd omnibufproto && golangci-lint run ./...
-    cd cmd/protoc-gen-omnibuf && golangci-lint run ./...
+    cd cmd/protoc-gen-omnibuf-go && golangci-lint run ./...
     cd benchmarks && golangci-lint run ./...
 
 # Fail if a performance-critical function loses compiler inlining eligibility
@@ -54,14 +54,14 @@ go-inline-check:
 go-fmt:
     golangci-lint fmt
     cd omnibufproto && golangci-lint fmt
-    cd cmd/protoc-gen-omnibuf && golangci-lint fmt
+    cd cmd/protoc-gen-omnibuf-go && golangci-lint fmt
     cd benchmarks && golangci-lint fmt
 
 # Check Go code formatting across all modules
 go-fmt-check:
     golangci-lint fmt --diff
     cd omnibufproto && golangci-lint fmt --diff
-    cd cmd/protoc-gen-omnibuf && golangci-lint fmt --diff
+    cd cmd/protoc-gen-omnibuf-go && golangci-lint fmt --diff
     cd benchmarks && golangci-lint fmt --diff
 
 # Run all Go benchmarks with memory allocation stats and persist output to testdata/benchmarks.txt and testdata/benchmarks.json
@@ -75,15 +75,15 @@ export-bench:
 
 # Regenerate omnibufproto/internal/pb and benchmarks/pb generated files
 generate:
-    cd cmd/protoc-gen-omnibuf && go run . -self-gen=../../omnibufproto/internal/pb/peer_omnibuf.pb.go
-    cd cmd/protoc-gen-omnibuf && go run . -conformance-gen=../../omnibufproto/internal/pb/conformance_omnibuf.pb.go
+    cd cmd/protoc-gen-omnibuf-go && go run . -self-gen=../../omnibufproto/internal/pb/peer_omnibuf.pb.go
+    cd cmd/protoc-gen-omnibuf-go && go run . -conformance-gen=../../omnibufproto/internal/pb/conformance_omnibuf.pb.go
     cp omnibufproto/internal/pb/peer_omnibuf.pb.go benchmarks/pb/peer_omnibuf.pb.go
     cd benchmarks && go run ./cmd/vtprotogen -out=pb/peer_vtproto.pb.go
 
-# Build the protoc-gen-omnibuf plugin binary into ./bin/protoc-gen-omnibuf
+# Build the protoc-gen-omnibuf-go plugin binary into ./bin/protoc-gen-omnibuf-go
 build-plugin:
     @mkdir -p bin
-    cd cmd/protoc-gen-omnibuf && go build -o ../../bin/protoc-gen-omnibuf .
+    cd cmd/protoc-gen-omnibuf-go && go build -o ../../bin/protoc-gen-omnibuf-go .
 
 # ==============================================================================
 # Protobuf / Buf Directives

@@ -2,14 +2,14 @@
 
 [![OmniBuf Spec: v1 DRAFT-1](https://img.shields.io/badge/OmniBuf%20Spec-v1%20DRAFT--1-FF4F18)](https://omnibuf.com/spec)
 
-Reference Go implementation of [OmniBuf Wire Specification v1 DRAFT-1](https://omnibuf.com/spec), including the `omnibuf` runtime, `omnibufproto` bridge, `protoc-gen-omnibuf` plugin, and the cross-language conformance runner. Full docs live at [omnibuf.com/go](https://omnibuf.com/go).
+Reference Go implementation of [OmniBuf Wire Specification v1 DRAFT-1](https://omnibuf.com/spec), including the `omnibuf` runtime, `omnibufproto` bridge, `protoc-gen-omnibuf-go` plugin, and the cross-language conformance runner. Full docs live at [omnibuf.com/go](https://omnibuf.com/go).
 
 ## Install
 
 ```bash
 go get github.com/omnibuf/omnibuf-go
 go get github.com/omnibuf/omnibuf-go/omnibufproto
-go install github.com/omnibuf/omnibuf-go/cmd/protoc-gen-omnibuf@latest
+go install github.com/omnibuf/omnibuf-go/cmd/protoc-gen-omnibuf-go@latest
 ```
 
 ## Quick usage
@@ -79,7 +79,7 @@ client := connect.NewClient(transport)
 
 - **Core module (`github.com/omnibuf/omnibuf-go`):** Pure Go standard library with zero external dependencies. Supports `omnibuf:"..."` struct tags (`name`, `wire`, `omitempty`, `-`), `DecodeBlind`, `LocateField`, and `SpliceFields`.
 - **Protobuf bridge (`github.com/omnibuf/omnibuf-go/omnibufproto`):** Separate submodule for `proto.Message`, `protoreflect.Message`, `dynamicpb.Message`, `oneof`, `enum`, and Go Opaque API types.
-- **Compiler plugin (`protoc-gen-omnibuf`):** Generates static OmniBuf codecs from `.proto` files. Available via `go install` or `brew install omnibuf/tap/protoc-gen-omnibuf`.
+- **Compiler plugin (`protoc-gen-omnibuf-go`):** Generates static OmniBuf codecs from `.proto` files. Available via `go install` or `brew install omnibuf/tap/protoc-gen-omnibuf-go`.
 - **Conformance suite host (`cmd/conformance-runner`):** Runs the canonical 758-case cross-language conformance corpus (`internal/conformance/conformance_corpus.json`). See [CONFORMANCE.md](./CONFORMANCE.md).
 - **Buffer ownership:** `Unmarshal` copies strings and bytes. `UnmarshalZeroCopy` and `Read*ZeroCopy` borrow the packet buffer, so keep the backing slice live and unmodified while decoded values are in use.
 

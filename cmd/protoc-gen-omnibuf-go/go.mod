@@ -1,4 +1,4 @@
-module github.com/omnibuf/omnibuf-go/cmd/protoc-gen-omnibuf
+module github.com/omnibuf/omnibuf-go/cmd/protoc-gen-omnibuf-go
 
 go 1.25.0
 
