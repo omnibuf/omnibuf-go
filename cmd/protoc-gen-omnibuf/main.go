@@ -486,7 +486,8 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 	g.P("// MarshalOmniBufAppend encodes ", typeName, " in a single forward pass using generated field tags.")
 	g.P("func (x *", typeName, ") MarshalOmniBufAppend(dst []byte) []byte {")
 	g.P("	if dst == nil {")
-	g.P("		dst = make([]byte, 0, max(64, x.MinWireSizeOmniBuf(0)+64))")
+	g.P("		minSize := x.MinWireSizeOmniBuf(0)")
+	g.P("		dst = make([]byte, 0, max(64, minSize+minSize/4))")
 	g.P("	}")
 	for i, f := range orderedFields {
 		fnum := uint16(f.Desc.Number())
