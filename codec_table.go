@@ -209,6 +209,9 @@ func inspectProtoStateType(t reflect.Type) ProtoStateOffsets {
 
 // Reset clears sizeCache unconditionally and clears unknownFields when merge is false.
 func (p ProtoStateOffsets) Reset(ptr unsafe.Pointer, merge bool) {
+	if (p.sizeCacheOff & p.unknownFieldsOff) == noFieldOffset {
+		return
+	}
 	if p.sizeCacheOff != noFieldOffset {
 		*(*int32)(unsafe.Add(ptr, p.sizeCacheOff)) = 0
 	}

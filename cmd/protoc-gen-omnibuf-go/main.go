@@ -487,162 +487,175 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 	g.P("}")
 	g.P()
 
-	g.P("// MarshalOmniBufAppend encodes ", typeName, " in a single forward pass using generated field tags.")
-	g.P("func (x *", typeName, ") MarshalOmniBufAppend(dst []byte) []byte {")
-	g.P("	if dst == nil {")
-	g.P("		minSize := x.MinWireSizeOmniBuf(0)")
-	g.P("		dst = make([]byte, 0, max(64, minSize+minSize/4))")
-	g.P("	}")
-	for i, f := range orderedFields {
-		fnum := uint16(f.Desc.Number())
-		wt := wireTypeForField(f)
-		rawTag := (uint64(fnum) << 4) | uint64(wt)
-		if f.Desc.Kind() == protoreflect.BoolKind && !f.Desc.IsList() {
-			tTrue := (uint64(fnum) << 4) | uint64(wire.WireBoolTrue)
-			tFalse := (uint64(fnum) << 4) | uint64(wire.WireBoolFalse)
-			g.P("\tif x.", f.GoName, " {")
-			emitConstTag(g, "dst", tTrue)
-			g.P("\t} else {")
-			emitConstTag(g, "dst", tFalse)
-			g.P("\t}")
-			continue
+	flatScalar := isFlatScalarMessage(orderedFields)
+	emitMarshalBody := true
+	if flatScalar {
+		if emitFlatScalarMarshal(g, typeName, orderedFields) {
+			g.P("//go:noinline")
+			g.P("func (x *", typeName, ") marshalOmniBufSlow(dst []byte) []byte {")
+		} else {
+			emitMarshalBody = false
 		}
-		if f.Desc.Kind() == protoreflect.MessageKind && !f.Desc.IsList() && !f.Desc.IsMap() {
-			g.P("\tif x.", f.GoName, " != nil {")
-			emitConstTag(g, "dst", rawTag)
-			g.P("		lenPos_", i, " := len(dst)")
-			g.P("		if x.", f.GoName, ".MinWireSizeOmniBuf(0) > wire.Max2BContainerLen {")
-			g.P("			dst = append(dst, 0, 0, 0, 0)")
-			g.P("			dst = x.", f.GoName, ".MarshalOmniBufAppend(dst)")
-			g.P("			dst = wire.BackpatchContainerLen4(dst, lenPos_", i, ")")
-			g.P("		} else {")
-			g.P("			dst = append(dst, 0, 0)")
-			g.P("			dst = x.", f.GoName, ".MarshalOmniBufAppend(dst)")
-			emitBackpatchLen(g, "dst", fmt.Sprintf("lenPos_%d", i))
-			g.P("		}")
-			g.P("\t}")
-			continue
-		}
-		emitConstTag(g, "dst", rawTag)
-
-		if f.Desc.IsMap() {
-			g.P("	dst = wire.EncodeMapStringUint(dst, x.", f.GoName, ", true)")
-			continue
-		}
-
-		if f.Desc.IsList() {
-			switch f.Desc.Kind() {
-			case protoreflect.StringKind:
-				g.P("	arrMin_", i, " := 2")
-				g.P("	for _, s := range x.", f.GoName, " {")
-				g.P("		arrMin_", i, " += 1 + len(s)")
-				g.P("	}")
-				g.P("	lenPos_", i, " := len(dst)")
-				g.P("	if arrMin_", i, " > wire.Max2BContainerLen {")
-				g.P("		dst = append(dst, 0, 0, 0, 0, wire.WireString)")
-				g.P("	} else {")
-				g.P("		dst = append(dst, 0, 0, wire.WireString)")
-				g.P("	}")
-				g.P("	dst = wire.AppendVarint(dst, uint64(len(x.", f.GoName, ")))")
-				g.P("	for _, s := range x.", f.GoName, " {")
-				g.P("		dst = wire.AppendVarint(dst, uint64(len(s)))")
-				g.P("		dst = append(dst, s...)")
-				g.P("	}")
-				g.P("	if arrMin_", i, " > wire.Max2BContainerLen {")
-				g.P("		dst = wire.BackpatchContainerLen4(dst, lenPos_", i, ")")
-				g.P("	} else {")
-				emitBackpatchLen(g, "dst", fmt.Sprintf("lenPos_%d", i))
-				g.P("	}")
-			case protoreflect.BytesKind:
-				g.P("	dst = wire.EncodeBytesArr(dst, x.", f.GoName, ")")
-			case protoreflect.BoolKind:
-				g.P("	dst = wire.EncodeBoolArr(dst, x.", f.GoName, ")")
-			case protoreflect.Uint32Kind, protoreflect.Uint64Kind:
-				g.P("	lenPos_", i, " := len(dst)")
-				g.P("	dst = append(dst, 0, 0, wire.WireUint)")
-				g.P("	dst = wire.AppendVarint(dst, uint64(len(x.", f.GoName, ")))")
-				g.P("	for _, v := range x.", f.GoName, " {")
-				g.P("		dst = wire.AppendVarint(dst, uint64(v))")
-				g.P("	}")
-				emitBackpatchLen(g, "dst", fmt.Sprintf("lenPos_%d", i))
-			case protoreflect.Sint32Kind, protoreflect.Int32Kind, protoreflect.Sint64Kind, protoreflect.Int64Kind:
-				g.P("	dst = wire.EncodeSintArr(dst, x.", f.GoName, ")")
-			case protoreflect.Fixed32Kind:
-				g.P("	dst = wire.EncodeFixed32Arr(dst, x.", f.GoName, ", wire.WireFixed32)")
-			case protoreflect.Fixed64Kind:
-				g.P("	dst = wire.EncodeFixed64Arr(dst, x.", f.GoName, ", wire.WireFixed64)")
-			case protoreflect.Sfixed32Kind:
-				g.P("	dst = wire.EncodeFixed32Arr(dst, x.", f.GoName, ", wire.WireSfixed32)")
-			case protoreflect.Sfixed64Kind:
-				g.P("	dst = wire.EncodeFixed64Arr(dst, x.", f.GoName, ", wire.WireSfixed64)")
-			case protoreflect.FloatKind:
-				g.P("	dst = wire.EncodeFloat32Arr(dst, x.", f.GoName, ")")
-			case protoreflect.DoubleKind:
-				g.P("	dst = wire.EncodeFloat64Arr(dst, x.", f.GoName, ")")
-			case protoreflect.MessageKind:
-				g.P("	arrMin_", i, " := 2")
-				g.P("	for _, elem := range x.", f.GoName, " {")
-				g.P("		arrMin_", i, " += 2 + elem.MinWireSizeOmniBuf(0)")
-				g.P("	}")
-				g.P("	lenPos_", i, " := len(dst)")
-				g.P("	if arrMin_", i, " > wire.Max2BContainerLen {")
-				g.P("		dst = append(dst, 0, 0, 0, 0, wire.WireSubMsg)")
-				g.P("	} else {")
-				g.P("		dst = append(dst, 0, 0, wire.WireSubMsg)")
-				g.P("	}")
-				g.P("	dst = wire.AppendVarint(dst, uint64(len(x.", f.GoName, ")))")
-				g.P("	for _, elem := range x.", f.GoName, " {")
-				g.P("		eLenPos := len(dst)")
-				g.P("		if elem != nil && elem.MinWireSizeOmniBuf(0) > wire.Max2BContainerLen {")
+	} else {
+		g.P("// MarshalOmniBufAppend encodes ", typeName, " in a single forward pass using generated field tags.")
+		g.P("func (x *", typeName, ") MarshalOmniBufAppend(dst []byte) []byte {")
+	}
+	if emitMarshalBody {
+		g.P("	if dst == nil {")
+		g.P("		minSize := x.MinWireSizeOmniBuf(0)")
+		g.P("		dst = make([]byte, 0, max(64, minSize+minSize/4))")
+		g.P("	}")
+		for i, f := range orderedFields {
+			fnum := uint16(f.Desc.Number())
+			wt := wireTypeForField(f)
+			rawTag := (uint64(fnum) << 4) | uint64(wt)
+			if f.Desc.Kind() == protoreflect.BoolKind && !f.Desc.IsList() {
+				tTrue := (uint64(fnum) << 4) | uint64(wire.WireBoolTrue)
+				tFalse := (uint64(fnum) << 4) | uint64(wire.WireBoolFalse)
+				g.P("\tif x.", f.GoName, " {")
+				emitConstTag(g, "dst", tTrue)
+				g.P("\t} else {")
+				emitConstTag(g, "dst", tFalse)
+				g.P("\t}")
+				continue
+			}
+			if f.Desc.Kind() == protoreflect.MessageKind && !f.Desc.IsList() && !f.Desc.IsMap() {
+				g.P("\tif x.", f.GoName, " != nil {")
+				emitConstTag(g, "dst", rawTag)
+				g.P("		lenPos_", i, " := len(dst)")
+				g.P("		if x.", f.GoName, ".MinWireSizeOmniBuf(0) > wire.Max2BContainerLen {")
 				g.P("			dst = append(dst, 0, 0, 0, 0)")
-				g.P("			dst = elem.MarshalOmniBufAppend(dst)")
-				g.P("			dst = wire.BackpatchContainerLen4(dst, eLenPos)")
+				g.P("			dst = x.", f.GoName, ".MarshalOmniBufAppend(dst)")
+				g.P("			dst = wire.BackpatchContainerLen4(dst, lenPos_", i, ")")
 				g.P("		} else {")
 				g.P("			dst = append(dst, 0, 0)")
-				g.P("			if elem != nil {")
-				g.P("				dst = elem.MarshalOmniBufAppend(dst)")
-				g.P("			}")
-				emitBackpatchLen(g, "dst", "eLenPos")
-				g.P("		}")
-				g.P("	}")
-				g.P("	if arrMin_", i, " > wire.Max2BContainerLen {")
-				g.P("		dst = wire.BackpatchContainerLen4(dst, lenPos_", i, ")")
-				g.P("	} else {")
+				g.P("			dst = x.", f.GoName, ".MarshalOmniBufAppend(dst)")
 				emitBackpatchLen(g, "dst", fmt.Sprintf("lenPos_%d", i))
-				g.P("	}")
+				g.P("		}")
+				g.P("\t}")
+				continue
 			}
-			continue
-		}
+			emitConstTag(g, "dst", rawTag)
 
-		switch f.Desc.Kind() {
-		case protoreflect.Uint32Kind:
-			g.P("	dst = wire.AppendVarint(dst, uint64(x.", f.GoName, "))")
-		case protoreflect.Uint64Kind:
-			g.P("	dst = wire.AppendVarint(dst, x.", f.GoName, ")")
-		case protoreflect.Sint32Kind, protoreflect.Int32Kind:
-			g.P("	dst = wire.AppendVarint(dst, wire.EncodeZigZag(int64(x.", f.GoName, ")))")
-		case protoreflect.Sint64Kind, protoreflect.Int64Kind:
-			g.P("	dst = wire.AppendVarint(dst, wire.EncodeZigZag(x.", f.GoName, "))")
-		case protoreflect.Fixed32Kind, protoreflect.Sfixed32Kind:
-			g.P("	b_", i, " := uint32(x.", f.GoName, ")")
-			g.P("	dst = append(dst, byte(b_", i, "), byte(b_", i, ">>8), byte(b_", i, ">>16), byte(b_", i, ">>24))")
-		case protoreflect.Fixed64Kind, protoreflect.Sfixed64Kind:
-			g.P("	b_", i, " := uint64(x.", f.GoName, ")")
-			g.P("	dst = append(dst, byte(b_", i, "), byte(b_", i, ">>8), byte(b_", i, ">>16), byte(b_", i, ">>24), byte(b_", i, ">>32), byte(b_", i, ">>40), byte(b_", i, ">>48), byte(b_", i, ">>56))")
-		case protoreflect.FloatKind:
-			g.P("	b_", i, " := math.Float32bits(x.", f.GoName, ")")
-			g.P("	dst = append(dst, byte(b_", i, "), byte(b_", i, ">>8), byte(b_", i, ">>16), byte(b_", i, ">>24))")
-		case protoreflect.DoubleKind:
-			g.P("	b_", i, " := math.Float64bits(x.", f.GoName, ")")
-			g.P("	dst = append(dst, byte(b_", i, "), byte(b_", i, ">>8), byte(b_", i, ">>16), byte(b_", i, ">>24), byte(b_", i, ">>32), byte(b_", i, ">>40), byte(b_", i, ">>48), byte(b_", i, ">>56))")
-		case protoreflect.StringKind, protoreflect.BytesKind:
-			g.P("	dst = wire.AppendVarint(dst, uint64(len(x.", f.GoName, ")))")
-			g.P("	dst = append(dst, x.", f.GoName, "...)")
+			if f.Desc.IsMap() {
+				g.P("	dst = wire.EncodeMapStringUint(dst, x.", f.GoName, ", true)")
+				continue
+			}
+
+			if f.Desc.IsList() {
+				switch f.Desc.Kind() {
+				case protoreflect.StringKind:
+					g.P("	arrMin_", i, " := 2")
+					g.P("	for _, s := range x.", f.GoName, " {")
+					g.P("		arrMin_", i, " += 1 + len(s)")
+					g.P("	}")
+					g.P("	lenPos_", i, " := len(dst)")
+					g.P("	if arrMin_", i, " > wire.Max2BContainerLen {")
+					g.P("		dst = append(dst, 0, 0, 0, 0, wire.WireString)")
+					g.P("	} else {")
+					g.P("		dst = append(dst, 0, 0, wire.WireString)")
+					g.P("	}")
+					g.P("	dst = wire.AppendVarint(dst, uint64(len(x.", f.GoName, ")))")
+					g.P("	for _, s := range x.", f.GoName, " {")
+					g.P("		dst = wire.AppendVarint(dst, uint64(len(s)))")
+					g.P("		dst = append(dst, s...)")
+					g.P("	}")
+					g.P("	if arrMin_", i, " > wire.Max2BContainerLen {")
+					g.P("		dst = wire.BackpatchContainerLen4(dst, lenPos_", i, ")")
+					g.P("	} else {")
+					emitBackpatchLen(g, "dst", fmt.Sprintf("lenPos_%d", i))
+					g.P("	}")
+				case protoreflect.BytesKind:
+					g.P("	dst = wire.EncodeBytesArr(dst, x.", f.GoName, ")")
+				case protoreflect.BoolKind:
+					g.P("	dst = wire.EncodeBoolArr(dst, x.", f.GoName, ")")
+				case protoreflect.Uint32Kind, protoreflect.Uint64Kind:
+					g.P("	lenPos_", i, " := len(dst)")
+					g.P("	dst = append(dst, 0, 0, wire.WireUint)")
+					g.P("	dst = wire.AppendVarint(dst, uint64(len(x.", f.GoName, ")))")
+					g.P("	for _, v := range x.", f.GoName, " {")
+					g.P("		dst = wire.AppendVarint(dst, uint64(v))")
+					g.P("	}")
+					emitBackpatchLen(g, "dst", fmt.Sprintf("lenPos_%d", i))
+				case protoreflect.Sint32Kind, protoreflect.Int32Kind, protoreflect.Sint64Kind, protoreflect.Int64Kind:
+					g.P("	dst = wire.EncodeSintArr(dst, x.", f.GoName, ")")
+				case protoreflect.Fixed32Kind:
+					g.P("	dst = wire.EncodeFixed32Arr(dst, x.", f.GoName, ", wire.WireFixed32)")
+				case protoreflect.Fixed64Kind:
+					g.P("	dst = wire.EncodeFixed64Arr(dst, x.", f.GoName, ", wire.WireFixed64)")
+				case protoreflect.Sfixed32Kind:
+					g.P("	dst = wire.EncodeFixed32Arr(dst, x.", f.GoName, ", wire.WireSfixed32)")
+				case protoreflect.Sfixed64Kind:
+					g.P("	dst = wire.EncodeFixed64Arr(dst, x.", f.GoName, ", wire.WireSfixed64)")
+				case protoreflect.FloatKind:
+					g.P("	dst = wire.EncodeFloat32Arr(dst, x.", f.GoName, ")")
+				case protoreflect.DoubleKind:
+					g.P("	dst = wire.EncodeFloat64Arr(dst, x.", f.GoName, ")")
+				case protoreflect.MessageKind:
+					g.P("	arrMin_", i, " := 2")
+					g.P("	for _, elem := range x.", f.GoName, " {")
+					g.P("		arrMin_", i, " += 2 + elem.MinWireSizeOmniBuf(0)")
+					g.P("	}")
+					g.P("	lenPos_", i, " := len(dst)")
+					g.P("	if arrMin_", i, " > wire.Max2BContainerLen {")
+					g.P("		dst = append(dst, 0, 0, 0, 0, wire.WireSubMsg)")
+					g.P("	} else {")
+					g.P("		dst = append(dst, 0, 0, wire.WireSubMsg)")
+					g.P("	}")
+					g.P("	dst = wire.AppendVarint(dst, uint64(len(x.", f.GoName, ")))")
+					g.P("	for _, elem := range x.", f.GoName, " {")
+					g.P("		eLenPos := len(dst)")
+					g.P("		if elem != nil && elem.MinWireSizeOmniBuf(0) > wire.Max2BContainerLen {")
+					g.P("			dst = append(dst, 0, 0, 0, 0)")
+					g.P("			dst = elem.MarshalOmniBufAppend(dst)")
+					g.P("			dst = wire.BackpatchContainerLen4(dst, eLenPos)")
+					g.P("		} else {")
+					g.P("			dst = append(dst, 0, 0)")
+					g.P("			if elem != nil {")
+					g.P("				dst = elem.MarshalOmniBufAppend(dst)")
+					g.P("			}")
+					emitBackpatchLen(g, "dst", "eLenPos")
+					g.P("		}")
+					g.P("	}")
+					g.P("	if arrMin_", i, " > wire.Max2BContainerLen {")
+					g.P("		dst = wire.BackpatchContainerLen4(dst, lenPos_", i, ")")
+					g.P("	} else {")
+					emitBackpatchLen(g, "dst", fmt.Sprintf("lenPos_%d", i))
+					g.P("	}")
+				}
+				continue
+			}
+
+			switch f.Desc.Kind() {
+			case protoreflect.Uint32Kind:
+				g.P("	dst = wire.AppendVarint(dst, uint64(x.", f.GoName, "))")
+			case protoreflect.Uint64Kind:
+				g.P("	dst = wire.AppendVarint(dst, x.", f.GoName, ")")
+			case protoreflect.Sint32Kind, protoreflect.Int32Kind:
+				g.P("	dst = wire.AppendVarint(dst, wire.EncodeZigZag(int64(x.", f.GoName, ")))")
+			case protoreflect.Sint64Kind, protoreflect.Int64Kind:
+				g.P("	dst = wire.AppendVarint(dst, wire.EncodeZigZag(x.", f.GoName, "))")
+			case protoreflect.Fixed32Kind, protoreflect.Sfixed32Kind:
+				g.P("	b_", i, " := uint32(x.", f.GoName, ")")
+				g.P("	dst = append(dst, byte(b_", i, "), byte(b_", i, ">>8), byte(b_", i, ">>16), byte(b_", i, ">>24))")
+			case protoreflect.Fixed64Kind, protoreflect.Sfixed64Kind:
+				g.P("	b_", i, " := uint64(x.", f.GoName, ")")
+				g.P("	dst = append(dst, byte(b_", i, "), byte(b_", i, ">>8), byte(b_", i, ">>16), byte(b_", i, ">>24), byte(b_", i, ">>32), byte(b_", i, ">>40), byte(b_", i, ">>48), byte(b_", i, ">>56))")
+			case protoreflect.FloatKind:
+				g.P("	b_", i, " := math.Float32bits(x.", f.GoName, ")")
+				g.P("	dst = append(dst, byte(b_", i, "), byte(b_", i, ">>8), byte(b_", i, ">>16), byte(b_", i, ">>24))")
+			case protoreflect.DoubleKind:
+				g.P("	b_", i, " := math.Float64bits(x.", f.GoName, ")")
+				g.P("	dst = append(dst, byte(b_", i, "), byte(b_", i, ">>8), byte(b_", i, ">>16), byte(b_", i, ">>24), byte(b_", i, ">>32), byte(b_", i, ">>40), byte(b_", i, ">>48), byte(b_", i, ">>56))")
+			case protoreflect.StringKind, protoreflect.BytesKind:
+				g.P("	dst = wire.AppendVarint(dst, uint64(len(x.", f.GoName, ")))")
+				g.P("	dst = append(dst, x.", f.GoName, "...)")
+			}
 		}
+		g.P("	return dst")
+		g.P("}")
+		g.P()
 	}
-	g.P("	return dst")
-	g.P("}")
-	g.P()
 
 	g.P("// ValidateOmniBufUTF8 verifies that all string fields in ", typeName, " contain valid UTF-8.")
 	g.P("func (x *", typeName, ") ValidateOmniBufUTF8() error {")
@@ -793,14 +806,19 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 	g.P("var _omnibufProtoState_", typeName, " = omnibuf.InspectProtoState[", typeName, "]()")
 	g.P()
 
-	g.P("// UnmarshalOmniBuf decodes data into ", typeName, " using generated switch dispatch.")
-	g.P("func (x *", typeName, ") UnmarshalOmniBuf(data []byte, zeroCopy bool) error {")
-	g.P("	if x == nil {")
-	g.P(`		return fmt.Errorf("omnibuf: Unmarshal requires non-nil pointer")`)
-	g.P("	}")
-	g.P("	return x.decodeOmniBuf(data, zeroCopy, 0, false)")
-	g.P("}")
-	g.P()
+	if flatScalar {
+		emitFlatScalarUnmarshal(g, typeName, orderedFields)
+		g.P("//go:noinline")
+	} else {
+		g.P("// UnmarshalOmniBuf decodes data into ", typeName, " using generated switch dispatch.")
+		g.P("func (x *", typeName, ") UnmarshalOmniBuf(data []byte, zeroCopy bool) error {")
+		g.P("	if x == nil {")
+		g.P(`		return fmt.Errorf("omnibuf: Unmarshal requires non-nil pointer")`)
+		g.P("	}")
+		g.P("	return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+		g.P("}")
+		g.P()
+	}
 
 	g.P("func (x *", typeName, ") decodeOmniBuf(data []byte, zeroCopy bool, depth int, merge bool) error {")
 	g.P("	if depth > omnibuf.MaxNestingDepth {")
