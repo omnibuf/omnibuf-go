@@ -28,79 +28,39 @@ func (x *Location) MinWireSizeOmniBuf(depth int) int {
 
 // MarshalOmniBufAppend encodes Location in a single forward pass using generated field tags.
 func (x *Location) MarshalOmniBufAppend(dst []byte) []byte {
-	n_0 := len(x.Region)
-	n_1 := len(x.Datacenter)
-	n_2 := len(x.City)
-	if n_0 < 8 || n_0 > 16 || n_1 < 8 || n_1 > 16 || n_2 < 8 || n_2 > 16 || (uint64(x.Rack)) > 127 {
-		return x.marshalOmniBufSlow(dst)
-	}
-	need := 18 + n_0 + n_1 + n_2
-	off := len(dst)
-	var b0 []byte
-	if cap(dst)-off >= need {
-		dst = dst[:off+need]
-		b0 = dst[off:]
-	} else if off == 0 {
-		dst = make([]byte, need)
-		b0 = dst
+	pos := len(dst)
+	if maxNeed := 50 + len(x.Region) + len(x.Datacenter) + len(x.City); cap(dst)-pos >= maxNeed {
+		dst = dst[:pos+maxNeed]
 	} else {
-		return x.marshalOmniBufSlow(dst)
+		need := 14 + wire.VarintSize(uint64(len(x.Region))) + len(x.Region) + wire.VarintSize(uint64(len(x.Datacenter))) + len(x.Datacenter) + wire.VarintSize(uint64(len(x.City))) + len(x.City) + wire.VarintSize(uint64(x.Rack))
+		if cap(dst)-pos >= need {
+			dst = dst[:pos+need]
+		} else if pos == 0 {
+			dst = make([]byte, need)
+		} else {
+			next := make([]byte, pos+need, max(pos+need, cap(dst)*2))
+			copy(next, dst)
+			dst = next
+		}
 	}
-	_ = b0[9]
-	b0[0] = 0x35
-	b0[1] = byte(n_0<<1) | 1
-	s_0 := unsafe.Slice(unsafe.StringData(x.Region), n_0)
-	binary.LittleEndian.PutUint64(b0[2:], binary.LittleEndian.Uint64(s_0))
-	b1 := b0[n_0-6:]
-	_ = b1[17]
-	binary.LittleEndian.PutUint64(b1, binary.LittleEndian.Uint64(s_0[n_0-8:]))
-	b1[8] = 0x55
-	b1[9] = byte(n_1<<1) | 1
-	s_1 := unsafe.Slice(unsafe.StringData(x.Datacenter), n_1)
-	binary.LittleEndian.PutUint64(b1[10:], binary.LittleEndian.Uint64(s_1))
-	b2 := b1[2+n_1:]
-	_ = b2[17]
-	binary.LittleEndian.PutUint64(b2, binary.LittleEndian.Uint64(s_1[n_1-8:]))
-	b2[8] = 0x75
-	b2[9] = byte(n_2<<1) | 1
-	s_2 := unsafe.Slice(unsafe.StringData(x.City), n_2)
-	binary.LittleEndian.PutUint64(b2[10:], binary.LittleEndian.Uint64(s_2))
-	b3 := b2[2+n_2:]
-	_ = b3[19]
-	binary.LittleEndian.PutUint64(b3, binary.LittleEndian.Uint64(s_2[n_2-8:]))
-	b3[8] = 0x81
-	b3[9] = byte(x.Rack<<1) | 1
-	b3[10] = 0xb1
-	binary.LittleEndian.PutUint32(b3[11:], math.Float32bits(x.Latitude))
-	b3[15] = 0xd1
-	binary.LittleEndian.PutUint32(b3[16:], math.Float32bits(x.Longitude))
-	return dst
-}
-
-//go:noinline
-func (x *Location) marshalOmniBufSlow(dst []byte) []byte {
-	if dst == nil {
-		minSize := x.MinWireSizeOmniBuf(0)
-		dst = make([]byte, 0, max(64, minSize+minSize/4))
-	}
-	dst = append(dst, 0x35)
-	dst = wire.AppendVarint(dst, uint64(len(x.Region)))
-	dst = append(dst, x.Region...)
-	dst = append(dst, 0x55)
-	dst = wire.AppendVarint(dst, uint64(len(x.Datacenter)))
-	dst = append(dst, x.Datacenter...)
-	dst = append(dst, 0x75)
-	dst = wire.AppendVarint(dst, uint64(len(x.City)))
-	dst = append(dst, x.City...)
-	dst = append(dst, 0x81)
-	dst = wire.AppendVarint(dst, uint64(x.Rack))
-	dst = append(dst, 0xb1)
-	b_4 := math.Float32bits(x.Latitude)
-	dst = append(dst, byte(b_4), byte(b_4>>8), byte(b_4>>16), byte(b_4>>24))
-	dst = append(dst, 0xd1)
-	b_5 := math.Float32bits(x.Longitude)
-	dst = append(dst, byte(b_5), byte(b_5>>8), byte(b_5>>16), byte(b_5>>24))
-	return dst
+	dst[pos] = 0x35
+	pos = wire.PutVarintAt(dst, pos+1, uint64(len(x.Region)))
+	pos = wire.CopyStringAt(dst, pos, x.Region)
+	dst[pos] = 0x55
+	pos = wire.PutVarintAt(dst, pos+1, uint64(len(x.Datacenter)))
+	pos = wire.CopyStringAt(dst, pos, x.Datacenter)
+	dst[pos] = 0x75
+	pos = wire.PutVarintAt(dst, pos+1, uint64(len(x.City)))
+	pos = wire.CopyStringAt(dst, pos, x.City)
+	dst[pos] = 0x81
+	pos = wire.PutVarintAt(dst, pos+1, uint64(x.Rack))
+	tail := dst[pos : pos+10]
+	tail[0] = 0xb1
+	binary.LittleEndian.PutUint32(tail[1:], math.Float32bits(x.Latitude))
+	tail[5] = 0xd1
+	binary.LittleEndian.PutUint32(tail[6:], math.Float32bits(x.Longitude))
+	pos += 10
+	return dst[:pos]
 }
 
 // ValidateOmniBufUTF8 verifies that all string fields in Location contain valid UTF-8.
@@ -179,69 +139,106 @@ func (x *Location) UnmarshalOmniBuf(data []byte, zeroCopy bool) error {
 	if x == nil {
 		return fmt.Errorf("omnibuf: Unmarshal requires non-nil pointer")
 	}
-	if len(data) >= 18 {
-		r0 := data
-		_ = r0[1]
-		if binary.LittleEndian.Uint16(r0)&0x01ff == 0x0135 {
-			n_0 := int(r0[1] >> 1)
-			if n_0 >= 8 && n_0 <= 16 && 2+n_0+16 <= len(r0) {
-				_ = r0[9]
-				r1 := r0[n_0-6:]
-				_ = r1[9]
-				if binary.LittleEndian.Uint16(r1[8:])&0x01ff == 0x0155 {
-					n_1 := int(r1[9] >> 1)
-					if n_1 >= 8 && n_1 <= 16 && 10+n_1+14 <= len(r1) {
-						_ = r1[17]
-						r2 := r1[2+n_1:]
-						_ = r2[9]
-						if binary.LittleEndian.Uint16(r2[8:])&0x01ff == 0x0175 {
-							n_2 := int(r2[9] >> 1)
-							if n_2 >= 8 && n_2 <= 16 && 10+n_2+12 == len(r2) {
-								_ = r2[17]
-								r3 := r2[2+n_2:]
-								_ = r3[19]
-								if binary.LittleEndian.Uint32(r3[8:])&0x00ff01ff == 0x00b10181 && r3[15] == 0xd1 {
-									w_0a := binary.LittleEndian.Uint64(r0[2:])
-									w_0b := binary.LittleEndian.Uint64(r1)
-									w_1a := binary.LittleEndian.Uint64(r1[10:])
-									w_1b := binary.LittleEndian.Uint64(r2)
-									w_2a := binary.LittleEndian.Uint64(r2[10:])
-									w_2b := binary.LittleEndian.Uint64(r3)
-									if (w_0a|w_0b|w_1a|w_1b|w_2a|w_2b)&0x8080808080808080 == 0 {
-										_omnibufProtoState_Location.Reset(unsafe.Pointer(x), false)
-										x.Rack = uint32(r3[9] >> 1)
-										x.Latitude = math.Float32frombits(binary.LittleEndian.Uint32(r3[11:]))
-										x.Longitude = math.Float32frombits(binary.LittleEndian.Uint32(r3[16:]))
-										if zeroCopy {
-											x.Region = unsafe.String(&r0[2], n_0)
-											x.Datacenter = unsafe.String(&r1[10], n_1)
-											x.City = unsafe.String(&r2[10], n_2)
-										} else {
-											totalStr := n_0 + n_1 + n_2
-											sb := make([]byte, totalStr)
-											_ = sb[totalStr-1]
-											binary.LittleEndian.PutUint64(sb, w_0a)
-											binary.LittleEndian.PutUint64(sb[n_0-8:], w_0b)
-											binary.LittleEndian.PutUint64(sb[n_0:], w_1a)
-											binary.LittleEndian.PutUint64(sb[n_0+n_1-8:], w_1b)
-											binary.LittleEndian.PutUint64(sb[n_0+n_1:], w_2a)
-											binary.LittleEndian.PutUint64(sb[n_0+n_1+n_2-8:], w_2b)
-											all := unsafe.String(&sb[0], totalStr)
-											x.Region = all[:n_0]
-											x.Datacenter = all[n_0 : n_0+n_1]
-											x.City = all[n_0+n_1:]
-										}
-										return nil
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
+	b := data
+	if len(b) < 18 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
 	}
-	return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	if b[0] != 0x35 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[1:]
+	sLen_0, sn_0 := wire.DecodeVarint(b)
+	if sn_0 == 0 || len(b)-sn_0 < 16 || sLen_0 > uint64(len(b)-sn_0-16) {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	end_0 := sn_0 + int(sLen_0)
+	s_0 := b[sn_0:end_0]
+	b = b[end_0:]
+	if b[0] != 0x55 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[1:]
+	sLen_1, sn_1 := wire.DecodeVarint(b)
+	if sn_1 == 0 || len(b)-sn_1 < 14 || sLen_1 > uint64(len(b)-sn_1-14) {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	end_1 := sn_1 + int(sLen_1)
+	s_1 := b[sn_1:end_1]
+	b = b[end_1:]
+	if b[0] != 0x75 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[1:]
+	sLen_2, sn_2 := wire.DecodeVarint(b)
+	if sn_2 == 0 || len(b)-sn_2 < 12 || sLen_2 > uint64(len(b)-sn_2-12) {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	end_2 := sn_2 + int(sLen_2)
+	s_2 := b[sn_2:end_2]
+	b = b[end_2:]
+	if b[0] != 0x81 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[1:]
+	v_3, vn_3 := wire.DecodeVarint(b)
+	if vn_3 == 0 || len(b)-vn_3 < 10 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[vn_3:]
+	if len(b) != 10 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	if b[0] != 0xb1 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	f_4 := math.Float32frombits(binary.LittleEndian.Uint32(b[1:]))
+	if b[5] != 0xd1 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	f_5 := math.Float32frombits(binary.LittleEndian.Uint32(b[6:]))
+	if !wire.IsASCII(s_0) || !wire.IsASCII(s_1) || !wire.IsASCII(s_2) {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	_omnibufProtoState_Location.Reset(unsafe.Pointer(x), false)
+	x.Rack = uint32(v_3)
+	x.Latitude = f_4
+	x.Longitude = f_5
+	if zeroCopy {
+		x.Region = wire.DecodeStr(s_0, true)
+		x.Datacenter = wire.DecodeStr(s_1, true)
+		x.City = wire.DecodeStr(s_2, true)
+	} else if totalStr := len(s_0) + len(s_1) + len(s_2); totalStr > 0 && totalStr <= 256 {
+		sb := make([]byte, totalStr)
+		strOff := 0
+		strOff = wire.CopyBytesAt(sb, strOff, s_0)
+		strOff = wire.CopyBytesAt(sb, strOff, s_1)
+		strOff = wire.CopyBytesAt(sb, strOff, s_2)
+		all := unsafe.String(&sb[0], totalStr)
+		strOff = 0
+		if l := len(s_0); l > 0 {
+			x.Region = all[strOff : strOff+l]
+			strOff += l
+		} else {
+			x.Region = ""
+		}
+		if l := len(s_1); l > 0 {
+			x.Datacenter = all[strOff : strOff+l]
+			strOff += l
+		} else {
+			x.Datacenter = ""
+		}
+		if l := len(s_2); l > 0 {
+			x.City = all[strOff : strOff+l]
+			strOff += l
+		} else {
+			x.City = ""
+		}
+	} else {
+		x.Region = string(s_0)
+		x.Datacenter = string(s_1)
+		x.City = string(s_2)
+	}
+	return nil
 }
 
 //go:noinline
@@ -512,61 +509,36 @@ func (x *Neighbor) MinWireSizeOmniBuf(depth int) int {
 
 // MarshalOmniBufAppend encodes Neighbor in a single forward pass using generated field tags.
 func (x *Neighbor) MarshalOmniBufAppend(dst []byte) []byte {
-	n_1 := len(x.Router)
-	if n_1 < 8 || n_1 > 16 || (uint64(x.PeerAsn)|uint64(x.LatencyUs)) > 127 {
-		return x.marshalOmniBufSlow(dst)
-	}
-	need := 7 + n_1
-	off := len(dst)
-	var b0 []byte
-	if cap(dst)-off >= need {
-		dst = dst[:off+need]
-		b0 = dst[off:]
-	} else if off == 0 {
-		dst = make([]byte, need)
-		b0 = dst
+	pos := len(dst)
+	if maxNeed := 31 + len(x.Router); cap(dst)-pos >= maxNeed {
+		dst = dst[:pos+maxNeed]
 	} else {
-		return x.marshalOmniBufSlow(dst)
+		need := 4 + wire.VarintSize(uint64(x.PeerAsn)) + wire.VarintSize(uint64(len(x.Router))) + len(x.Router) + wire.VarintSize(uint64(x.LatencyUs))
+		if cap(dst)-pos >= need {
+			dst = dst[:pos+need]
+		} else if pos == 0 {
+			dst = make([]byte, need)
+		} else {
+			next := make([]byte, pos+need, max(pos+need, cap(dst)*2))
+			copy(next, dst)
+			dst = next
+		}
 	}
-	_ = b0[11]
-	b0[0] = 0x21
-	b0[1] = byte(x.PeerAsn<<1) | 1
-	b0[2] = 0x55
-	b0[3] = byte(n_1<<1) | 1
-	s_1 := unsafe.Slice(unsafe.StringData(x.Router), n_1)
-	binary.LittleEndian.PutUint64(b0[4:], binary.LittleEndian.Uint64(s_1))
-	b1 := b0[n_1-4:]
-	_ = b1[10]
-	binary.LittleEndian.PutUint64(b1, binary.LittleEndian.Uint64(s_1[n_1-8:]))
-	b1[8] = 0x61
-	b1[9] = byte(x.LatencyUs<<1) | 1
+	dst[pos] = 0x21
+	pos = wire.PutVarintAt(dst, pos+1, uint64(x.PeerAsn))
+	dst[pos] = 0x55
+	pos = wire.PutVarintAt(dst, pos+1, uint64(len(x.Router)))
+	pos = wire.CopyStringAt(dst, pos, x.Router)
+	dst[pos] = 0x61
+	pos = wire.PutVarintAt(dst, pos+1, uint64(x.LatencyUs))
+	tail := dst[pos : pos+1]
 	sp_3 := byte(0x85)
 	if x.Established {
 		sp_3 = 0x87
 	}
-	b1[10] = sp_3
-	return dst
-}
-
-//go:noinline
-func (x *Neighbor) marshalOmniBufSlow(dst []byte) []byte {
-	if dst == nil {
-		minSize := x.MinWireSizeOmniBuf(0)
-		dst = make([]byte, 0, max(64, minSize+minSize/4))
-	}
-	dst = append(dst, 0x21)
-	dst = wire.AppendVarint(dst, uint64(x.PeerAsn))
-	dst = append(dst, 0x55)
-	dst = wire.AppendVarint(dst, uint64(len(x.Router)))
-	dst = append(dst, x.Router...)
-	dst = append(dst, 0x61)
-	dst = wire.AppendVarint(dst, uint64(x.LatencyUs))
-	if x.Established {
-		dst = append(dst, 0x87)
-	} else {
-		dst = append(dst, 0x85)
-	}
-	return dst
+	tail[0] = sp_3
+	pos += 1
+	return dst[:pos]
 }
 
 // ValidateOmniBufUTF8 verifies that all string fields in Neighbor contain valid UTF-8.
@@ -633,40 +605,55 @@ func (x *Neighbor) UnmarshalOmniBuf(data []byte, zeroCopy bool) error {
 	if x == nil {
 		return fmt.Errorf("omnibuf: Unmarshal requires non-nil pointer")
 	}
-	if len(data) >= 7 {
-		r0 := data
-		_ = r0[3]
-		if binary.LittleEndian.Uint32(r0)&0x01ff01ff == 0x01550121 {
-			n_1 := int(r0[3] >> 1)
-			if n_1 >= 8 && n_1 <= 16 && 4+n_1+3 == len(r0) {
-				_ = r0[11]
-				r1 := r0[n_1-4:]
-				_ = r1[10]
-				if binary.LittleEndian.Uint16(r1[8:])&0x01ff == 0x0161 && r1[10]&0xfd == 0x85 {
-					w_1a := binary.LittleEndian.Uint64(r0[4:])
-					w_1b := binary.LittleEndian.Uint64(r1)
-					if (w_1a|w_1b)&0x8080808080808080 == 0 {
-						_omnibufProtoState_Neighbor.Reset(unsafe.Pointer(x), false)
-						x.PeerAsn = uint32(r0[1] >> 1)
-						x.LatencyUs = uint32(r1[9] >> 1)
-						x.Established = (r1[10] & 2) != 0
-						if zeroCopy {
-							x.Router = unsafe.String(&r0[4], n_1)
-						} else {
-							totalStr := n_1
-							sb := make([]byte, totalStr)
-							_ = sb[totalStr-1]
-							binary.LittleEndian.PutUint64(sb, w_1a)
-							binary.LittleEndian.PutUint64(sb[n_1-8:], w_1b)
-							x.Router = unsafe.String(&sb[0], totalStr)
-						}
-						return nil
-					}
-				}
-			}
-		}
+	b := data
+	if len(b) < 7 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
 	}
-	return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	if b[0] != 0x21 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[1:]
+	v_0, vn_0 := wire.DecodeVarint(b)
+	if vn_0 == 0 || len(b)-vn_0 < 5 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[vn_0:]
+	if b[0] != 0x55 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[1:]
+	sLen_1, sn_1 := wire.DecodeVarint(b)
+	if sn_1 == 0 || len(b)-sn_1 < 3 || sLen_1 > uint64(len(b)-sn_1-3) {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	end_1 := sn_1 + int(sLen_1)
+	s_1 := b[sn_1:end_1]
+	b = b[end_1:]
+	if b[0] != 0x61 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[1:]
+	v_2, vn_2 := wire.DecodeVarint(b)
+	if vn_2 == 0 || len(b)-vn_2 < 1 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[vn_2:]
+	if len(b) != 1 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	if (b[0] &^ 2) != 0x85 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	f_3 := (b[0] & 2) != 0
+	if !wire.IsASCII(s_1) {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	_omnibufProtoState_Neighbor.Reset(unsafe.Pointer(x), false)
+	x.PeerAsn = uint32(v_0)
+	x.LatencyUs = uint32(v_2)
+	x.Established = f_3
+	x.Router = wire.DecodeStr(s_1, zeroCopy)
+	return nil
 }
 
 //go:noinline

@@ -13,7 +13,6 @@ func isFlatScalarMessage(orderedFields []*protogen.Field) bool {
 	if len(orderedFields) == 0 || len(orderedFields) > 32 {
 		return false
 	}
-	strCount := 0
 	for _, f := range orderedFields {
 		if f.Desc.IsMap() || f.Desc.IsList() {
 			return false
@@ -29,15 +28,12 @@ func isFlatScalarMessage(orderedFields []*protogen.Field) bool {
 			protoreflect.Fixed32Kind, protoreflect.Sfixed32Kind,
 			protoreflect.Fixed64Kind, protoreflect.Sfixed64Kind,
 			protoreflect.FloatKind, protoreflect.DoubleKind,
-			protoreflect.BytesKind:
-		case protoreflect.StringKind:
-			strCount++
+			protoreflect.StringKind, protoreflect.BytesKind:
 		default:
 			return false
 		}
 	}
-	// Keep combined safe string slab bounded (<= 256 bytes when every string is <= 16 bytes).
-	return strCount <= 16
+	return true
 }
 
 func flatTagBytes(fnum uint16, wt uint8) []byte {
@@ -49,33 +45,41 @@ func flatTagBytes(fnum uint16, wt uint8) []byte {
 	return []byte{byte(u), byte(u >> 8)}
 }
 
-func isVarLenScalar(f *protogen.Field) bool {
-	k := f.Desc.Kind()
-	return k == protoreflect.StringKind || k == protoreflect.BytesKind
+func flatFixedFieldSize(f *protogen.Field) (int, bool) {
+	fnum := uint16(f.Desc.Number())
+	switch f.Desc.Kind() {
+	case protoreflect.BoolKind:
+		return len(flatTagBytes(fnum, wire.WireBoolFalse)), true
+	case protoreflect.Fixed32Kind, protoreflect.Sfixed32Kind, protoreflect.FloatKind:
+		return len(flatTagBytes(fnum, wireTypeForField(f))) + 4, true
+	case protoreflect.Fixed64Kind, protoreflect.Sfixed64Kind, protoreflect.DoubleKind:
+		return len(flatTagBytes(fnum, wireTypeForField(f))) + 8, true
+	default:
+		return 0, false
+	}
 }
 
-type flatFieldMeta struct {
-	idx       int
-	field     *protogen.Field
-	fnum      uint16
-	tagBytes  []byte
-	fixedSize int // tag + fixed payload (or tag + 1-byte varint/length)
-	valOff    int // offset within run to value/len byte
+func flatMinFieldSize(f *protogen.Field) int {
+	if sz, ok := flatFixedFieldSize(f); ok {
+		return sz
+	}
+	fnum := uint16(f.Desc.Number())
+	return len(flatTagBytes(fnum, wireTypeForField(f))) + 1
 }
 
-type flatRun struct {
-	fields     []flatFieldMeta
-	fixedLen   int
-	endsVarLen bool
-	varLenMeta flatFieldMeta
-}
+// emitFlatScalarMarshal emits a single-allocation, direct-indexed MarshalOmniBufAppend
+// for flat scalar messages. When dst already has spare capacity for the upper-bound
+// wire size it skips varint sizing completely; otherwise it computes the exact size
+// so fresh allocations never over-allocate.
+func emitFlatScalarMarshal(g *protogen.GeneratedFile, typeName string, orderedFields []*protogen.Field) {
+	g.P("// MarshalOmniBufAppend encodes ", typeName, " in a single forward pass using generated field tags.")
+	g.P("func (x *", typeName, ") MarshalOmniBufAppend(dst []byte) []byte {")
 
-func buildFlatRuns(orderedFields []*protogen.Field) ([]flatRun, int) {
-	var runs []flatRun
-	var cur flatRun
-	totalMin := 0
-
-	for i, f := range orderedFields {
+	constBytes := 0
+	numVarints := 0
+	var sizeTerms []string
+	var maxTerms []string
+	for _, f := range orderedFields {
 		fnum := uint16(f.Desc.Number())
 		var tb []byte
 		if f.Desc.Kind() == protoreflect.BoolKind {
@@ -83,551 +87,493 @@ func buildFlatRuns(orderedFields []*protogen.Field) ([]flatRun, int) {
 		} else {
 			tb = flatTagBytes(fnum, wireTypeForField(f))
 		}
-		meta := flatFieldMeta{
-			idx:      i,
-			field:    f,
-			fnum:     fnum,
-			tagBytes: tb,
-			valOff:   cur.fixedLen + len(tb),
-		}
+		constBytes += len(tb)
+
 		switch f.Desc.Kind() {
 		case protoreflect.BoolKind:
-			meta.fixedSize = len(tb)
-			meta.valOff = cur.fixedLen
-		case protoreflect.Uint32Kind,
-			protoreflect.Int32Kind, protoreflect.Sint32Kind,
-			protoreflect.StringKind, protoreflect.BytesKind:
-			meta.fixedSize = len(tb) + 1
-		case protoreflect.Uint64Kind, protoreflect.Int64Kind, protoreflect.Sint64Kind:
-			// 64-bit varints (> 536870911, e.g. UnixNano timestamps / IDs) encode as 0x00 + 8-byte LE uint64.
-			meta.fixedSize = len(tb) + 9
-		case protoreflect.Fixed32Kind, protoreflect.Sfixed32Kind, protoreflect.FloatKind:
-			meta.fixedSize = len(tb) + 4
-		case protoreflect.Fixed64Kind, protoreflect.Sfixed64Kind, protoreflect.DoubleKind:
-			meta.fixedSize = len(tb) + 8
-		}
-		cur.fixedLen += meta.fixedSize
-		totalMin += meta.fixedSize
-		cur.fields = append(cur.fields, meta)
-
-		if isVarLenScalar(f) {
-			cur.endsVarLen = true
-			cur.varLenMeta = meta
-			runs = append(runs, cur)
-			cur = flatRun{}
-		}
-	}
-	if len(cur.fields) > 0 {
-		runs = append(runs, cur)
-	}
-	return runs, totalMin
-}
-
-func constSliceExpr(sliceVar string, off int) string {
-	if off == 0 {
-		return sliceVar
-	}
-	return fmt.Sprintf("%s[%d:]", sliceVar, off)
-}
-
-func slideBack8Expr(payOff, idx int) string {
-	delta := payOff - 8
-	if delta == 0 {
-		return fmt.Sprintf("n_%d", idx)
-	}
-	if delta > 0 {
-		return fmt.Sprintf("%d+n_%d", delta, idx)
-	}
-	return fmt.Sprintf("n_%d-%d", idx, -delta)
-}
-
-// emitFlatScalarMarshal emits a single-allocation, sliding-window, zero-memmove fast path
-// for flat scalar messages when all varint values fit in 1 byte and variable-length
-// string/bytes fields are 8..16 bytes (falling back to marshalOmniBufSlow otherwise).
-// Each run after a varlen field slices 8 bytes back so the previous field's tail 8 bytes
-// land at constant offset 0, eliminating per-field bounds checks and sub-slices.
-func emitFlatScalarMarshal(g *protogen.GeneratedFile, typeName string, orderedFields []*protogen.Field) bool {
-	runs, constBase := buildFlatRuns(orderedFields)
-
-	g.P("// MarshalOmniBufAppend encodes ", typeName, " in a single forward pass using generated field tags.")
-	g.P("func (x *", typeName, ") MarshalOmniBufAppend(dst []byte) []byte {")
-
-	var intVarintChecks []string
-	var wide64Checks []string
-	var shortVarLenChecks []string
-	var lenTerms []string
-	for i, f := range orderedFields {
-		switch f.Desc.Kind() {
-		case protoreflect.StringKind, protoreflect.BytesKind:
-			g.P("	n_", i, " := len(x.", f.GoName, ")")
-			shortVarLenChecks = append(shortVarLenChecks, fmt.Sprintf("n_%d < 8 || n_%d > 16", i, i))
-			lenTerms = append(lenTerms, fmt.Sprintf("n_%d", i))
+			// Tag byte alone encodes the boolean value.
 		case protoreflect.Uint32Kind:
-			intVarintChecks = append(intVarintChecks, fmt.Sprintf("uint64(x.%s)", f.GoName))
+			numVarints++
+			sizeTerms = append(sizeTerms, fmt.Sprintf("wire.VarintSize(uint64(x.%s))", f.GoName))
 		case protoreflect.Uint64Kind:
-			wide64Checks = append(wide64Checks, fmt.Sprintf("x.%s <= 536870911", f.GoName))
+			numVarints++
+			sizeTerms = append(sizeTerms, fmt.Sprintf("wire.VarintSize(x.%s)", f.GoName))
 		case protoreflect.Int32Kind, protoreflect.Sint32Kind:
-			g.P("	v_", i, " := wire.EncodeZigZag(int64(x.", f.GoName, "))")
-			intVarintChecks = append(intVarintChecks, fmt.Sprintf("v_%d", i))
+			numVarints++
+			sizeTerms = append(sizeTerms, fmt.Sprintf("wire.VarintSize(wire.EncodeZigZag(int64(x.%s)))", f.GoName))
 		case protoreflect.Int64Kind, protoreflect.Sint64Kind:
-			g.P("	v_", i, " := wire.EncodeZigZag(x.", f.GoName, ")")
-			wide64Checks = append(wide64Checks, fmt.Sprintf("v_%d <= 536870911", i))
+			numVarints++
+			sizeTerms = append(sizeTerms, fmt.Sprintf("wire.VarintSize(wire.EncodeZigZag(x.%s))", f.GoName))
+		case protoreflect.Fixed32Kind, protoreflect.Sfixed32Kind, protoreflect.FloatKind:
+			constBytes += 4
+		case protoreflect.Fixed64Kind, protoreflect.Sfixed64Kind, protoreflect.DoubleKind:
+			constBytes += 8
+		case protoreflect.StringKind, protoreflect.BytesKind:
+			numVarints++
+			sizeTerms = append(sizeTerms, fmt.Sprintf("wire.VarintSize(uint64(len(x.%s)))", f.GoName), fmt.Sprintf("len(x.%s)", f.GoName))
+			maxTerms = append(maxTerms, fmt.Sprintf("len(x.%s)", f.GoName))
 		}
 	}
 
-	var slowConds []string
-	slowConds = append(slowConds, shortVarLenChecks...)
-	slowConds = append(slowConds, wide64Checks...)
-	if len(intVarintChecks) > 0 {
-		slowConds = append(slowConds, fmt.Sprintf("(%s) > 127", strings.Join(intVarintChecks, "|")))
+	maxNeedExpr := fmt.Sprintf("%d", constBytes+numVarints*9)
+	if len(maxTerms) > 0 {
+		maxNeedExpr += " + " + strings.Join(maxTerms, " + ")
 	}
-	if len(slowConds) > 0 {
-		g.P("	if ", strings.Join(slowConds, " || "), " {")
-		g.P("		return x.marshalOmniBufSlow(dst)")
+	needExpr := fmt.Sprintf("%d", constBytes)
+	if len(sizeTerms) > 0 {
+		needExpr += " + " + strings.Join(sizeTerms, " + ")
+	}
+
+	g.P("	pos := len(dst)")
+	if numVarints > 0 {
+		g.P("	if maxNeed := ", maxNeedExpr, "; cap(dst)-pos >= maxNeed {")
+		g.P("		dst = dst[:pos+maxNeed]")
+		g.P("	} else {")
+		g.P("		need := ", needExpr)
+		g.P("		if cap(dst)-pos >= need {")
+		g.P("			dst = dst[:pos+need]")
+		g.P("		} else if pos == 0 {")
+		g.P("			dst = make([]byte, need)")
+		g.P("		} else {")
+		g.P("			next := make([]byte, pos+need, max(pos+need, cap(dst)*2))")
+		g.P("			copy(next, dst)")
+		g.P("			dst = next")
+		g.P("		}")
+		g.P("	}")
+	} else {
+		g.P("	const need = ", constBytes)
+		g.P("	if cap(dst)-pos >= need {")
+		g.P("		dst = dst[:pos+need]")
+		g.P("	} else if pos == 0 {")
+		g.P("		dst = make([]byte, need)")
+		g.P("	} else {")
+		g.P("		next := make([]byte, pos+need, max(pos+need, cap(dst)*2))")
+		g.P("		copy(next, dst)")
+		g.P("		dst = next")
 		g.P("	}")
 	}
 
-	needExpr := fmt.Sprintf("%d", constBase)
-	if len(lenTerms) > 0 {
-		needExpr += " + " + strings.Join(lenTerms, " + ")
+	// Combine any trailing suffix of fixed-size fields into one sub-slice so Go emits
+	// a single bounds check for the entire fixed suffix.
+	tailStart := len(orderedFields)
+	tailBytes := 0
+	for i := len(orderedFields) - 1; i >= 0; i-- {
+		sz, ok := flatFixedFieldSize(orderedFields[i])
+		if !ok {
+			break
+		}
+		tailStart = i
+		tailBytes += sz
 	}
-	g.P("	need := ", needExpr)
-	g.P("	off := len(dst)")
-	g.P("	var b0 []byte")
-	g.P("	if cap(dst)-off >= need {")
-	g.P("		dst = dst[:off+need]")
-	g.P("		b0 = dst[off:]")
-	g.P("	} else if off == 0 {")
-	g.P("		dst = make([]byte, need)")
-	g.P("		b0 = dst")
-	g.P("	} else {")
-	g.P("		return x.marshalOmniBufSlow(dst)")
-	g.P("	}")
 
-	for rIdx, run := range runs {
-		bVar := fmt.Sprintf("b%d", rIdx)
-		shift := 0
-		if rIdx > 0 {
-			shift = 8
+	for i, f := range orderedFields {
+		if i == tailStart && tailBytes > 0 {
+			g.P("	tail := dst[pos : pos+", tailBytes, "]")
 		}
-		// Compute max constant offset touched in this run.
-		maxTouch := shift + run.fixedLen
-		if run.endsVarLen {
-			maxTouch += 8 // head 8 bytes of varlen payload
-		}
-		if maxTouch > 0 {
-			g.P("	_ = ", bVar, "[", maxTouch-1, "]")
-		}
-		if rIdx > 0 {
-			prev := runs[rIdx-1].varLenMeta
-			if prev.field.Desc.Kind() == protoreflect.StringKind {
-				g.P("	binary.LittleEndian.PutUint64(", bVar, ", binary.LittleEndian.Uint64(s_", prev.idx, "[n_", prev.idx, "-8:]))")
-			} else {
-				g.P("	binary.LittleEndian.PutUint64(", bVar, ", binary.LittleEndian.Uint64(x.", prev.field.GoName, "[n_", prev.idx, "-8:]))")
+		fnum := uint16(f.Desc.Number())
+		if i >= tailStart {
+			off := 0
+			for j := tailStart; j < i; j++ {
+				sz, _ := flatFixedFieldSize(orderedFields[j])
+				off += sz
 			}
-		}
-
-		for _, m := range run.fields {
-			f := m.field
 			if f.Desc.Kind() == protoreflect.BoolKind {
-				tagOff := shift + m.valOff
-				if len(m.tagBytes) == 1 {
-					tFalse := m.tagBytes[0]
-					tTrue := tFalse | 2
-					g.P(fmt.Sprintf("	sp_%d := byte(0x%02x)", m.idx, tFalse))
+				tb := flatTagBytes(fnum, wire.WireBoolFalse)
+				if len(tb) == 1 {
+					g.P(fmt.Sprintf("	sp_%d := byte(0x%02x)", i, tb[0]))
 					g.P("	if x.", f.GoName, " {")
-					g.P(fmt.Sprintf("		sp_%d = 0x%02x", m.idx, tTrue))
+					g.P(fmt.Sprintf("		sp_%d = 0x%02x", i, tb[0]|2))
 					g.P("	}")
-					g.P("	", bVar, "[", tagOff, "] = sp_", m.idx)
+					g.P(fmt.Sprintf("	tail[%d] = sp_%d", off, i))
 				} else {
-					lowFalse := m.tagBytes[0]
-					lowTrue := lowFalse | 4
-					g.P(fmt.Sprintf("	sp_%d := byte(0x%02x)", m.idx, lowFalse))
+					g.P(fmt.Sprintf("	sp_%d := byte(0x%02x)", i, tb[0]))
 					g.P("	if x.", f.GoName, " {")
-					g.P(fmt.Sprintf("		sp_%d = 0x%02x", m.idx, lowTrue))
+					g.P(fmt.Sprintf("		sp_%d = 0x%02x", i, tb[0]|4))
 					g.P("	}")
-					g.P("	", bVar, "[", tagOff, "] = sp_", m.idx)
-					g.P(fmt.Sprintf("	%s[%d] = 0x%02x", bVar, tagOff+1, m.tagBytes[1]))
+					g.P(fmt.Sprintf("	tail[%d] = sp_%d", off, i))
+					g.P(fmt.Sprintf("	tail[%d] = 0x%02x", off+1, tb[1]))
 				}
 				continue
 			}
 
-			tagOff := shift + m.valOff - len(m.tagBytes)
-			for ti, tb := range m.tagBytes {
-				g.P(fmt.Sprintf("	%s[%d] = 0x%02x", bVar, tagOff+ti, tb))
+			tb := flatTagBytes(fnum, wireTypeForField(f))
+			for ti, bByte := range tb {
+				g.P(fmt.Sprintf("	tail[%d] = 0x%02x", off+ti, bByte))
 			}
-
-			valOff := shift + m.valOff
+			payOff := off + len(tb)
 			switch f.Desc.Kind() {
-			case protoreflect.Uint32Kind:
-				g.P("	", bVar, "[", valOff, "] = byte(x.", f.GoName, "<<1) | 1")
-			case protoreflect.Uint64Kind:
-				g.P("	", bVar, "[", valOff, "] = 0x00")
-				g.P("	binary.LittleEndian.PutUint64(", constSliceExpr(bVar, valOff+1), ", x.", f.GoName, ")")
-			case protoreflect.Int32Kind, protoreflect.Sint32Kind:
-				g.P("	", bVar, "[", valOff, "] = byte(v_", m.idx, "<<1) | 1")
-			case protoreflect.Int64Kind, protoreflect.Sint64Kind:
-				g.P("	", bVar, "[", valOff, "] = 0x00")
-				g.P("	binary.LittleEndian.PutUint64(", constSliceExpr(bVar, valOff+1), ", v_", m.idx, ")")
 			case protoreflect.Fixed32Kind:
-				g.P("	binary.LittleEndian.PutUint32(", constSliceExpr(bVar, valOff), ", x.", f.GoName, ")")
+				g.P(fmt.Sprintf("	binary.LittleEndian.PutUint32(tail[%d:], x.%s)", payOff, f.GoName))
 			case protoreflect.Sfixed32Kind:
-				g.P("	binary.LittleEndian.PutUint32(", constSliceExpr(bVar, valOff), ", uint32(x.", f.GoName, "))")
+				g.P(fmt.Sprintf("	binary.LittleEndian.PutUint32(tail[%d:], uint32(x.%s))", payOff, f.GoName))
 			case protoreflect.FloatKind:
-				g.P("	binary.LittleEndian.PutUint32(", constSliceExpr(bVar, valOff), ", math.Float32bits(x.", f.GoName, "))")
+				g.P(fmt.Sprintf("	binary.LittleEndian.PutUint32(tail[%d:], math.Float32bits(x.%s))", payOff, f.GoName))
 			case protoreflect.Fixed64Kind:
-				g.P("	binary.LittleEndian.PutUint64(", constSliceExpr(bVar, valOff), ", x.", f.GoName, ")")
+				g.P(fmt.Sprintf("	binary.LittleEndian.PutUint64(tail[%d:], x.%s)", payOff, f.GoName))
 			case protoreflect.Sfixed64Kind:
-				g.P("	binary.LittleEndian.PutUint64(", constSliceExpr(bVar, valOff), ", uint64(x.", f.GoName, "))")
+				g.P(fmt.Sprintf("	binary.LittleEndian.PutUint64(tail[%d:], uint64(x.%s))", payOff, f.GoName))
 			case protoreflect.DoubleKind:
-				g.P("	binary.LittleEndian.PutUint64(", constSliceExpr(bVar, valOff), ", math.Float64bits(x.", f.GoName, "))")
-			case protoreflect.StringKind:
-				g.P("	", bVar, "[", valOff, "] = byte(n_", m.idx, "<<1) | 1")
-				payOff := shift + run.fixedLen
-				g.P("	s_", m.idx, " := unsafe.Slice(unsafe.StringData(x.", f.GoName, "), n_", m.idx, ")")
-				g.P("	binary.LittleEndian.PutUint64(", constSliceExpr(bVar, payOff), ", binary.LittleEndian.Uint64(s_", m.idx, "))")
-				if rIdx < len(runs)-1 {
-					g.P("	b", rIdx+1, " := ", bVar, "[", slideBack8Expr(payOff, m.idx), ":]")
-				} else {
-					g.P("	binary.LittleEndian.PutUint64(", bVar, "[", slideBack8Expr(payOff, m.idx), ":], binary.LittleEndian.Uint64(s_", m.idx, "[n_", m.idx, "-8:]))")
-				}
-			case protoreflect.BytesKind:
-				g.P("	", bVar, "[", valOff, "] = byte(n_", m.idx, "<<1) | 1")
-				payOff := shift + run.fixedLen
-				g.P("	binary.LittleEndian.PutUint64(", constSliceExpr(bVar, payOff), ", binary.LittleEndian.Uint64(x.", f.GoName, "))")
-				if rIdx < len(runs)-1 {
-					g.P("	b", rIdx+1, " := ", bVar, "[", slideBack8Expr(payOff, m.idx), ":]")
-				} else {
-					g.P("	binary.LittleEndian.PutUint64(", bVar, "[", slideBack8Expr(payOff, m.idx), ":], binary.LittleEndian.Uint64(x.", f.GoName, "[n_", m.idx, "-8:]))")
-				}
+				g.P(fmt.Sprintf("	binary.LittleEndian.PutUint64(tail[%d:], math.Float64bits(x.%s))", payOff, f.GoName))
 			}
+			continue
+		}
+
+		if f.Desc.Kind() == protoreflect.BoolKind {
+			tb := flatTagBytes(fnum, wire.WireBoolFalse)
+			if len(tb) == 1 {
+				g.P(fmt.Sprintf("	sp_%d := byte(0x%02x)", i, tb[0]))
+				g.P("	if x.", f.GoName, " {")
+				g.P(fmt.Sprintf("		sp_%d = 0x%02x", i, tb[0]|2))
+				g.P("	}")
+				g.P("	dst[pos] = sp_", i)
+				g.P("	pos++")
+			} else {
+				g.P(fmt.Sprintf("	sp_%d := byte(0x%02x)", i, tb[0]))
+				g.P("	if x.", f.GoName, " {")
+				g.P(fmt.Sprintf("		sp_%d = 0x%02x", i, tb[0]|4))
+				g.P("	}")
+				g.P("	dst[pos] = sp_", i)
+				g.P(fmt.Sprintf("	dst[pos+1] = 0x%02x", tb[1]))
+				g.P("	pos += 2")
+			}
+			continue
+		}
+
+		tb := flatTagBytes(fnum, wireTypeForField(f))
+		for ti, bByte := range tb {
+			if ti == 0 {
+				g.P(fmt.Sprintf("	dst[pos] = 0x%02x", bByte))
+			} else {
+				g.P(fmt.Sprintf("	dst[pos+%d] = 0x%02x", ti, bByte))
+			}
+		}
+
+		switch f.Desc.Kind() {
+		case protoreflect.Uint32Kind:
+			g.P("	pos = wire.PutVarintAt(dst, pos+", len(tb), ", uint64(x.", f.GoName, "))")
+		case protoreflect.Uint64Kind:
+			g.P("	pos = wire.PutVarintAt(dst, pos+", len(tb), ", x.", f.GoName, ")")
+		case protoreflect.Int32Kind, protoreflect.Sint32Kind:
+			g.P("	pos = wire.PutVarintAt(dst, pos+", len(tb), ", wire.EncodeZigZag(int64(x.", f.GoName, ")))")
+		case protoreflect.Int64Kind, protoreflect.Sint64Kind:
+			g.P("	pos = wire.PutVarintAt(dst, pos+", len(tb), ", wire.EncodeZigZag(x.", f.GoName, "))")
+		case protoreflect.Fixed32Kind:
+			g.P("	binary.LittleEndian.PutUint32(dst[pos+", len(tb), ":], x.", f.GoName, ")")
+			g.P("	pos += ", len(tb)+4)
+		case protoreflect.Sfixed32Kind:
+			g.P("	binary.LittleEndian.PutUint32(dst[pos+", len(tb), ":], uint32(x.", f.GoName, "))")
+			g.P("	pos += ", len(tb)+4)
+		case protoreflect.FloatKind:
+			g.P("	binary.LittleEndian.PutUint32(dst[pos+", len(tb), ":], math.Float32bits(x.", f.GoName, "))")
+			g.P("	pos += ", len(tb)+4)
+		case protoreflect.Fixed64Kind:
+			g.P("	binary.LittleEndian.PutUint64(dst[pos+", len(tb), ":], x.", f.GoName, ")")
+			g.P("	pos += ", len(tb)+8)
+		case protoreflect.Sfixed64Kind:
+			g.P("	binary.LittleEndian.PutUint64(dst[pos+", len(tb), ":], uint64(x.", f.GoName, "))")
+			g.P("	pos += ", len(tb)+8)
+		case protoreflect.DoubleKind:
+			g.P("	binary.LittleEndian.PutUint64(dst[pos+", len(tb), ":], math.Float64bits(x.", f.GoName, "))")
+			g.P("	pos += ", len(tb)+8)
+		case protoreflect.StringKind:
+			g.P("	pos = wire.PutVarintAt(dst, pos+", len(tb), ", uint64(len(x.", f.GoName, ")))")
+			g.P("	pos = wire.CopyStringAt(dst, pos, x.", f.GoName, ")")
+		case protoreflect.BytesKind:
+			g.P("	pos = wire.PutVarintAt(dst, pos+", len(tb), ", uint64(len(x.", f.GoName, ")))")
+			g.P("	pos = wire.CopyBytesAt(dst, pos, x.", f.GoName, ")")
 		}
 	}
 
-	g.P("	return dst")
+	if tailBytes > 0 {
+		g.P("	pos += ", tailBytes)
+	}
+	g.P("	return dst[:pos]")
 	g.P("}")
 	g.P()
-	return true
 }
 
-type byteCheck struct {
-	mask byte
-	want byte
-}
-
-func buildRunCheckExprShifted(run flatRun, sliceVar string, shift int) string {
-	checks := make([]byteCheck, run.fixedLen)
-	for _, m := range run.fields {
-		k := m.field.Desc.Kind()
-		if k == protoreflect.BoolKind {
-			if len(m.tagBytes) == 1 {
-				checks[m.valOff] = byteCheck{mask: 0xfd, want: m.tagBytes[0]}
-			} else {
-				checks[m.valOff] = byteCheck{mask: 0xfb, want: m.tagBytes[0]}
-				checks[m.valOff+1] = byteCheck{mask: 0xff, want: m.tagBytes[1]}
-			}
-			continue
-		}
-		tagOff := m.valOff - len(m.tagBytes)
-		for ti, tb := range m.tagBytes {
-			checks[tagOff+ti] = byteCheck{mask: 0xff, want: tb}
-		}
-		switch k {
-		case protoreflect.Uint32Kind,
-			protoreflect.Int32Kind, protoreflect.Sint32Kind,
-			protoreflect.StringKind, protoreflect.BytesKind:
-			checks[m.valOff] = byteCheck{mask: 0x01, want: 0x01}
-		case protoreflect.Uint64Kind, protoreflect.Int64Kind, protoreflect.Sint64Kind:
-			checks[m.valOff] = byteCheck{mask: 0xff, want: 0x00}
-		}
-	}
-
-	var conds []string
-	for i := 0; i < len(checks); {
-		if checks[i].mask == 0 {
-			i++
-			continue
-		}
-		off := shift + i
-		if i+4 <= len(checks) && (checks[i+2].mask != 0 || checks[i+3].mask != 0) {
-			mask := uint32(checks[i].mask) | uint32(checks[i+1].mask)<<8 | uint32(checks[i+2].mask)<<16 | uint32(checks[i+3].mask)<<24
-			want := uint32(checks[i].want) | uint32(checks[i+1].want)<<8 | uint32(checks[i+2].want)<<16 | uint32(checks[i+3].want)<<24
-			se := constSliceExpr(sliceVar, off)
-			if mask == 0xffffffff {
-				conds = append(conds, fmt.Sprintf("binary.LittleEndian.Uint32(%s) == 0x%08x", se, want))
-			} else {
-				conds = append(conds, fmt.Sprintf("binary.LittleEndian.Uint32(%s)&0x%08x == 0x%08x", se, mask, want))
-			}
-			i += 4
-			continue
-		}
-		if i+2 <= len(checks) && checks[i+1].mask != 0 {
-			mask := uint16(checks[i].mask) | uint16(checks[i+1].mask)<<8
-			want := uint16(checks[i].want) | uint16(checks[i+1].want)<<8
-			se := constSliceExpr(sliceVar, off)
-			if mask == 0xffff {
-				conds = append(conds, fmt.Sprintf("binary.LittleEndian.Uint16(%s) == 0x%04x", se, want))
-			} else {
-				conds = append(conds, fmt.Sprintf("binary.LittleEndian.Uint16(%s)&0x%04x == 0x%04x", se, mask, want))
-			}
-			i += 2
-			continue
-		}
-		if checks[i].mask == 0xff {
-			conds = append(conds, fmt.Sprintf("%s[%d] == 0x%02x", sliceVar, off, checks[i].want))
-		} else {
-			conds = append(conds, fmt.Sprintf("%s[%d]&0x%02x == 0x%02x", sliceVar, off, checks[i].mask, checks[i].want))
-		}
-		i++
-	}
-	return strings.Join(conds, " && ")
-}
-
-func flatScalarDecodeExprShifted(m flatFieldMeta, sliceVar string, shift int) string {
-	off := shift + m.valOff
-	se := constSliceExpr(sliceVar, off)
-	switch m.field.Desc.Kind() {
-	case protoreflect.BoolKind:
-		bit := 2
-		if len(m.tagBytes) == 2 {
-			bit = 4
-		}
-		return fmt.Sprintf("(%s[%d] & %d) != 0", sliceVar, off, bit)
-	case protoreflect.Uint32Kind:
-		return fmt.Sprintf("uint32(%s[%d] >> 1)", sliceVar, off)
-	case protoreflect.Uint64Kind:
-		return fmt.Sprintf("binary.LittleEndian.Uint64(%s)", constSliceExpr(sliceVar, off+1))
-	case protoreflect.Int32Kind, protoreflect.Sint32Kind:
-		return fmt.Sprintf("int32(wire.DecodeZigZag(uint64(%s[%d] >> 1)))", sliceVar, off)
-	case protoreflect.Int64Kind, protoreflect.Sint64Kind:
-		return fmt.Sprintf("wire.DecodeZigZag(binary.LittleEndian.Uint64(%s))", constSliceExpr(sliceVar, off+1))
-	case protoreflect.Fixed32Kind:
-		return fmt.Sprintf("binary.LittleEndian.Uint32(%s)", se)
-	case protoreflect.Sfixed32Kind:
-		return fmt.Sprintf("int32(binary.LittleEndian.Uint32(%s))", se)
-	case protoreflect.FloatKind:
-		return fmt.Sprintf("math.Float32frombits(binary.LittleEndian.Uint32(%s))", se)
-	case protoreflect.Fixed64Kind:
-		return fmt.Sprintf("binary.LittleEndian.Uint64(%s)", se)
-	case protoreflect.Sfixed64Kind:
-		return fmt.Sprintf("int64(binary.LittleEndian.Uint64(%s))", se)
-	case protoreflect.DoubleKind:
-		return fmt.Sprintf("math.Float64frombits(binary.LittleEndian.Uint64(%s))", se)
-	}
-	return ""
-}
-
-type slidingVarLen struct {
-	meta     flatFieldMeta
-	headExpr string // constant-offset slice expr for head 8 bytes and zero-copy &ptr
-	headPtr  string // e.g. &r0[2] or &r1[19]
-	tailExpr string // constant-offset slice expr for tail 8 bytes
-	rawSlice string // e.g. r0[2 : 2+n_0 : 2+n_0] (for BytesKind zeroCopy)
-}
-
-// emitFlatScalarUnmarshal emits UnmarshalOmniBuf with a canonical-order sliding-window
-// fast path. Each run after a varlen field slices 8 bytes back so every tag check, scalar
-// load, and 8-byte ASCII/UTF-8 word load uses constant offsets with minimal bounds checks,
-// zero memmove, and zero function calls on the zero-copy path.
+// emitFlatScalarUnmarshal emits UnmarshalOmniBuf with a general canonical-order fast path
+// that decodes all fields sequentially without loop or switch dispatch, supporting any
+// varint width and any string/bytes length. Non-canonical, partial, non-ASCII, or corrupt
+// packets fall back to decodeOmniBuf.
 func emitFlatScalarUnmarshal(g *protogen.GeneratedFile, typeName string, orderedFields []*protogen.Field) {
-	runs, minCanonical := buildFlatRuns(orderedFields)
-	remMinAfter := make([]int, len(runs))
-	for r := len(runs) - 2; r >= 0; r-- {
-		remMinAfter[r] = remMinAfter[r+1] + runs[r+1].fixedLen
-	}
-
-	lastVarLenRun := -1
-	for rIdx, run := range runs {
-		if run.endsVarLen {
-			lastVarLenRun = rIdx
-		}
-	}
-
 	g.P("// UnmarshalOmniBuf decodes data into ", typeName, " using generated switch dispatch.")
 	g.P("func (x *", typeName, ") UnmarshalOmniBuf(data []byte, zeroCopy bool) error {")
 	g.P("	if x == nil {")
 	g.P(`		return fmt.Errorf("omnibuf: Unmarshal requires non-nil pointer")`)
 	g.P("	}")
 
-	indent := "\t"
-	openDepth := 0
-	open := func(line string) {
-		g.P(indent, line)
-		indent += "\t"
-		openDepth++
+	// Precompute the minimum remaining wire bytes after each field so the compiler
+	// proves slice bounds across consecutive fields and eliminates redundant length checks.
+	remMin := make([]int, len(orderedFields))
+	running := 0
+	for i := len(orderedFields) - 1; i >= 0; i-- {
+		remMin[i] = running
+		running += flatMinFieldSize(orderedFields[i])
+	}
+	totalMin := running
+
+	g.P("	b := data")
+	g.P("	if len(b) < ", totalMin, " {")
+	g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+	g.P("	}")
+
+	// Find any trailing suffix of fixed-size fields so we can validate their combined
+	// exact length in a single check (also replacing the final len(b) != 0 check).
+	tailStart := len(orderedFields)
+	tailBytes := 0
+	for i := len(orderedFields) - 1; i >= 0; i-- {
+		sz, ok := flatFixedFieldSize(orderedFields[i])
+		if !ok {
+			break
+		}
+		tailStart = i
+		tailBytes += sz
 	}
 
-	var strLocs []slidingVarLen
-	var bytesLocs []slidingVarLen
-
-	if lastVarLenRun < 0 {
-		open(fmt.Sprintf("if len(data) == %d {", minCanonical))
-	} else {
-		open(fmt.Sprintf("if len(data) >= %d {", minCanonical))
+	type strFieldInfo struct {
+		idx   int
+		field *protogen.Field
 	}
-	g.P(indent, "r0 := data")
+	var strFields []strFieldInfo
+	var bytesFields []strFieldInfo
+	var assignStmts []string
 
-	for rIdx, run := range runs {
-		rVar := fmt.Sprintf("r%d", rIdx)
-		shift := 0
-		if rIdx > 0 {
-			shift = 8
+	for i, f := range orderedFields {
+		inTail := i >= tailStart
+		if i == tailStart && tailBytes > 0 {
+			g.P("	if len(b) != ", tailBytes, " {")
+			g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+			g.P("	}")
 		}
-		if shift+run.fixedLen > 0 {
-			g.P(indent, "_ = ", rVar, "[", shift+run.fixedLen-1, "]")
-		}
-		checkExpr := buildRunCheckExprShifted(run, rVar, shift)
-		open("if " + checkExpr + " {")
 
-		if run.endsVarLen {
-			vm := run.varLenMeta
-			valOff := shift + vm.valOff
-			payOff := shift + run.fixedLen
-			g.P(indent, "n_", vm.idx, " := int(", rVar, "[", valOff, "] >> 1)")
-
-			op := "<="
-			if rIdx == lastVarLenRun {
-				op = "=="
+		fnum := uint16(f.Desc.Number())
+		if inTail {
+			off := 0
+			for j := tailStart; j < i; j++ {
+				sz, _ := flatFixedFieldSize(orderedFields[j])
+				off += sz
 			}
-			lenCheck := fmt.Sprintf("%d+n_%d", payOff, vm.idx)
-			if remMinAfter[rIdx] > 0 {
-				lenCheck += fmt.Sprintf("+%d", remMinAfter[rIdx])
-			}
-			open(fmt.Sprintf("if n_%d >= 8 && n_%d <= 16 && %s %s len(%s) {", vm.idx, vm.idx, lenCheck, op, rVar))
-			// Hint that head 8 bytes of this varlen payload are in bounds at constant offset payOff.
-			g.P(indent, "_ = ", rVar, "[", payOff+7, "]")
-
-			var tailExpr string
-			if rIdx < len(runs)-1 {
-				nextVar := fmt.Sprintf("r%d", rIdx+1)
-				g.P(indent, nextVar, " := ", rVar, "[", slideBack8Expr(payOff, vm.idx), ":]")
-				tailExpr = nextVar
-			} else {
-				// Last run ends with a varlen field: len(rVar) == payOff+n_idx.
-				tailExpr = fmt.Sprintf("%s[len(%s)-8:]", rVar, rVar)
-			}
-
-			sv := slidingVarLen{
-				meta:     vm,
-				headExpr: constSliceExpr(rVar, payOff),
-				headPtr:  fmt.Sprintf("&%s[%d]", rVar, payOff),
-				tailExpr: tailExpr,
-				rawSlice: fmt.Sprintf("%s[%d : %d+n_%d : %d+n_%d]", rVar, payOff, payOff, vm.idx, payOff, vm.idx),
-			}
-			if vm.field.Desc.Kind() == protoreflect.StringKind {
-				strLocs = append(strLocs, sv)
-			} else {
-				bytesLocs = append(bytesLocs, sv)
-			}
-		}
-	}
-
-	if len(strLocs) > 0 {
-		var asciiTerms []string
-		for _, loc := range strLocs {
-			idx := loc.meta.idx
-			g.P(indent, "w_", idx, "a := binary.LittleEndian.Uint64(", loc.headExpr, ")")
-			g.P(indent, "w_", idx, "b := binary.LittleEndian.Uint64(", loc.tailExpr, ")")
-			asciiTerms = append(asciiTerms, fmt.Sprintf("w_%da", idx), fmt.Sprintf("w_%db", idx))
-		}
-		open(fmt.Sprintf("if (%s)&0x8080808080808080 == 0 {", strings.Join(asciiTerms, "|")))
-	}
-
-	g.P(indent, "_omnibufProtoState_", typeName, ".Reset(unsafe.Pointer(x), false)")
-
-	// Assign fixed scalar fields BEFORE any safe-mode heap allocation so r0..rN die before makeslice.
-	for rIdx, run := range runs {
-		rVar := fmt.Sprintf("r%d", rIdx)
-		shift := 0
-		if rIdx > 0 {
-			shift = 8
-		}
-		for _, m := range run.fields {
-			if isVarLenScalar(m.field) {
+			if f.Desc.Kind() == protoreflect.BoolKind {
+				tb := flatTagBytes(fnum, wire.WireBoolFalse)
+				if len(tb) == 1 {
+					g.P(fmt.Sprintf("	if (b[%d]&^2) != 0x%02x {", off, tb[0]))
+					g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+					g.P("	}")
+					g.P(fmt.Sprintf("	f_%d := (b[%d] & 2) != 0", i, off))
+				} else {
+					g.P(fmt.Sprintf("	if (b[%d]&^4) != 0x%02x || b[%d] != 0x%02x {", off, tb[0], off+1, tb[1]))
+					g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+					g.P("	}")
+					g.P(fmt.Sprintf("	f_%d := (b[%d] & 4) != 0", i, off))
+				}
+				assignStmts = append(assignStmts, fmt.Sprintf("x.%s = f_%d", f.GoName, i))
 				continue
 			}
-			g.P(indent, "x.", m.field.GoName, " = ", flatScalarDecodeExprShifted(m, rVar, shift))
-		}
-	}
 
-	if len(strLocs) > 0 {
-		g.P(indent, "if zeroCopy {")
-		for _, loc := range strLocs {
-			idx := loc.meta.idx
-			g.P(indent, "	x.", loc.meta.field.GoName, " = unsafe.String(", loc.headPtr, ", n_", idx, ")")
-		}
-		g.P(indent, "} else {")
-		var nTerms []string
-		for _, loc := range strLocs {
-			nTerms = append(nTerms, fmt.Sprintf("n_%d", loc.meta.idx))
-		}
-		g.P(indent, "	totalStr := ", strings.Join(nTerms, "+"))
-		g.P(indent, "	sb := make([]byte, totalStr)")
-		g.P(indent, "	_ = sb[totalStr-1]")
-		if len(strLocs) == 1 {
-			idx := strLocs[0].meta.idx
-			g.P(indent, "	binary.LittleEndian.PutUint64(sb, w_", idx, "a)")
-			g.P(indent, "	binary.LittleEndian.PutUint64(sb[n_", idx, "-8:], w_", idx, "b)")
-			g.P(indent, "	x.", strLocs[0].meta.field.GoName, " = unsafe.String(&sb[0], totalStr)")
-		} else {
-			offExpr := ""
-			for i, loc := range strLocs {
-				idx := loc.meta.idx
-				if i == 0 {
-					g.P(indent, "	binary.LittleEndian.PutUint64(sb, w_", idx, "a)")
-					g.P(indent, "	binary.LittleEndian.PutUint64(sb[n_", idx, "-8:], w_", idx, "b)")
-					offExpr = fmt.Sprintf("n_%d", idx)
-				} else {
-					g.P(indent, "	binary.LittleEndian.PutUint64(sb[", offExpr, ":], w_", idx, "a)")
-					endExpr := fmt.Sprintf("%s+n_%d", offExpr, idx)
-					g.P(indent, "	binary.LittleEndian.PutUint64(sb[", endExpr, "-8:], w_", idx, "b)")
-					offExpr = endExpr
-				}
+			tb := flatTagBytes(fnum, wireTypeForField(f))
+			var tagConds []string
+			for ti, bByte := range tb {
+				tagConds = append(tagConds, fmt.Sprintf("b[%d] != 0x%02x", off+ti, bByte))
 			}
-			g.P(indent, "	all := unsafe.String(&sb[0], totalStr)")
-			offExpr = ""
-			for i, loc := range strLocs {
-				idx := loc.meta.idx
-				if i == 0 {
-					g.P(indent, "	x.", loc.meta.field.GoName, " = all[:n_", idx, "]")
-					offExpr = fmt.Sprintf("n_%d", idx)
-				} else if i == len(strLocs)-1 {
-					g.P(indent, "	x.", loc.meta.field.GoName, " = all[", offExpr, ":]")
-				} else {
-					endExpr := fmt.Sprintf("%s+n_%d", offExpr, idx)
-					g.P(indent, "	x.", loc.meta.field.GoName, " = all[", offExpr, ":", endExpr, "]")
-					offExpr = endExpr
-				}
+			g.P("	if ", strings.Join(tagConds, " || "), " {")
+			g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+			g.P("	}")
+			payOff := off + len(tb)
+			switch f.Desc.Kind() {
+			case protoreflect.Fixed32Kind:
+				g.P(fmt.Sprintf("	f_%d := binary.LittleEndian.Uint32(b[%d:])", i, payOff))
+			case protoreflect.Sfixed32Kind:
+				g.P(fmt.Sprintf("	f_%d := int32(binary.LittleEndian.Uint32(b[%d:]))", i, payOff))
+			case protoreflect.FloatKind:
+				g.P(fmt.Sprintf("	f_%d := math.Float32frombits(binary.LittleEndian.Uint32(b[%d:]))", i, payOff))
+			case protoreflect.Fixed64Kind:
+				g.P(fmt.Sprintf("	f_%d := binary.LittleEndian.Uint64(b[%d:])", i, payOff))
+			case protoreflect.Sfixed64Kind:
+				g.P(fmt.Sprintf("	f_%d := int64(binary.LittleEndian.Uint64(b[%d:]))", i, payOff))
+			case protoreflect.DoubleKind:
+				g.P(fmt.Sprintf("	f_%d := math.Float64frombits(binary.LittleEndian.Uint64(b[%d:]))", i, payOff))
 			}
+			assignStmts = append(assignStmts, fmt.Sprintf("x.%s = f_%d", f.GoName, i))
+			continue
 		}
-		g.P(indent, "}")
+
+		// Invariant at start of field i: len(b) >= flatMinFieldSize(f) + remMin[i].
+		if f.Desc.Kind() == protoreflect.BoolKind {
+			tb := flatTagBytes(fnum, wire.WireBoolFalse)
+			if len(tb) == 1 {
+				g.P(fmt.Sprintf("	if (b[0]&^2) != 0x%02x {", tb[0]))
+				g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+				g.P("	}")
+				g.P("	f_", i, " := (b[0] & 2) != 0")
+				g.P("	b = b[1:]")
+			} else {
+				g.P(fmt.Sprintf("	if (b[0]&^4) != 0x%02x || b[1] != 0x%02x {", tb[0], tb[1]))
+				g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+				g.P("	}")
+				g.P("	f_", i, " := (b[0] & 4) != 0")
+				g.P("	b = b[2:]")
+			}
+			assignStmts = append(assignStmts, fmt.Sprintf("x.%s = f_%d", f.GoName, i))
+			continue
+		}
+
+		tb := flatTagBytes(fnum, wireTypeForField(f))
+		var tagConds []string
+		for ti, bByte := range tb {
+			tagConds = append(tagConds, fmt.Sprintf("b[%d] != 0x%02x", ti, bByte))
+		}
+		g.P("	if ", strings.Join(tagConds, " || "), " {")
+		g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+		g.P("	}")
+		g.P("	b = b[", len(tb), ":]")
+
+		rem := remMin[i]
+		switch f.Desc.Kind() {
+		case protoreflect.Uint32Kind, protoreflect.Uint64Kind,
+			protoreflect.Int32Kind, protoreflect.Sint32Kind,
+			protoreflect.Int64Kind, protoreflect.Sint64Kind:
+			g.P("	v_", i, ", vn_", i, " := wire.DecodeVarint(b)")
+			if rem > 0 {
+				g.P("	if vn_", i, " == 0 || len(b)-vn_", i, " < ", rem, " {")
+			} else {
+				g.P("	if vn_", i, " == 0 {")
+			}
+			g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+			g.P("	}")
+			g.P("	b = b[vn_", i, ":]")
+			switch f.Desc.Kind() {
+			case protoreflect.Uint32Kind:
+				assignStmts = append(assignStmts, fmt.Sprintf("x.%s = uint32(v_%d)", f.GoName, i))
+			case protoreflect.Uint64Kind:
+				assignStmts = append(assignStmts, fmt.Sprintf("x.%s = v_%d", f.GoName, i))
+			case protoreflect.Int32Kind, protoreflect.Sint32Kind:
+				assignStmts = append(assignStmts, fmt.Sprintf("x.%s = int32(wire.DecodeZigZag(v_%d))", f.GoName, i))
+			case protoreflect.Int64Kind, protoreflect.Sint64Kind:
+				assignStmts = append(assignStmts, fmt.Sprintf("x.%s = wire.DecodeZigZag(v_%d)", f.GoName, i))
+			}
+		case protoreflect.Fixed32Kind:
+			g.P("	f_", i, " := binary.LittleEndian.Uint32(b)")
+			g.P("	b = b[4:]")
+			assignStmts = append(assignStmts, fmt.Sprintf("x.%s = f_%d", f.GoName, i))
+		case protoreflect.Sfixed32Kind:
+			g.P("	f_", i, " := int32(binary.LittleEndian.Uint32(b))")
+			g.P("	b = b[4:]")
+			assignStmts = append(assignStmts, fmt.Sprintf("x.%s = f_%d", f.GoName, i))
+		case protoreflect.FloatKind:
+			g.P("	f_", i, " := math.Float32frombits(binary.LittleEndian.Uint32(b))")
+			g.P("	b = b[4:]")
+			assignStmts = append(assignStmts, fmt.Sprintf("x.%s = f_%d", f.GoName, i))
+		case protoreflect.Fixed64Kind:
+			g.P("	f_", i, " := binary.LittleEndian.Uint64(b)")
+			g.P("	b = b[8:]")
+			assignStmts = append(assignStmts, fmt.Sprintf("x.%s = f_%d", f.GoName, i))
+		case protoreflect.Sfixed64Kind:
+			g.P("	f_", i, " := int64(binary.LittleEndian.Uint64(b))")
+			g.P("	b = b[8:]")
+			assignStmts = append(assignStmts, fmt.Sprintf("x.%s = f_%d", f.GoName, i))
+		case protoreflect.DoubleKind:
+			g.P("	f_", i, " := math.Float64frombits(binary.LittleEndian.Uint64(b))")
+			g.P("	b = b[8:]")
+			assignStmts = append(assignStmts, fmt.Sprintf("x.%s = f_%d", f.GoName, i))
+		case protoreflect.StringKind:
+			g.P("	sLen_", i, ", sn_", i, " := wire.DecodeVarint(b)")
+			if rem > 0 {
+				g.P("	if sn_", i, " == 0 || len(b)-sn_", i, " < ", rem, " || sLen_", i, " > uint64(len(b)-sn_", i, "-", rem, ") {")
+			} else {
+				g.P("	if sn_", i, " == 0 || sLen_", i, " > uint64(len(b)-sn_", i, ") {")
+			}
+			g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+			g.P("	}")
+			g.P("	end_", i, " := sn_", i, " + int(sLen_", i, ")")
+			g.P("	s_", i, " := b[sn_", i, ":end_", i, "]")
+			g.P("	b = b[end_", i, ":]")
+			strFields = append(strFields, strFieldInfo{idx: i, field: f})
+		case protoreflect.BytesKind:
+			g.P("	bLen_", i, ", bn_", i, " := wire.DecodeVarint(b)")
+			if rem > 0 {
+				g.P("	if bn_", i, " == 0 || len(b)-bn_", i, " < ", rem, " || bLen_", i, " > uint64(len(b)-bn_", i, "-", rem, ") {")
+			} else {
+				g.P("	if bn_", i, " == 0 || bLen_", i, " > uint64(len(b)-bn_", i, ") {")
+			}
+			g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+			g.P("	}")
+			g.P("	end_", i, " := bn_", i, " + int(bLen_", i, ")")
+			g.P("	b_", i, " := b[bn_", i, ":end_", i, ":end_", i, "]")
+			g.P("	b = b[end_", i, ":]")
+			bytesFields = append(bytesFields, strFieldInfo{idx: i, field: f})
+		}
 	}
 
-	if len(bytesLocs) > 0 {
-		g.P(indent, "if zeroCopy {")
-		for _, loc := range bytesLocs {
-			g.P(indent, "	x.", loc.meta.field.GoName, " = ", loc.rawSlice)
-		}
-		g.P(indent, "} else {")
-		for _, loc := range bytesLocs {
-			idx := loc.meta.idx
-			g.P(indent, "	bb_", idx, " := make([]byte, n_", idx, ")")
-			g.P(indent, "	binary.LittleEndian.PutUint64(bb_", idx, ", binary.LittleEndian.Uint64(", loc.headExpr, "))")
-			g.P(indent, "	binary.LittleEndian.PutUint64(bb_", idx, "[n_", idx, "-8:], binary.LittleEndian.Uint64(", loc.tailExpr, "))")
-			g.P(indent, "	x.", loc.meta.field.GoName, " = bb_", idx)
-		}
-		g.P(indent, "}")
+	if tailBytes == 0 {
+		g.P("	if len(b) != 0 {")
+		g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+		g.P("	}")
 	}
 
-	g.P(indent, "return nil")
-
-	for openDepth > 0 {
-		openDepth--
-		indent = indent[:len(indent)-1]
-		g.P(indent, "}")
+	if len(strFields) > 0 {
+		var asciiChecks []string
+		for _, sf := range strFields {
+			asciiChecks = append(asciiChecks, fmt.Sprintf("!wire.IsASCII(s_%d)", sf.idx))
+		}
+		g.P("	if ", strings.Join(asciiChecks, " || "), " {")
+		g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+		g.P("	}")
 	}
 
-	g.P("	return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+	g.P("	_omnibufProtoState_", typeName, ".Reset(unsafe.Pointer(x), false)")
+	for _, stmt := range assignStmts {
+		g.P("	", stmt)
+	}
+
+	if len(strFields) >= 2 {
+		var lenTerms []string
+		for _, sf := range strFields {
+			lenTerms = append(lenTerms, fmt.Sprintf("len(s_%d)", sf.idx))
+		}
+		g.P("	if zeroCopy {")
+		for _, sf := range strFields {
+			g.P("		x.", sf.field.GoName, " = wire.DecodeStr(s_", sf.idx, ", true)")
+		}
+		g.P("	} else if totalStr := ", strings.Join(lenTerms, " + "), "; totalStr > 0 && totalStr <= 256 {")
+		g.P("		sb := make([]byte, totalStr)")
+		g.P("		strOff := 0")
+		for _, sf := range strFields {
+			g.P("		strOff = wire.CopyBytesAt(sb, strOff, s_", sf.idx, ")")
+		}
+		g.P("		all := unsafe.String(&sb[0], totalStr)")
+		g.P("		strOff = 0")
+		for _, sf := range strFields {
+			g.P("		if l := len(s_", sf.idx, "); l > 0 {")
+			g.P("			x.", sf.field.GoName, " = all[strOff : strOff+l]")
+			g.P("			strOff += l")
+			g.P("		} else {")
+			g.P(`			x.`, sf.field.GoName, ` = ""`)
+			g.P("		}")
+		}
+		g.P("	} else {")
+		for _, sf := range strFields {
+			g.P("		x.", sf.field.GoName, " = string(s_", sf.idx, ")")
+		}
+		g.P("	}")
+	} else if len(strFields) == 1 {
+		sf := strFields[0]
+		g.P("	x.", sf.field.GoName, " = wire.DecodeStr(s_", sf.idx, ", zeroCopy)")
+	}
+
+	if len(bytesFields) > 0 {
+		g.P("	if zeroCopy {")
+		for _, bf := range bytesFields {
+			g.P("		x.", bf.field.GoName, " = b_", bf.idx)
+		}
+		g.P("	} else {")
+		for _, bf := range bytesFields {
+			g.P("		x.", bf.field.GoName, " = append([]byte(nil), b_", bf.idx, "...)")
+		}
+		g.P("	}")
+	}
+
+	g.P("	return nil")
 	g.P("}")
 	g.P()
 }

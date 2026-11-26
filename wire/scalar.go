@@ -90,6 +90,60 @@ func (e *Encoder) WriteBytes(fieldNum uint16, b []byte) {
 	e.buf = append(e.buf, b...)
 }
 
+// IsASCII reports whether every byte in b is 7-bit ASCII (< 0x80).
+// Pure-ASCII slices are always valid UTF-8, allowing generated decoders
+// to validate ASCII strings inline without a function call.
+func IsASCII(b []byte) bool {
+	n := len(b)
+	if n >= 8 {
+		var bits uint64
+		for i := 0; i < n-8; i += 8 {
+			bits |= binary.LittleEndian.Uint64(b[i:])
+		}
+		bits |= binary.LittleEndian.Uint64(b[n-8:])
+		return bits&0x8080808080808080 == 0
+	}
+	for _, c := range b {
+		if c >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// CopyStringAt copies s into dst starting at pos and returns pos + len(s).
+// Caller must ensure len(dst)-pos >= len(s).
+// Uses inline word copies for short strings to avoid runtime.memmove call overhead.
+func CopyStringAt(dst []byte, pos int, s string) int {
+	n := len(s)
+	if last := n - 8; uint(last) <= 56 {
+		src := unsafe.Slice(unsafe.StringData(s), n)
+		d := dst[pos : pos+n]
+		for i := 0; i < last; i += 8 {
+			binary.LittleEndian.PutUint64(d[i:], binary.LittleEndian.Uint64(src[i:]))
+		}
+		binary.LittleEndian.PutUint64(d[last:], binary.LittleEndian.Uint64(src[last:]))
+		return pos + n
+	}
+	return pos + copy(dst[pos:], s)
+}
+
+// CopyBytesAt copies src into dst starting at pos and returns pos + len(src).
+// Caller must ensure len(dst)-pos >= len(src).
+// Uses inline word copies for short slices to avoid runtime.memmove call overhead.
+func CopyBytesAt(dst []byte, pos int, src []byte) int {
+	n := len(src)
+	if last := n - 8; uint(last) <= 56 {
+		d := dst[pos : pos+n]
+		for i := 0; i < last; i += 8 {
+			binary.LittleEndian.PutUint64(d[i:], binary.LittleEndian.Uint64(src[i:]))
+		}
+		binary.LittleEndian.PutUint64(d[last:], binary.LittleEndian.Uint64(src[last:]))
+		return pos + n
+	}
+	return pos + copy(dst[pos:], src)
+}
+
 // ValidUTF8 reports whether b is valid UTF-8, as required for WireString payloads.
 func ValidUTF8(b []byte) bool {
 	// Short ASCII identifiers are common on the wire. Overlapping word loads

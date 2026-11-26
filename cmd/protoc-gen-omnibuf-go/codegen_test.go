@@ -12,6 +12,16 @@ import (
 	"google.golang.org/protobuf/types/pluginpb"
 )
 
+// runGoInRoot executes a go command in the repository root module so tests of
+// generated code always compile against the in-tree github.com/omnibuf/omnibuf-go
+// and wire packages without requiring a replace directive in this submodule.
+func runGoInRoot(t *testing.T, args ...string) ([]byte, error) {
+	t.Helper()
+	cmd := exec.Command("go", args...)
+	cmd.Dir = filepath.Join("..", "..")
+	return cmd.CombinedOutput()
+}
+
 // TestOpaqueSpliceOutOfOrderFieldNumbers verifies that when a .proto message
 // declares fields out of ascending field-number order, the generated Opaque
 // type tracks the true maximum field number so SpliceFields and TrySpliceFields
@@ -109,7 +119,7 @@ func TestOpaqueAlertOutOfOrderSplice(t *testing.T) {
 		t.Fatalf("write test file: %v", err)
 	}
 
-	if out, err := exec.Command("go", "test", "-v", generated, testFile).CombinedOutput(); err != nil {
+	if out, err := runGoInRoot(t, "test", "-v", generated, testFile); err != nil {
 		t.Fatalf("OpaqueAlert splice test failed:\n%s", out)
 	}
 }
@@ -243,7 +253,7 @@ func TestMixedCompileAndOpaqueRecursive(t *testing.T) {
 	if err := os.WriteFile(testFile, []byte(testSource), 0o600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
-	if out, err := exec.Command("go", "test", "-v", generated, testFile).CombinedOutput(); err != nil {
+	if out, err := runGoInRoot(t, "test", "-v", generated, testFile); err != nil {
 		t.Fatalf("mixed opaque/non-opaque generated code failed:\n%s", out)
 	}
 }
@@ -285,7 +295,7 @@ func TestEmptyMessageFreeProtoNoUnusedImports(t *testing.T) {
 	if err := os.WriteFile(generated, []byte(resp.File[0].GetContent()), 0o600); err != nil {
 		t.Fatalf("write generated file: %v", err)
 	}
-	if out, err := exec.Command("go", "build", generated).CombinedOutput(); err != nil {
+	if out, err := runGoInRoot(t, "build", generated); err != nil {
 		t.Fatalf("empty/message-free generated file failed to compile:\n%s\ncontent:\n%s", out, resp.File[0].GetContent())
 	}
 }
@@ -336,6 +346,28 @@ func TestFlatScalarFastPath(t *testing.T) {
 					f("ok", 3, descriptorpb.FieldDescriptorProto_TYPE_BOOL),
 				},
 			},
+			{
+				// Covers all scalar kinds, 2-byte field numbers, single string field,
+				// and a trailing variable-length field (tailBytes == 0).
+				Name: proto.String("AllFlatTypes"),
+				Field: []*descriptorpb.FieldDescriptorProto{
+					f("u32", 1, descriptorpb.FieldDescriptorProto_TYPE_UINT32),
+					f("u64", 2, descriptorpb.FieldDescriptorProto_TYPE_UINT64),
+					f("i32", 3, descriptorpb.FieldDescriptorProto_TYPE_INT32),
+					f("s32", 4, descriptorpb.FieldDescriptorProto_TYPE_SINT32),
+					f("i64", 5, descriptorpb.FieldDescriptorProto_TYPE_INT64),
+					f("s64", 6, descriptorpb.FieldDescriptorProto_TYPE_SINT64),
+					f("f32", 7, descriptorpb.FieldDescriptorProto_TYPE_FIXED32),
+					f("sf32", 8, descriptorpb.FieldDescriptorProto_TYPE_SFIXED32),
+					f("f64", 9, descriptorpb.FieldDescriptorProto_TYPE_FIXED64),
+					f("sf64", 10, descriptorpb.FieldDescriptorProto_TYPE_SFIXED64),
+					f("fl", 11, descriptorpb.FieldDescriptorProto_TYPE_FLOAT),
+					f("db", 12, descriptorpb.FieldDescriptorProto_TYPE_DOUBLE),
+					f("flag", 100, descriptorpb.FieldDescriptorProto_TYPE_BOOL),
+					f("payload", 200, descriptorpb.FieldDescriptorProto_TYPE_BYTES),
+					f("label", 500, descriptorpb.FieldDescriptorProto_TYPE_STRING),
+				},
+			},
 		},
 	}
 	req := &pluginpb.CodeGeneratorRequest{
@@ -364,9 +396,12 @@ func TestFlatScalarFastPath(t *testing.T) {
 
 import (
 	"bytes"
+	"math"
+	"strings"
 	"testing"
 
 	"github.com/omnibuf/omnibuf-go"
+	"github.com/omnibuf/omnibuf-go/wire"
 )
 
 type FlatBench struct {
@@ -391,14 +426,37 @@ type FixedOnly struct {
 	Ok    bool    ` + "`" + `omnibuf:"3,name=ok"` + "`" + `
 }
 
+type AllFlatTypes struct {
+	U32     uint32  ` + "`" + `omnibuf:"1,name=u32"` + "`" + `
+	U64     uint64  ` + "`" + `omnibuf:"2,name=u64"` + "`" + `
+	I32     int32   ` + "`" + `omnibuf:"3,name=i32"` + "`" + `
+	S32     int32   ` + "`" + `omnibuf:"4,name=s32"` + "`" + `
+	I64     int64   ` + "`" + `omnibuf:"5,name=i64"` + "`" + `
+	S64     int64   ` + "`" + `omnibuf:"6,name=s64"` + "`" + `
+	F32     uint32  ` + "`" + `omnibuf:"7,name=f32,wire=fixed32"` + "`" + `
+	Sf32    int32   ` + "`" + `omnibuf:"8,name=sf32,wire=sfixed32"` + "`" + `
+	F64     uint64  ` + "`" + `omnibuf:"9,name=f64,wire=fixed64"` + "`" + `
+	Sf64    int64   ` + "`" + `omnibuf:"10,name=sf64,wire=sfixed64"` + "`" + `
+	Fl      float32 ` + "`" + `omnibuf:"11,name=fl"` + "`" + `
+	Db      float64 ` + "`" + `omnibuf:"12,name=db"` + "`" + `
+	Flag    bool    ` + "`" + `omnibuf:"100,name=flag"` + "`" + `
+	Payload []byte  ` + "`" + `omnibuf:"200,name=payload"` + "`" + `
+	Label   string  ` + "`" + `omnibuf:"500,name=label"` + "`" + `
+}
+
 func TestFlatScalarRoundTripAndEdgeCases(t *testing.T) {
 	cases := []FlatBench{
-		// Fast path: 8..16 byte ASCII strings, small int32, both bool values.
+		// 8..64 byte ASCII strings (inline word copy path), 9-byte int64, 1-byte int32.
 		{Name: "0123456789abcdef", BirthDay: 1795000000123456789, Phone: "5551234567", Siblings: 3, Spouse: true, Money: 42.5},
 		{Name: "abcdefgh", BirthDay: -123456789, Phone: "12345678", Siblings: -5, Spouse: false, Money: -0.25},
-		// Slow path: short strings (<8), empty strings, long strings (>16), large int32, non-ASCII UTF-8.
+		// Empty and <8 byte strings, zero values.
 		{Name: "", BirthDay: 0, Phone: "123", Siblings: 0, Spouse: false, Money: 0},
-		{Name: "very-long-name-exceeding-sixteen-bytes", BirthDay: 99, Phone: "01234567890123456789", Siblings: 10000, Spouse: true, Money: 1.5},
+		{Name: "a", BirthDay: 63, Phone: "", Siblings: -64, Spouse: true, Money: 1.0},
+		// 2-byte and 4-byte varint widths, exact 64-byte string boundary, and 65-byte (>64) fallback.
+		{Name: strings.Repeat("a", 64), BirthDay: 8000, Phone: strings.Repeat("b", 65), Siblings: 10000, Spouse: true, Money: 1.5},
+		// Total string length > 256 (bypasses safe string slab).
+		{Name: strings.Repeat("x", 200), BirthDay: math.MinInt64, Phone: strings.Repeat("y", 100), Siblings: math.MaxInt32, Spouse: false, Money: -99.75},
+		// Non-ASCII valid UTF-8 (hits IsASCII -> decodeOmniBuf fallback).
 		{Name: "héllo wörld!", BirthDay: 42, Phone: "日本語テスト", Siblings: -500, Spouse: true, Money: 3.14},
 	}
 
@@ -413,13 +471,23 @@ func TestFlatScalarRoundTripAndEdgeCases(t *testing.T) {
 			t.Fatalf("case %d wire mismatch:\ngot  %x\nwant %x", idx, gotWire, wantWire)
 		}
 
-		// Also verify appending onto non-empty dst (both with and without spare capacity).
+		// Buffer reuse paths:
+		// 1) cap >= maxNeed (fast reuse skipping VarintSize)
+		// 2) exact need <= cap < maxNeed (tight reuse branch)
+		// 3) non-empty prefix with grow
+		// 4) non-empty prefix with spare capacity
+		for _, capHint := range []int{len(wantWire), len(wantWire) + 1, len(wantWire) + 64} {
+			reused := tc.MarshalOmniBufAppend(make([]byte, 0, capHint))
+			if !bytes.Equal(reused, wantWire) {
+				t.Fatalf("case %d reuse(cap=%d) mismatch", idx, capHint)
+			}
+		}
 		prefix := []byte{0xde, 0xad}
 		appended := tc.MarshalOmniBufAppend(append([]byte(nil), prefix...))
 		if !bytes.Equal(appended, append(append([]byte(nil), prefix...), wantWire...)) {
 			t.Fatalf("case %d append-grow mismatch", idx)
 		}
-		buf := make([]byte, 2, 256)
+		buf := make([]byte, 2, len(wantWire)+128)
 		copy(buf, prefix)
 		appendedCap := tc.MarshalOmniBufAppend(buf)
 		if !bytes.Equal(appendedCap, append(append([]byte(nil), prefix...), wantWire...)) {
@@ -459,16 +527,63 @@ func TestFlatScalarRoundTripAndEdgeCases(t *testing.T) {
 		}
 	}
 
-	// Invalid UTF-8 in 8..16 byte string must be rejected even on canonical layout.
-	valid := cases[0].MarshalOmniBufAppend(nil)
-	badUTF8 := append([]byte(nil), valid...)
-	badUTF8[2] = 0xff // first byte of Name
-	var badOut FlatBench
-	if err := badOut.UnmarshalOmniBuf(badUTF8, false); err == nil {
-		t.Fatal("expected invalid UTF-8 error for fast-path packet")
+	// Nil receiver error.
+	var nilFB *FlatBench
+	if err := nilFB.UnmarshalOmniBuf(nil, false); err == nil {
+		t.Fatal("expected error for nil receiver")
 	}
-	if err := badOut.UnmarshalOmniBuf(badUTF8, true); err == nil {
-		t.Fatal("expected invalid UTF-8 error for zeroCopy fast-path packet")
+
+	// Every byte prefix must match table-driven omnibuf.Unmarshal (succeeding at
+	// complete field boundaries and returning an error mid-field, never panicking).
+	valid := cases[0].MarshalOmniBufAppend(nil)
+	for cut := 0; cut <= len(valid); cut++ {
+		prefix := valid[:cut]
+		ref := FlatBench{Name: "stale", BirthDay: 99, Phone: "stale", Siblings: 9, Spouse: true, Money: 9}
+		refErr := omnibuf.Unmarshal(prefix, &ref)
+		got := FlatBench{Name: "stale", BirthDay: 99, Phone: "stale", Siblings: 9, Spouse: true, Money: 9}
+		gotErr := got.UnmarshalOmniBuf(prefix, false)
+		if (gotErr != nil) != (refErr != nil) {
+			t.Fatalf("prefix %d/%d error mismatch: gotErr=%v, refErr=%v", cut, len(valid), gotErr, refErr)
+		}
+		if gotErr == nil && got != ref {
+			t.Fatalf("prefix %d/%d value mismatch: got %+v, want %+v", cut, len(valid), got, ref)
+		}
+	}
+
+	// Trailing garbage must be rejected.
+	withGarbage := append(append([]byte(nil), valid...), 0x00)
+	var garbageOut FlatBench
+	if err := garbageOut.UnmarshalOmniBuf(withGarbage, false); err == nil {
+		t.Fatal("expected error for trailing garbage byte")
+	}
+
+	// Partial / out-of-order message must clear unseen fields via fallback.
+	enc := wire.NewEncoder(32)
+	enc.WriteFloat64(6, 7.25)
+	enc.WriteString(1, "partial")
+	partialWire := append([]byte(nil), enc.Finish()...)
+	partialOut := FlatBench{Name: "old", BirthDay: 123, Phone: "old", Siblings: 9, Spouse: true, Money: 1}
+	if err := partialOut.UnmarshalOmniBuf(partialWire, false); err != nil {
+		t.Fatalf("partial unmarshal: %v", err)
+	}
+	wantPartial := FlatBench{Name: "partial", Money: 7.25}
+	if partialOut != wantPartial {
+		t.Fatalf("partial mismatch: got %+v, want %+v", partialOut, wantPartial)
+	}
+
+	// Invalid UTF-8 in short, medium (8..64), and long (>64) strings must be rejected.
+	for _, s := range []string{"abc", "0123456789abcdef", strings.Repeat("z", 80)} {
+		w := (&FlatBench{Name: s, Phone: "5551234567"}).MarshalOmniBufAppend(nil)
+		// Corrupt the last byte of Name.
+		nameLenBytes := wire.VarintSize(uint64(len(s)))
+		w[1+nameLenBytes+len(s)-1] = 0xff
+		var badOut FlatBench
+		if err := badOut.UnmarshalOmniBuf(w, false); err == nil {
+			t.Fatalf("expected invalid UTF-8 error (safe, len=%d)", len(s))
+		}
+		if err := badOut.UnmarshalOmniBuf(w, true); err == nil {
+			t.Fatalf("expected invalid UTF-8 error (zeroCopy, len=%d)", len(s))
+		}
 	}
 
 	// Consecutive strings + bytes + 2-byte bool tag.
@@ -486,7 +601,7 @@ func TestFlatScalarRoundTripAndEdgeCases(t *testing.T) {
 		}
 	}
 
-	// Fixed-only message (no varlen fields).
+	// Fixed-only message (no varint or varlen fields).
 	fo := FixedOnly{Id: 0xdeadbeefcafebabe, Score: 3.5, Ok: true}
 	var foOut FixedOnly
 	if err := foOut.UnmarshalOmniBuf(fo.MarshalOmniBufAppend(nil), false); err != nil {
@@ -495,12 +610,55 @@ func TestFlatScalarRoundTripAndEdgeCases(t *testing.T) {
 	if foOut != fo {
 		t.Fatalf("FixedOnly mismatch: got %+v, want %+v", foOut, fo)
 	}
+
+	// AllFlatTypes: every scalar kind, 2-byte tags, single string field, tailBytes == 0.
+	allCases := []AllFlatTypes{
+		{
+			U32: 127, U64: 16383, I32: -100, S32: 500000, I64: -900000000000, S64: math.MaxInt64,
+			F32: 0x12345678, Sf32: -123456, F64: 0xfeedfacecafebeef, Sf64: -9876543210,
+			Fl: -12.5, Db: 98765.4321, Flag: true,
+			Payload: []byte("0123456789abcdef"), Label: "single-string-field",
+		},
+		{
+			U32: math.MaxUint32, U64: math.MaxUint64, I32: math.MinInt32, S32: math.MaxInt32,
+			I64: math.MinInt64, S64: 0, Flag: false,
+			Payload: bytes.Repeat([]byte{0xab}, 70), Label: "café-🚀",
+		},
+	}
+	for idx, tc := range allCases {
+		wantWire, err := omnibuf.Marshal(&tc)
+		if err != nil {
+			t.Fatalf("AllFlatTypes[%d] omnibuf.Marshal: %v", idx, err)
+		}
+		gotWire := tc.MarshalOmniBufAppend(nil)
+		if !bytes.Equal(gotWire, wantWire) {
+			t.Fatalf("AllFlatTypes[%d] wire mismatch:\ngot  %x\nwant %x", idx, gotWire, wantWire)
+		}
+		for _, zc := range []bool{false, true} {
+			wireCopy := append([]byte(nil), gotWire...)
+			var out AllFlatTypes
+			if err := out.UnmarshalOmniBuf(wireCopy, zc); err != nil {
+				t.Fatalf("AllFlatTypes[%d] unmarshal(zc=%v): %v", idx, zc, err)
+			}
+			if !zc {
+				for i := range wireCopy {
+					wireCopy[i] ^= 0xff
+				}
+			}
+			if out.U32 != tc.U32 || out.U64 != tc.U64 || out.I32 != tc.I32 || out.S32 != tc.S32 ||
+				out.I64 != tc.I64 || out.S64 != tc.S64 || out.F32 != tc.F32 || out.Sf32 != tc.Sf32 ||
+				out.F64 != tc.F64 || out.Sf64 != tc.Sf64 || out.Fl != tc.Fl || out.Db != tc.Db ||
+				out.Flag != tc.Flag || !bytes.Equal(out.Payload, tc.Payload) || out.Label != tc.Label {
+				t.Fatalf("AllFlatTypes[%d] mismatch(zc=%v):\ngot  %+v\nwant %+v", idx, zc, out, tc)
+			}
+		}
+	}
 }
 `
 	if err := os.WriteFile(testFile, []byte(testSource), 0o600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
-	if out, err := exec.Command("go", "test", "-race", "-v", generated, testFile).CombinedOutput(); err != nil {
+	if out, err := runGoInRoot(t, "test", "-race", "-v", generated, testFile); err != nil {
 		t.Fatalf("flat scalar fast path test failed:\n%s", out)
 	}
 }

@@ -11,6 +11,11 @@ import (
 
 var required = []string{
 	"github.com/omnibuf/omnibuf-go/wire.DecodeVarint",
+	"github.com/omnibuf/omnibuf-go/wire.VarintSize",
+	"github.com/omnibuf/omnibuf-go/wire.PutVarintAt",
+	"github.com/omnibuf/omnibuf-go/wire.IsASCII",
+	"github.com/omnibuf/omnibuf-go/wire.CopyStringAt",
+	"github.com/omnibuf/omnibuf-go/wire.CopyBytesAt",
 }
 
 func main() {

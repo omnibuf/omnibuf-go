@@ -26,63 +26,35 @@ func (x *AllTypesSubMsg) MinWireSizeOmniBuf(depth int) int {
 
 // MarshalOmniBufAppend encodes AllTypesSubMsg in a single forward pass using generated field tags.
 func (x *AllTypesSubMsg) MarshalOmniBufAppend(dst []byte) []byte {
-	n_1 := len(x.Label)
-	v_3 := wire.EncodeZigZag(x.Score)
-	if n_1 < 8 || n_1 > 16 || v_3 <= 536870911 || (uint64(x.Id)) > 127 {
-		return x.marshalOmniBufSlow(dst)
-	}
-	need := 15 + n_1
-	off := len(dst)
-	var b0 []byte
-	if cap(dst)-off >= need {
-		dst = dst[:off+need]
-		b0 = dst[off:]
-	} else if off == 0 {
-		dst = make([]byte, need)
-		b0 = dst
+	pos := len(dst)
+	if maxNeed := 31 + len(x.Label); cap(dst)-pos >= maxNeed {
+		dst = dst[:pos+maxNeed]
 	} else {
-		return x.marshalOmniBufSlow(dst)
+		need := 4 + wire.VarintSize(uint64(x.Id)) + wire.VarintSize(uint64(len(x.Label))) + len(x.Label) + wire.VarintSize(wire.EncodeZigZag(x.Score))
+		if cap(dst)-pos >= need {
+			dst = dst[:pos+need]
+		} else if pos == 0 {
+			dst = make([]byte, need)
+		} else {
+			next := make([]byte, pos+need, max(pos+need, cap(dst)*2))
+			copy(next, dst)
+			dst = next
+		}
 	}
-	_ = b0[11]
-	b0[0] = 0x21
-	b0[1] = byte(x.Id<<1) | 1
-	b0[2] = 0x55
-	b0[3] = byte(n_1<<1) | 1
-	s_1 := unsafe.Slice(unsafe.StringData(x.Label), n_1)
-	binary.LittleEndian.PutUint64(b0[4:], binary.LittleEndian.Uint64(s_1))
-	b1 := b0[n_1-4:]
-	_ = b1[18]
-	binary.LittleEndian.PutUint64(b1, binary.LittleEndian.Uint64(s_1[n_1-8:]))
+	dst[pos] = 0x21
+	pos = wire.PutVarintAt(dst, pos+1, uint64(x.Id))
+	dst[pos] = 0x55
+	pos = wire.PutVarintAt(dst, pos+1, uint64(len(x.Label)))
+	pos = wire.CopyStringAt(dst, pos, x.Label)
 	sp_2 := byte(0x65)
 	if x.Flag {
 		sp_2 = 0x67
 	}
-	b1[8] = sp_2
-	b1[9] = 0x83
-	b1[10] = 0x00
-	binary.LittleEndian.PutUint64(b1[11:], v_3)
-	return dst
-}
-
-//go:noinline
-func (x *AllTypesSubMsg) marshalOmniBufSlow(dst []byte) []byte {
-	if dst == nil {
-		minSize := x.MinWireSizeOmniBuf(0)
-		dst = make([]byte, 0, max(64, minSize+minSize/4))
-	}
-	dst = append(dst, 0x21)
-	dst = wire.AppendVarint(dst, uint64(x.Id))
-	dst = append(dst, 0x55)
-	dst = wire.AppendVarint(dst, uint64(len(x.Label)))
-	dst = append(dst, x.Label...)
-	if x.Flag {
-		dst = append(dst, 0x67)
-	} else {
-		dst = append(dst, 0x65)
-	}
-	dst = append(dst, 0x83)
-	dst = wire.AppendVarint(dst, wire.EncodeZigZag(x.Score))
-	return dst
+	dst[pos] = sp_2
+	pos++
+	dst[pos] = 0x83
+	pos = wire.PutVarintAt(dst, pos+1, wire.EncodeZigZag(x.Score))
+	return dst[:pos]
 }
 
 // ValidateOmniBufUTF8 verifies that all string fields in AllTypesSubMsg contain valid UTF-8.
@@ -149,40 +121,56 @@ func (x *AllTypesSubMsg) UnmarshalOmniBuf(data []byte, zeroCopy bool) error {
 	if x == nil {
 		return fmt.Errorf("omnibuf: Unmarshal requires non-nil pointer")
 	}
-	if len(data) >= 15 {
-		r0 := data
-		_ = r0[3]
-		if binary.LittleEndian.Uint32(r0)&0x01ff01ff == 0x01550121 {
-			n_1 := int(r0[3] >> 1)
-			if n_1 >= 8 && n_1 <= 16 && 4+n_1+11 == len(r0) {
-				_ = r0[11]
-				r1 := r0[n_1-4:]
-				_ = r1[18]
-				if binary.LittleEndian.Uint32(r1[8:])&0x00fffffd == 0x00008365 {
-					w_1a := binary.LittleEndian.Uint64(r0[4:])
-					w_1b := binary.LittleEndian.Uint64(r1)
-					if (w_1a|w_1b)&0x8080808080808080 == 0 {
-						_omnibufProtoState_AllTypesSubMsg.Reset(unsafe.Pointer(x), false)
-						x.Id = uint32(r0[1] >> 1)
-						x.Flag = (r1[8] & 2) != 0
-						x.Score = wire.DecodeZigZag(binary.LittleEndian.Uint64(r1[11:]))
-						if zeroCopy {
-							x.Label = unsafe.String(&r0[4], n_1)
-						} else {
-							totalStr := n_1
-							sb := make([]byte, totalStr)
-							_ = sb[totalStr-1]
-							binary.LittleEndian.PutUint64(sb, w_1a)
-							binary.LittleEndian.PutUint64(sb[n_1-8:], w_1b)
-							x.Label = unsafe.String(&sb[0], totalStr)
-						}
-						return nil
-					}
-				}
-			}
-		}
+	b := data
+	if len(b) < 7 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
 	}
-	return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	if b[0] != 0x21 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[1:]
+	v_0, vn_0 := wire.DecodeVarint(b)
+	if vn_0 == 0 || len(b)-vn_0 < 5 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[vn_0:]
+	if b[0] != 0x55 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[1:]
+	sLen_1, sn_1 := wire.DecodeVarint(b)
+	if sn_1 == 0 || len(b)-sn_1 < 3 || sLen_1 > uint64(len(b)-sn_1-3) {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	end_1 := sn_1 + int(sLen_1)
+	s_1 := b[sn_1:end_1]
+	b = b[end_1:]
+	if (b[0] &^ 2) != 0x65 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	f_2 := (b[0] & 2) != 0
+	b = b[1:]
+	if b[0] != 0x83 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[1:]
+	v_3, vn_3 := wire.DecodeVarint(b)
+	if vn_3 == 0 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[vn_3:]
+	if len(b) != 0 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	if !wire.IsASCII(s_1) {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	_omnibufProtoState_AllTypesSubMsg.Reset(unsafe.Pointer(x), false)
+	x.Id = uint32(v_0)
+	x.Flag = f_2
+	x.Score = wire.DecodeZigZag(v_3)
+	x.Label = wire.DecodeStr(s_1, zeroCopy)
+	return nil
 }
 
 //go:noinline

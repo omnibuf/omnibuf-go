@@ -490,12 +490,8 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 	flatScalar := isFlatScalarMessage(orderedFields)
 	emitMarshalBody := true
 	if flatScalar {
-		if emitFlatScalarMarshal(g, typeName, orderedFields) {
-			g.P("//go:noinline")
-			g.P("func (x *", typeName, ") marshalOmniBufSlow(dst []byte) []byte {")
-		} else {
-			emitMarshalBody = false
-		}
+		emitFlatScalarMarshal(g, typeName, orderedFields)
+		emitMarshalBody = false
 	} else {
 		g.P("// MarshalOmniBufAppend encodes ", typeName, " in a single forward pass using generated field tags.")
 		g.P("func (x *", typeName, ") MarshalOmniBufAppend(dst []byte) []byte {")

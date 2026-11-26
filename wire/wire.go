@@ -41,6 +41,46 @@ func DecodeZigZag(u uint64) int64 {
 	return int64(u>>1) ^ -int64(u&1)
 }
 
+// VarintSize returns the encoded byte length (1, 2, 4, or 9) of a Prefix-Varint.
+func VarintSize(v uint64) int {
+	if v <= 127 {
+		return 1
+	}
+	if v <= 16383 {
+		return 2
+	}
+	if v <= 536870911 {
+		return 4
+	}
+	return 9
+}
+
+// PutVarintAt writes a Prefix-Varint into dst starting at pos and returns the next offset.
+// Caller must ensure len(dst)-pos >= VarintSize(v).
+func PutVarintAt(dst []byte, pos int, v uint64) int {
+	if v <= 127 {
+		dst[pos] = byte(v<<1) | 1
+		return pos + 1
+	}
+	if v <= 16383 {
+		binary.LittleEndian.PutUint16(dst[pos:], uint16(v<<2)|2)
+		return pos + 2
+	}
+	if v <= 536870911 {
+		binary.LittleEndian.PutUint32(dst[pos:], uint32(v<<3)|4)
+		return pos + 4
+	}
+	dst[pos] = 0
+	binary.LittleEndian.PutUint64(dst[pos+1:], v)
+	return pos + 9
+}
+
+// PutVarint writes a Prefix-Varint into dst and returns the number of bytes written (1, 2, 4, or 9).
+// Caller must ensure len(dst) >= VarintSize(v).
+func PutVarint(dst []byte, v uint64) int {
+	return PutVarintAt(dst, 0, v)
+}
+
 // AppendVarint appends a Prefix-Varint to dst and returns the extended slice.
 // Fast-pathed for 1-byte values (0..127) so the Go compiler inlines it at every call site.
 func AppendVarint(dst []byte, v uint64) []byte {
