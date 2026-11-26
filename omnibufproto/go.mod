@@ -5,6 +5,6 @@ go 1.26
 replace github.com/omnibuf/omnibuf-go => ..
 
 require (
-	github.com/omnibuf/omnibuf-go v0.2.7
+	github.com/omnibuf/omnibuf-go v0.2.11
 	google.golang.org/protobuf v1.37.0-rc.1
 )
