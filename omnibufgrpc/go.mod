@@ -9,7 +9,7 @@ replace (
 
 require (
 	github.com/omnibuf/omnibuf-go v0.2.12
-	github.com/omnibuf/omnibuf-go/omnibufproto v0.2.11
+	github.com/omnibuf/omnibuf-go/omnibufproto v0.2.12
 	google.golang.org/grpc v1.85.0
 )
 
