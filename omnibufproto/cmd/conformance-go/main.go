@@ -368,9 +368,118 @@ func handlePluginTier(req *conformance.ConformanceRequest) *conformance.Conforma
 		return &conformance.ConformanceResponse{
 			OmniBufPayload: dst,
 		}
+
+	case "omnibuf.conformance.TestEditions2023":
+		staleInt := int32(999)
+		staleBool := true
+		staleStr := "stale"
+		staleDouble := 99.5
+		staleStatus := pb.Editions2023Status_EDITIONS2023_STATUS_PAUSED
+		msg := pb.TestEditions2023{
+			ExplicitInt:    &staleInt,
+			ExplicitBool:   &staleBool,
+			ExplicitString: &staleStr,
+			ExplicitBytes:  []byte{0xff},
+			ExplicitDouble: &staleDouble,
+			Status:         &staleStatus,
+			ImplicitCount:  999,
+			ImplicitFlag:   true,
+			Child:          &pb.Editions2023Child{Id: &staleInt, Note: &staleStr},
+			DelimitedChild: &pb.Editions2023Child{Id: &staleInt, Note: &staleStr},
+			PackedVals:     []int32{999},
+			ExpandedVals:   []int32{999},
+			Scores:         map[string]int32{"stale": 999},
+			Choice:         &pb.TestEditions2023_ChoiceText{ChoiceText: "stale"},
+		}
+		if err := msg.UnmarshalOmniBuf(req.OmniBufPayload, false); err != nil {
+			return &conformance.ConformanceResponse{ParseError: err.Error()}
+		}
+		if req.SelfDescribing {
+			out, err := msg.TryMarshalOmniBufSelfDescribingAppend(nil)
+			if err != nil {
+				return &conformance.ConformanceResponse{SerializeError: err.Error()}
+			}
+			return &conformance.ConformanceResponse{OmniBufPayload: out}
+		}
+		out, err := msg.TryMarshalOmniBufAppend(nil)
+		if err != nil {
+			return &conformance.ConformanceResponse{SerializeError: err.Error()}
+		}
+		return &conformance.ConformanceResponse{OmniBufPayload: out}
+
+	case "omnibuf.conformance.TestEditions2024":
+		var msg pb.TestEditions2024
+		msg.SetExplicitInt(999)
+		msg.SetExplicitBool(true)
+		msg.SetExplicitString("stale")
+		msg.SetExplicitBytes([]byte{0xff})
+		msg.SetExplicitDouble(99.5)
+		msg.SetStatus(pb.Editions2024Status_EDITIONS2024_STATUS_PAUSED)
+		msg.SetImplicitCount(999)
+		msg.SetImplicitFlag(true)
+		staleChild := &pb.Editions2024Child{}
+		staleChild.SetId(999)
+		staleChild.SetNote("stale")
+		msg.SetChild(staleChild)
+		msg.SetDelimitedChild(staleChild)
+		msg.SetPackedVals([]int32{999})
+		msg.SetExpandedVals([]int32{999})
+		msg.SetScores(map[string]int32{"stale": 999})
+		msg.SetChoiceText("stale")
+		if err := msg.UnmarshalOmniBuf(req.OmniBufPayload, false); err != nil {
+			return &conformance.ConformanceResponse{ParseError: err.Error()}
+		}
+		if req.SelfDescribing {
+			out, err := msg.TryMarshalOmniBufSelfDescribingAppend(nil)
+			if err != nil {
+				return &conformance.ConformanceResponse{SerializeError: err.Error()}
+			}
+			return &conformance.ConformanceResponse{OmniBufPayload: out}
+		}
+		out, err := msg.TryMarshalOmniBufAppend(nil)
+		if err != nil {
+			return &conformance.ConformanceResponse{SerializeError: err.Error()}
+		}
+		return &conformance.ConformanceResponse{OmniBufPayload: out}
+
+	case "omnibuf.conformance.TestEditions2026":
+		var msg pb.TestEditions2026
+		msg.SetExplicitInt(999)
+		msg.SetExplicitBool(true)
+		msg.SetExplicitString("stale")
+		msg.SetExplicitBytes([]byte{0xff})
+		msg.SetExplicitDouble(99.5)
+		msg.SetStatus(pb.Editions2026Status_EDITIONS2026_STATUS_PAUSED)
+		msg.SetImplicitCount(999)
+		msg.SetImplicitFlag(true)
+		staleChild := &pb.Editions2026Child{}
+		staleChild.SetId(999)
+		staleChild.SetNote("stale")
+		msg.SetChild(staleChild)
+		msg.SetDelimitedChild(staleChild)
+		msg.SetPackedVals([]int32{999})
+		msg.SetExpandedVals([]int32{999})
+		msg.SetScores(map[string]int32{"stale": 999})
+		msg.SetChoiceText("stale")
+		if err := msg.UnmarshalOmniBuf(req.OmniBufPayload, false); err != nil {
+			return &conformance.ConformanceResponse{ParseError: err.Error()}
+		}
+		if req.SelfDescribing {
+			out, err := msg.TryMarshalOmniBufSelfDescribingAppend(nil)
+			if err != nil {
+				return &conformance.ConformanceResponse{SerializeError: err.Error()}
+			}
+			return &conformance.ConformanceResponse{OmniBufPayload: out}
+		}
+		out, err := msg.TryMarshalOmniBufAppend(nil)
+		if err != nil {
+			return &conformance.ConformanceResponse{SerializeError: err.Error()}
+		}
+		return &conformance.ConformanceResponse{OmniBufPayload: out}
+
 	default:
 		return &conformance.ConformanceResponse{
-			Skipped: "plugin tier generated for PeerUpdate and TestAllTypes",
+			Skipped: "plugin tier generated for PeerUpdate, TestAllTypes, and Editions 2023/2024/2026",
 		}
 	}
 }
@@ -438,9 +547,46 @@ func handleProtobufTypesTier(req *conformance.ConformanceRequest) *conformance.C
 		return &conformance.ConformanceResponse{
 			OmniBufPayload: out,
 		}
+	case "omnibuf.conformance.TestEditions2023":
+		staleInt := int32(999)
+		msg := pb.TestEditions2023{ExplicitInt: &staleInt, ImplicitCount: 999, ImplicitFlag: true}
+		if err := omnibuf.Unmarshal(req.OmniBufPayload, &msg); err != nil {
+			return &conformance.ConformanceResponse{ParseError: err.Error()}
+		}
+		out, err := opts.Marshal(&msg)
+		if err != nil {
+			return &conformance.ConformanceResponse{SerializeError: err.Error()}
+		}
+		return &conformance.ConformanceResponse{OmniBufPayload: out}
+	case "omnibuf.conformance.TestEditions2024":
+		var msg pb.TestEditions2024
+		msg.SetExplicitInt(999)
+		msg.SetImplicitCount(999)
+		msg.SetImplicitFlag(true)
+		if err := omnibuf.Unmarshal(req.OmniBufPayload, &msg); err != nil {
+			return &conformance.ConformanceResponse{ParseError: err.Error()}
+		}
+		out, err := opts.Marshal(&msg)
+		if err != nil {
+			return &conformance.ConformanceResponse{SerializeError: err.Error()}
+		}
+		return &conformance.ConformanceResponse{OmniBufPayload: out}
+	case "omnibuf.conformance.TestEditions2026":
+		var msg pb.TestEditions2026
+		msg.SetExplicitInt(999)
+		msg.SetImplicitCount(999)
+		msg.SetImplicitFlag(true)
+		if err := omnibuf.Unmarshal(req.OmniBufPayload, &msg); err != nil {
+			return &conformance.ConformanceResponse{ParseError: err.Error()}
+		}
+		out, err := opts.Marshal(&msg)
+		if err != nil {
+			return &conformance.ConformanceResponse{SerializeError: err.Error()}
+		}
+		return &conformance.ConformanceResponse{OmniBufPayload: out}
 	default:
 		return &conformance.ConformanceResponse{
-			Skipped: "protobuf types tier exercises pb.PeerUpdate and pb.TestAllTypes",
+			Skipped: "protobuf types tier exercises PeerUpdate, TestAllTypes, and Editions 2023/2024/2026",
 		}
 	}
 }

@@ -13,4 +13,4 @@ require (
 	github.com/omnibuf/omnibuf-go/omnibufproto v0.0.0-00010101000000-000000000000
 )
 
-require google.golang.org/protobuf v1.36.12 // indirect
+require google.golang.org/protobuf v1.37.0-rc.1 // indirect

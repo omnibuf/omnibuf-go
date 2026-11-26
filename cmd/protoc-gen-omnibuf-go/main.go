@@ -38,7 +38,7 @@ func main() {
 	}
 
 	protogen.Options{}.Run(func(gen *protogen.Plugin) error {
-		gen.SupportedFeatures = uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL)
+		setSupportedFeatures(gen)
 		for _, f := range gen.Files {
 			if !f.Generate {
 				continue
@@ -264,6 +264,10 @@ func wireTypeForField(field *protogen.Field) uint8 {
 }
 
 func generateFile(gen *protogen.Plugin, file *protogen.File) {
+	if file.Desc.Syntax() == protoreflect.Editions {
+		generateEditionFile(gen, file)
+		return
+	}
 	if err := validateGeneratedFile(file); err != nil {
 		gen.Error(err)
 		return

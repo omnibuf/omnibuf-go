@@ -4225,6 +4225,474 @@
         "field_6": [],
         "field_7": {}
       }
+    },
+    {
+      "name": "editions_2023_empty",
+      "category": "P_ProtobufEditions",
+      "description": "Edition 2023 empty message with all explicit fields absent (0 bytes input; explicit fields must remain absent)",
+      "schema": "TestEditions2023",
+      "wire_hex": "",
+      "wire_byte_len": 0,
+      "present_fields": null
+    },
+    {
+      "name": "editions_2023_explicit_zeros",
+      "category": "P_ProtobufEditions",
+      "description": "Edition 2023 message preserving explicit 0, false, empty string/bytes, 0.0, enum 0, explicit-zero child, empty DELIMITED child, and zero oneof",
+      "schema": "TestEditions2023",
+      "wire_hex": "23014575019701b30000000000000000c301e3010a027202120023015501b2020200f6020a00010136030a0001017a030e000a0101860301",
+      "wire_byte_len": 56,
+      "present_fields": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14
+      ],
+      "expected_blind": {
+        "field_1": 0,
+        "field_10": {},
+        "field_11": [],
+        "field_12": [],
+        "field_13": {},
+        "field_14": 0,
+        "field_2": false,
+        "field_3": "",
+        "field_4": "",
+        "field_5": 0,
+        "field_6": 0,
+        "field_7": 0,
+        "field_8": false,
+        "field_9": {
+          "field_1": 0,
+          "field_2": ""
+        }
+      }
+    },
+    {
+      "name": "editions_2023_implicit_vs_explicit_presence",
+      "category": "P_ProtobufEditions",
+      "description": "Edition 2023 input carrying explicit zeros (#1,#2,#16) and implicit zeros (#7,#8) while other explicit fields remain absent",
+      "schema": "TestEditions2023",
+      "wire_hex": "230145e3010a020a04",
+      "wire_byte_len": 9,
+      "present_fields": [
+        1,
+        2,
+        7,
+        8,
+        16
+      ],
+      "expected_blind": {
+        "field_1": 0,
+        "field_16": false,
+        "field_2": false,
+        "field_7": 0,
+        "field_8": false
+      }
+    },
+    {
+      "name": "editions_2023_full_and_open_enum",
+      "category": "P_ProtobufEditions",
+      "description": "Edition 2023 full message with unknown open enum 99, LENGTH_PREFIXED \u0026 DELIMITED children, PACKED \u0026 EXPANDED arrays, sorted map, and empty string oneof",
+      "schema": "TestEditions2023",
+      "wire_hex": "23a747752365646974696f6e2d323032332df09f9a80970b00deadbeefb300000000000029c0c31a03e31d0e0272025200232a03551f6c656e6774682d7072656669786564b2026a00235206552b64656c696d697465642d776972652d7375626d7367f60226000109270129046a180036031600010705070d7a035a000a01070b616c7068610109626574611309f09f9a80a9ea0301",
+      "wire_byte_len": 150,
+      "present_fields": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        15
+      ],
+      "expected_blind": {
+        "field_1": -42,
+        "field_10": {
+          "field_1": 202,
+          "field_2": "delimited-wire-submsg"
+        },
+        "field_11": [
+          -10,
+          0,
+          10,
+          100000
+        ],
+        "field_12": [
+          1,
+          -2,
+          3
+        ],
+        "field_13": {
+          "alpha": 0,
+          "beta": -5,
+          "🚀": 42
+        },
+        "field_15": "",
+        "field_2": true,
+        "field_3": "edition-2023-🚀",
+        "field_4": "AN6tvu8=",
+        "field_5": -12.5,
+        "field_6": 99,
+        "field_7": 7,
+        "field_8": true,
+        "field_9": {
+          "field_1": 101,
+          "field_2": "length-prefixed"
+        }
+      }
+    },
+    {
+      "name": "editions_2023_oneof_last_wins_and_child",
+      "category": "P_ProtobufEditions",
+      "description": "Edition 2023 message with negative open enum (-7) and multiple choice oneof branches verifying last-wins choice_child",
+      "schema": "TestEditions2023",
+      "wire_hex": "c31b86036a02ea03176f7665727772697474656e720427237a09551d77696e6e696e672d6272616e6368",
+      "wire_byte_len": 42,
+      "present_fields": [
+        6,
+        14,
+        15,
+        17
+      ],
+      "expected_blind": {
+        "field_14": 77,
+        "field_15": "overwritten",
+        "field_17": {
+          "field_1": 303,
+          "field_2": "winning-branch"
+        },
+        "field_6": -7
+      }
+    },
+    {
+      "name": "editions_2024_empty",
+      "category": "P_ProtobufEditions",
+      "description": "Edition 2024 empty message with all explicit fields absent (0 bytes input; explicit fields must remain absent)",
+      "schema": "TestEditions2024",
+      "wire_hex": "",
+      "wire_byte_len": 0,
+      "present_fields": null
+    },
+    {
+      "name": "editions_2024_explicit_zeros",
+      "category": "P_ProtobufEditions",
+      "description": "Edition 2024 message preserving explicit 0, false, empty string/bytes, 0.0, enum 0, explicit-zero child, empty DELIMITED child, and zero oneof",
+      "schema": "TestEditions2024",
+      "wire_hex": "23014575019701b30000000000000000c301e3010a027202120023015501b2020200f6020a00010136030a0001017a030e000a0101860301",
+      "wire_byte_len": 56,
+      "present_fields": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14
+      ],
+      "expected_blind": {
+        "field_1": 0,
+        "field_10": {},
+        "field_11": [],
+        "field_12": [],
+        "field_13": {},
+        "field_14": 0,
+        "field_2": false,
+        "field_3": "",
+        "field_4": "",
+        "field_5": 0,
+        "field_6": 0,
+        "field_7": 0,
+        "field_8": false,
+        "field_9": {
+          "field_1": 0,
+          "field_2": ""
+        }
+      }
+    },
+    {
+      "name": "editions_2024_implicit_vs_explicit_presence",
+      "category": "P_ProtobufEditions",
+      "description": "Edition 2024 input carrying explicit zeros (#1,#2,#16) and implicit zeros (#7,#8) while other explicit fields remain absent",
+      "schema": "TestEditions2024",
+      "wire_hex": "230145e3010a020a04",
+      "wire_byte_len": 9,
+      "present_fields": [
+        1,
+        2,
+        7,
+        8,
+        16
+      ],
+      "expected_blind": {
+        "field_1": 0,
+        "field_16": false,
+        "field_2": false,
+        "field_7": 0,
+        "field_8": false
+      }
+    },
+    {
+      "name": "editions_2024_full_and_open_enum",
+      "category": "P_ProtobufEditions",
+      "description": "Edition 2024 full message with unknown open enum 99, LENGTH_PREFIXED \u0026 DELIMITED children, PACKED \u0026 EXPANDED arrays, sorted map, and empty string oneof",
+      "schema": "TestEditions2024",
+      "wire_hex": "23a747752365646974696f6e2d323032342df09f9a80970b00deadbeefb300000000000029c0c31a03e31d0e0272025200232a03551f6c656e6774682d7072656669786564b2026a00235206552b64656c696d697465642d776972652d7375626d7367f60226000109270129046a180036031600010705070d7a035a000a01070b616c7068610109626574611309f09f9a80a9ea0301",
+      "wire_byte_len": 150,
+      "present_fields": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        15
+      ],
+      "expected_blind": {
+        "field_1": -42,
+        "field_10": {
+          "field_1": 202,
+          "field_2": "delimited-wire-submsg"
+        },
+        "field_11": [
+          -10,
+          0,
+          10,
+          100000
+        ],
+        "field_12": [
+          1,
+          -2,
+          3
+        ],
+        "field_13": {
+          "alpha": 0,
+          "beta": -5,
+          "🚀": 42
+        },
+        "field_15": "",
+        "field_2": true,
+        "field_3": "edition-2024-🚀",
+        "field_4": "AN6tvu8=",
+        "field_5": -12.5,
+        "field_6": 99,
+        "field_7": 7,
+        "field_8": true,
+        "field_9": {
+          "field_1": 101,
+          "field_2": "length-prefixed"
+        }
+      }
+    },
+    {
+      "name": "editions_2024_oneof_last_wins_and_child",
+      "category": "P_ProtobufEditions",
+      "description": "Edition 2024 message with negative open enum (-7) and multiple choice oneof branches verifying last-wins choice_child",
+      "schema": "TestEditions2024",
+      "wire_hex": "c31b86036a02ea03176f7665727772697474656e720427237a09551d77696e6e696e672d6272616e6368",
+      "wire_byte_len": 42,
+      "present_fields": [
+        6,
+        14,
+        15,
+        17
+      ],
+      "expected_blind": {
+        "field_14": 77,
+        "field_15": "overwritten",
+        "field_17": {
+          "field_1": 303,
+          "field_2": "winning-branch"
+        },
+        "field_6": -7
+      }
+    },
+    {
+      "name": "editions_2026_empty",
+      "category": "P_ProtobufEditions",
+      "description": "Edition 2026 empty message with all explicit fields absent (0 bytes input; explicit fields must remain absent)",
+      "schema": "TestEditions2026",
+      "wire_hex": "",
+      "wire_byte_len": 0,
+      "present_fields": null
+    },
+    {
+      "name": "editions_2026_explicit_zeros",
+      "category": "P_ProtobufEditions",
+      "description": "Edition 2026 message preserving explicit 0, false, empty string/bytes, 0.0, enum 0, explicit-zero child, empty DELIMITED child, and zero oneof",
+      "schema": "TestEditions2026",
+      "wire_hex": "23014575019701b30000000000000000c301e3010a027202120023015501b2020200f6020a00010136030a0001017a030e000a0101860301",
+      "wire_byte_len": 56,
+      "present_fields": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14
+      ],
+      "expected_blind": {
+        "field_1": 0,
+        "field_10": {},
+        "field_11": [],
+        "field_12": [],
+        "field_13": {},
+        "field_14": 0,
+        "field_2": false,
+        "field_3": "",
+        "field_4": "",
+        "field_5": 0,
+        "field_6": 0,
+        "field_7": 0,
+        "field_8": false,
+        "field_9": {
+          "field_1": 0,
+          "field_2": ""
+        }
+      }
+    },
+    {
+      "name": "editions_2026_implicit_vs_explicit_presence",
+      "category": "P_ProtobufEditions",
+      "description": "Edition 2026 input carrying explicit zeros (#1,#2,#16) and implicit zeros (#7,#8) while other explicit fields remain absent",
+      "schema": "TestEditions2026",
+      "wire_hex": "230145e3010a020a04",
+      "wire_byte_len": 9,
+      "present_fields": [
+        1,
+        2,
+        7,
+        8,
+        16
+      ],
+      "expected_blind": {
+        "field_1": 0,
+        "field_16": false,
+        "field_2": false,
+        "field_7": 0,
+        "field_8": false
+      }
+    },
+    {
+      "name": "editions_2026_full_and_open_enum",
+      "category": "P_ProtobufEditions",
+      "description": "Edition 2026 full message with unknown open enum 99, LENGTH_PREFIXED \u0026 DELIMITED children, PACKED \u0026 EXPANDED arrays, sorted map, and empty string oneof",
+      "schema": "TestEditions2026",
+      "wire_hex": "23a747752365646974696f6e2d323032362df09f9a80970b00deadbeefb300000000000029c0c31a03e31d0e0272025200232a03551f6c656e6774682d7072656669786564b2026a00235206552b64656c696d697465642d776972652d7375626d7367f60226000109270129046a180036031600010705070d7a035a000a01070b616c7068610109626574611309f09f9a80a9ea0301",
+      "wire_byte_len": 150,
+      "present_fields": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        15
+      ],
+      "expected_blind": {
+        "field_1": -42,
+        "field_10": {
+          "field_1": 202,
+          "field_2": "delimited-wire-submsg"
+        },
+        "field_11": [
+          -10,
+          0,
+          10,
+          100000
+        ],
+        "field_12": [
+          1,
+          -2,
+          3
+        ],
+        "field_13": {
+          "alpha": 0,
+          "beta": -5,
+          "🚀": 42
+        },
+        "field_15": "",
+        "field_2": true,
+        "field_3": "edition-2026-🚀",
+        "field_4": "AN6tvu8=",
+        "field_5": -12.5,
+        "field_6": 99,
+        "field_7": 7,
+        "field_8": true,
+        "field_9": {
+          "field_1": 101,
+          "field_2": "length-prefixed"
+        }
+      }
+    },
+    {
+      "name": "editions_2026_oneof_last_wins_and_child",
+      "category": "P_ProtobufEditions",
+      "description": "Edition 2026 message with negative open enum (-7) and multiple choice oneof branches verifying last-wins choice_child",
+      "schema": "TestEditions2026",
+      "wire_hex": "c31b86036a02ea03176f7665727772697474656e720427237a09551d77696e6e696e672d6272616e6368",
+      "wire_byte_len": 42,
+      "present_fields": [
+        6,
+        14,
+        15,
+        17
+      ],
+      "expected_blind": {
+        "field_14": 77,
+        "field_15": "overwritten",
+        "field_17": {
+          "field_1": 303,
+          "field_2": "winning-branch"
+        },
+        "field_6": -7
+      }
     }
   ],
   "invalid_cases": [
@@ -4853,6 +5321,34 @@
       "description": "Unknown field #99 WireString containing invalid UTF-8 [0xFF, 0xFE] testing schema skip and OpaqueSplice UTF-8 validation",
       "blind_only": true,
       "wire_hex": "2155ea1805fffe"
+    },
+    {
+      "name": "editions_2023_invalid_utf8",
+      "category": "InvalidUTF8",
+      "description": "Edition 2023 explicit_string field #3 containing invalid UTF-8 [0xFF, 0xFE] under utf8_validation = VERIFY",
+      "schema": "TestEditions2023",
+      "wire_hex": "7505fffe"
+    },
+    {
+      "name": "editions_2024_invalid_utf8",
+      "category": "InvalidUTF8",
+      "description": "Edition 2024 explicit_string field #3 containing invalid UTF-8 [0xFF, 0xFE] under utf8_validation = VERIFY",
+      "schema": "TestEditions2024",
+      "wire_hex": "7505fffe"
+    },
+    {
+      "name": "editions_2026_invalid_utf8",
+      "category": "InvalidUTF8",
+      "description": "Edition 2026 explicit_string field #3 containing invalid UTF-8 [0xFF, 0xFE] under utf8_validation = VERIFY",
+      "schema": "TestEditions2026",
+      "wire_hex": "7505fffe"
+    },
+    {
+      "name": "editions_2026_truncated_delimited_child",
+      "category": "CorruptSubMsg",
+      "description": "Edition 2026 delimited_child field #10 WireSubMsg claiming 10 bytes with only 2 payload bytes",
+      "schema": "TestEditions2026",
+      "wire_hex": "b202151102"
     }
   ]
 }

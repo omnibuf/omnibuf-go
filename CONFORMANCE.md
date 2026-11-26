@@ -13,7 +13,7 @@ go install github.com/omnibuf/omnibuf-go/cmd/conformance-runner@latest
 Pass the target adapter command and any adapter arguments:
 
 ```bash
-# Run all 4 tiers (758 test cases across 58 valid vectors and 90 invalid wire cases)
+# Run all 4 tiers (1109 test cases across 81 valid vectors and 107 invalid wire cases)
 conformance-runner ./bin/conformance-go
 
 # Run against an interpreted adapter (such as Node.js or Python)
@@ -52,7 +52,7 @@ Clean `EOF` on the 4-byte length read signals that all test cases have completed
 | Field # | Name | OmniBuf Wire Type | Go / Proto Type | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `1` | `test_name` | `WireString` (`10`) | `string` | Unique test vector identifier |
-| `2` | `message_type` | `WireString` (`10`) | `string` | Fully qualified message name (`omnibuf.bench.PeerUpdate`, `omnibuf.conformance.TestAllTypes`, `omnibuf.conformance.TreeNode`, or `omnibuf.conformance.NestedCluster`; `TIER_BLIND` passes the vector schema label) |
+| `2` | `message_type` | `WireString` (`10`) | `string` | Fully qualified message name (`omnibuf.bench.PeerUpdate`, `omnibuf.conformance.TestAllTypes`, `omnibuf.conformance.TreeNode`, `omnibuf.conformance.NestedCluster`, `omnibuf.conformance.TestEditions2023`, `omnibuf.conformance.TestEditions2024`, or `omnibuf.conformance.TestEditions2026`; `TIER_BLIND` passes the vector schema label) |
 | `3` | `tier` | `WireUint` (`0`) | `uint32` | Target `TestTier` (`1..4`) |
 | `4` | `requested_output_format` | `WireUint` (`0`) | `uint32` | `1` (`WireFormatOmniBuf`) or `2` (`WireFormatJSON`) |
 | `5` | `omnibuf_payload` | `WireBytes` (`11`) | `[]byte` | Input wire packet to decode |

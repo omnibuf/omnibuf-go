@@ -1,0 +1,38 @@
+edition = "2023";
+
+package omnibuf.conformance;
+
+option go_package = "github.com/sudorandom/omnibuf/internal/pb;pb";
+
+enum Editions2023Status {
+  EDITIONS2023_STATUS_UNSPECIFIED = 0;
+  EDITIONS2023_STATUS_ACTIVE = 1;
+  EDITIONS2023_STATUS_PAUSED = 2;
+}
+
+message Editions2023Child {
+  int32 id = 1;
+  string note = 2;
+}
+
+message TestEditions2023 {
+  int32 explicit_int = 1;
+  bool explicit_bool = 2;
+  string explicit_string = 3;
+  bytes explicit_bytes = 4;
+  double explicit_double = 5;
+  Editions2023Status status = 6;
+  int32 implicit_count = 7 [features.field_presence = IMPLICIT];
+  bool implicit_flag = 8 [features.field_presence = IMPLICIT];
+  Editions2023Child child = 9;
+  Editions2023Child delimited_child = 10 [features.message_encoding = DELIMITED];
+  repeated int32 packed_vals = 11;
+  repeated int32 expanded_vals = 12 [features.repeated_field_encoding = EXPANDED];
+  map<string, int32> scores = 13;
+  oneof choice {
+    int32 choice_int = 14;
+    string choice_text = 15;
+    bool choice_flag = 16;
+    Editions2023Child choice_child = 17;
+  }
+}

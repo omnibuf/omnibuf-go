@@ -1,0 +1,42 @@
+edition = "2024";
+
+package omnibuf.conformance;
+
+option features.field_presence = IMPLICIT;
+option features.repeated_field_encoding = EXPANDED;
+option go_package = "github.com/sudorandom/omnibuf/internal/pb;pb";
+
+export enum Editions2024Status {
+  EDITIONS2024_STATUS_UNSPECIFIED = 0;
+  EDITIONS2024_STATUS_ACTIVE = 1;
+  EDITIONS2024_STATUS_PAUSED = 2;
+}
+
+export message Editions2024Child {
+  int32 id = 1 [features.field_presence = EXPLICIT];
+  string note = 2 [features.field_presence = EXPLICIT];
+}
+
+export message TestEditions2024 {
+  option features.json_format = LEGACY_BEST_EFFORT;
+
+  int32 explicit_int = 1 [features.field_presence = EXPLICIT];
+  bool explicit_bool = 2 [features.field_presence = EXPLICIT];
+  string explicit_string = 3 [features.field_presence = EXPLICIT];
+  bytes explicit_bytes = 4 [features.field_presence = EXPLICIT];
+  double explicit_double = 5 [features.field_presence = EXPLICIT];
+  Editions2024Status status = 6 [features.field_presence = EXPLICIT];
+  int32 implicit_count = 7;
+  bool implicit_flag = 8;
+  Editions2024Child child = 9;
+  Editions2024Child delimited_child = 10 [features.message_encoding = DELIMITED];
+  repeated int32 packed_vals = 11 [features.repeated_field_encoding = PACKED];
+  repeated int32 expanded_vals = 12;
+  map<string, int32> scores = 13;
+  oneof choice {
+    int32 choice_int = 14;
+    string choice_text = 15;
+    bool choice_flag = 16;
+    Editions2024Child choice_child = 17;
+  }
+}

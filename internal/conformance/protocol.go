@@ -643,6 +643,33 @@ func RunSuiteWithOptions(opts RunOptions) (*Summary, error) {
 						}
 					}
 				}
+			} else if isEditionsSchema(vec.Schema) {
+				reqSD := &ConformanceRequest{
+					TestName:              vec.Name + "/" + tier.String() + "/SelfDescribing",
+					MessageType:           canonicalMessageType(vec.Schema),
+					Tier:                  uint32(tier),
+					RequestedOutputFormat: uint32(WireFormatOmniBuf),
+					OmniBufPayload:        rawWire,
+					SelfDescribing:        true,
+				}
+				respSD, err := sendReq(reqSD)
+				if err != nil {
+					_ = stdin.Close()
+					_ = cmd.Wait()
+					return nil, err
+				}
+				if respSD.ParseError != "" || respSD.SerializeError != "" || respSD.RuntimeError != "" {
+					recordResult(tier, vec.Name+"/SelfDescribing", fmt.Sprintf("error: parse=%q serialize=%q runtime=%q", respSD.ParseError, respSD.SerializeError, respSD.RuntimeError), respSD.Skipped)
+				} else if meta, ok := omnibuf.ReadField0SchemaMeta(respSD.OmniBufPayload); !ok ||
+					meta.Fields[1] != "explicit_int" ||
+					meta.Fields[10] != "delimited_child" ||
+					meta.Fields[14] != "choice_int" {
+					recordResult(tier, vec.Name+"/SelfDescribing", "missing or invalid Field #0 SchemaMeta in Editions self_describing output", respSD.Skipped)
+				} else if err := verifyRoundTripEquivalence(vec.Schema, rawWire, respSD.OmniBufPayload); err != nil {
+					recordResult(tier, vec.Name+"/SelfDescribing", err.Error(), respSD.Skipped)
+				} else {
+					recordResult(tier, vec.Name+"/SelfDescribing", "", respSD.Skipped)
+				}
 			}
 		}
 	}
@@ -748,10 +775,16 @@ func RunSuiteWithOptions(opts RunOptions) (*Summary, error) {
 	return sum, nil
 }
 
+func isEditionsSchema(schema string) bool {
+	return schema == "TestEditions2023" || schema == "TestEditions2024" || schema == "TestEditions2026"
+}
+
 func tiersForSchema(schema string) []TestTier {
 	switch schema {
 	case "PeerUpdate", "TestAllTypes":
 		return []TestTier{TestTierPlugin, TestTierProtobufTypes, TestTierAnnotatedStruct}
+	case "TestEditions2023", "TestEditions2024", "TestEditions2026":
+		return []TestTier{TestTierPlugin, TestTierProtobufTypes}
 	case "EmptyMessage", "SparseField14", "SelfDescribingSparse":
 		return []TestTier{TestTierAnnotatedStruct}
 	case "TreeNode", "NestedCluster":
@@ -769,6 +802,12 @@ func canonicalMessageType(schema string) string {
 		return "omnibuf.conformance.TreeNode"
 	case "NestedCluster":
 		return "omnibuf.conformance.NestedCluster"
+	case "TestEditions2023":
+		return "omnibuf.conformance.TestEditions2023"
+	case "TestEditions2024":
+		return "omnibuf.conformance.TestEditions2024"
+	case "TestEditions2026":
+		return "omnibuf.conformance.TestEditions2026"
 	default:
 		return "omnibuf.conformance.TestAllTypes"
 	}
@@ -1000,6 +1039,8 @@ func verifyRoundTripEquivalence(schema string, inputWire, outputWire []byte) err
 			return fmt.Errorf("NestedCluster round-trip mismatch:\ngot:  %+v\nwant: %+v", got, want)
 		}
 		return nil
+	case "TestEditions2023", "TestEditions2024", "TestEditions2026":
+		return verifyEditionsRoundTrip(schema, inputWire, outputWire)
 	default:
 		var want, got TestAllTypes
 		if err := omnibuf.Unmarshal(inputWire, &want); err != nil {

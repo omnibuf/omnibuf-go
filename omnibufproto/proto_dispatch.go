@@ -24,6 +24,9 @@ func needsProtoReflection(pm proto.Message) bool {
 			return false
 		}
 		seen[md.FullName()] = true
+		if md.Syntax() == protoreflect.Editions {
+			return true
+		}
 		if md.ExtensionRanges().Len() > 0 {
 			return true
 		}

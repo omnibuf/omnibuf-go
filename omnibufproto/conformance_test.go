@@ -813,9 +813,15 @@ func TestProtobufStyleConformanceCorpus(t *testing.T) {
 	// ------------------------------------------------------------------------
 	vectors = append(vectors, buildAuditHardeningVectors(t)...)
 
+	// ------------------------------------------------------------------------
+	// Category P: Protobuf Editions (2023, 2024, and 2026)
+	// ------------------------------------------------------------------------
+	vectors = append(vectors, buildEditionsVectors(t)...)
+
 	allInvalid := append(buildInvalidWireCases(), buildEdgeInvalidWireCases()...)
 	allInvalid = append(allInvalid, buildReviewInvalidWireCases()...)
 	allInvalid = append(allInvalid, buildAuditInvalidWireCases()...)
+	allInvalid = append(allInvalid, buildEditionsInvalidWireCases()...)
 
 	// Verify or update golden corpus file at testdata/conformance_corpus.json
 	corpus := ConformanceCorpusFile{
@@ -3222,6 +3228,7 @@ func TestMalformedWireRejectionConformance(t *testing.T) {
 	cases := append(buildInvalidWireCases(), buildEdgeInvalidWireCases()...)
 	cases = append(cases, buildReviewInvalidWireCases()...)
 	cases = append(cases, buildAuditInvalidWireCases()...)
+	cases = append(cases, buildEditionsInvalidWireCases()...)
 	for _, tc := range cases {
 		t.Run(tc.Name, func(t *testing.T) {
 			raw, err := hex.DecodeString(tc.WireHex)
@@ -3236,20 +3243,47 @@ func TestMalformedWireRejectionConformance(t *testing.T) {
 
 			// 2. For all !BlindOnly cases, schema-aware decoders and Opaque splicing MUST also reject
 			if !tc.BlindOnly {
-				var allTypes TestAllTypes
-				if err := Unmarshal(raw, &allTypes); err == nil {
-					t.Errorf("[%s] expected Unmarshal(TestAllTypes) to return error on %x", tc.Name, raw)
-				}
-				var allTypesZC TestAllTypes
-				if err := UnmarshalZeroCopy(raw, &allTypesZC); err == nil {
-					t.Errorf("[%s] expected UnmarshalZeroCopy(TestAllTypes) to return error on %x", tc.Name, raw)
-				}
-				var pbAll pb.TestAllTypes
-				if err := pbAll.UnmarshalOmniBuf(raw, false); err == nil {
-					t.Errorf("[%s] expected pb.TestAllTypes.UnmarshalOmniBuf to return error on %x", tc.Name, raw)
+				switch tc.Schema {
+				case "TestEditions2023":
+					var m pb.TestEditions2023
+					if err := m.UnmarshalOmniBuf(raw, false); err == nil {
+						t.Errorf("[%s] expected pb.TestEditions2023.UnmarshalOmniBuf to return error on %x", tc.Name, raw)
+					}
+					if err := Unmarshal(raw, &m); err == nil {
+						t.Errorf("[%s] expected Unmarshal(TestEditions2023) to return error on %x", tc.Name, raw)
+					}
+				case "TestEditions2024":
+					var m pb.TestEditions2024
+					if err := m.UnmarshalOmniBuf(raw, false); err == nil {
+						t.Errorf("[%s] expected pb.TestEditions2024.UnmarshalOmniBuf to return error on %x", tc.Name, raw)
+					}
+					if err := Unmarshal(raw, &m); err == nil {
+						t.Errorf("[%s] expected Unmarshal(TestEditions2024) to return error on %x", tc.Name, raw)
+					}
+				case "TestEditions2026":
+					var m pb.TestEditions2026
+					if err := m.UnmarshalOmniBuf(raw, false); err == nil {
+						t.Errorf("[%s] expected pb.TestEditions2026.UnmarshalOmniBuf to return error on %x", tc.Name, raw)
+					}
+					if err := Unmarshal(raw, &m); err == nil {
+						t.Errorf("[%s] expected Unmarshal(TestEditions2026) to return error on %x", tc.Name, raw)
+					}
+				default:
+					var allTypes TestAllTypes
+					if err := Unmarshal(raw, &allTypes); err == nil {
+						t.Errorf("[%s] expected Unmarshal(TestAllTypes) to return error on %x", tc.Name, raw)
+					}
+					var allTypesZC TestAllTypes
+					if err := UnmarshalZeroCopy(raw, &allTypesZC); err == nil {
+						t.Errorf("[%s] expected UnmarshalZeroCopy(TestAllTypes) to return error on %x", tc.Name, raw)
+					}
+					var pbAll pb.TestAllTypes
+					if err := pbAll.UnmarshalOmniBuf(raw, false); err == nil {
+						t.Errorf("[%s] expected pb.TestAllTypes.UnmarshalOmniBuf to return error on %x", tc.Name, raw)
+					}
 				}
 			}
-			if !tc.BlindOnly || tc.Category == "InvalidUTF8" {
+			if (tc.Schema == "" || tc.Schema == "TestAllTypes") && (!tc.BlindOnly || tc.Category == "InvalidUTF8") {
 				var opAll pb.OpaqueTestAllTypes
 				_ = opAll.Unmarshal(raw)
 				opAll.SetF1Uint32(1)
