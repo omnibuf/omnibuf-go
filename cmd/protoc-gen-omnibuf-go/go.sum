@@ -12,6 +12,8 @@ github.com/omnibuf/omnibuf-go v0.2.6 h1:Q5/tBaS+0WqTZNsqaMRbJZyel/2un9VSTBFNuAbk
 github.com/omnibuf/omnibuf-go v0.2.6/go.mod h1:wrcpM54pcS4exzDj7xo7aa/ivD2GrFzmXV63FwMETNI=
 github.com/omnibuf/omnibuf-go v0.2.7 h1:+aiXt0AHbaHUviwdjLCc43a4sX2O7wYOQAyEl3M0Nyw=
 github.com/omnibuf/omnibuf-go v0.2.7/go.mod h1:wrcpM54pcS4exzDj7xo7aa/ivD2GrFzmXV63FwMETNI=
+github.com/omnibuf/omnibuf-go v0.2.10 h1:JVfNkZYoBrkxUHbWYwhDc1vJ8nS6P7tzTdpb0DG2rF8=
+github.com/omnibuf/omnibuf-go v0.2.10/go.mod h1:wrcpM54pcS4exzDj7xo7aa/ivD2GrFzmXV63FwMETNI=
 google.golang.org/protobuf v1.36.12 h1:pJOKDDOyeXErUroCihFAd5LQuwXBSpVnKGrj5o/fwxc=
 google.golang.org/protobuf v1.36.12/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
 google.golang.org/protobuf v1.37.0-rc.1 h1:RQUh2I7V8DjoPJlj2K1BXNUKIOpK2ZdPRfG0HK766Yg=
