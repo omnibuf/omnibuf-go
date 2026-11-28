@@ -805,6 +805,9 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 	if flatScalar {
 		emitFlatScalarUnmarshal(g, typeName, orderedFields)
 		g.P("//go:noinline")
+	} else if isCanonicalFastMessage(orderedFields) {
+		emitCanonicalFastUnmarshal(g, msg, orderedFields)
+		g.P("//go:noinline")
 	} else {
 		g.P("// UnmarshalOmniBuf decodes data into ", typeName, " using generated switch dispatch.")
 		g.P("func (x *", typeName, ") UnmarshalOmniBuf(data []byte, zeroCopy bool) error {")
@@ -1148,7 +1151,12 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 				g.P("				if x.", f.GoName, "[start+i] == nil {")
 				g.P("					x.", f.GoName, "[start+i] = new(", elemType, ")")
 				g.P("				}")
-				g.P("				if err := x.", f.GoName, "[start+i].decodeOmniBuf(body[p:p+int(el)], zeroCopy, depth+2, false); err != nil {")
+				if isSamePkgFlatScalar(msg, f.Message) {
+					g.P("				if depth+2 <= omnibuf.MaxNestingDepth && x.", f.GoName, "[start+i].unmarshalFlatFast(body[p:p+int(el)], zeroCopy) {")
+					g.P("				} else if err := x.", f.GoName, "[start+i].decodeOmniBuf(body[p:p+int(el)], zeroCopy, depth+2, false); err != nil {")
+				} else {
+					g.P("				if err := x.", f.GoName, "[start+i].decodeOmniBuf(body[p:p+int(el)], zeroCopy, depth+2, false); err != nil {")
+				}
 				g.P("					if reused && firstOcc {")
 				g.P("						clear(oldSlice[:max(oldLen, total)])")
 				g.P("						x.", f.GoName, " = oldSlice[:0]")
@@ -1287,7 +1295,12 @@ func generateOpenStructCodec(g *protogen.GeneratedFile, msg *protogen.Message) {
 			g.P("			}")
 			g.P("			subMerge := merge || (", mv, "&(1<<", bit, ")) != 0")
 			g.P("			", mv, " |= 1 << ", bit)
-			g.P("			if err := x.", f.GoName, ".decodeOmniBuf(data[pos:pos+int(subLen)], zeroCopy, depth+1, subMerge); err != nil {")
+			if isSamePkgFlatScalar(msg, f.Message) {
+				g.P("			if !subMerge && depth+1 <= omnibuf.MaxNestingDepth && x.", f.GoName, ".unmarshalFlatFast(data[pos:pos+int(subLen)], zeroCopy) {")
+				g.P("			} else if err := x.", f.GoName, ".decodeOmniBuf(data[pos:pos+int(subLen)], zeroCopy, depth+1, subMerge); err != nil {")
+			} else {
+				g.P("			if err := x.", f.GoName, ".decodeOmniBuf(data[pos:pos+int(subLen)], zeroCopy, depth+1, subMerge); err != nil {")
+			}
 			g.P("				return err")
 			g.P("			}")
 			g.P("			pos += int(subLen)")

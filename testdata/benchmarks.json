@@ -13,73 +13,73 @@
       "results": [
         {
           "name": "OmniBuf (Generated)",
-          "nsPerOp": 95,
-          "opsPerSec": 10507955,
+          "nsPerOp": 93,
+          "opsPerSec": 10730765,
           "wireBytes": 366,
           "highlight": true,
           "baseline": true
         },
         {
           "name": "Protobuf (vtprotobuf)",
-          "nsPerOp": 129,
-          "opsPerSec": 7778469,
+          "nsPerOp": 128,
+          "opsPerSec": 7794232,
           "wireBytes": 341
         },
         {
           "name": "OmniBuf (Go Struct Tags)",
-          "nsPerOp": 383,
-          "opsPerSec": 2610148,
+          "nsPerOp": 373,
+          "opsPerSec": 2680247,
           "wireBytes": 366,
           "highlight": true
         },
         {
           "name": "Avro (Raw Binary)",
-          "nsPerOp": 463,
-          "opsPerSec": 2159174,
+          "nsPerOp": 409,
+          "opsPerSec": 2446184,
           "bytesPerOp": 320,
           "allocsPerOp": 1,
           "wireBytes": 313
         },
         {
           "name": "FlatBuffers",
-          "nsPerOp": 571,
-          "opsPerSec": 1750700,
+          "nsPerOp": 554,
+          "opsPerSec": 1806032,
           "wireBytes": 600
         },
         {
           "name": "Protobuf",
-          "nsPerOp": 560,
-          "opsPerSec": 1785714,
+          "nsPerOp": 561,
+          "opsPerSec": 1783485,
           "wireBytes": 341
         },
         {
           "name": "Cap'n Proto",
-          "nsPerOp": 1072,
-          "opsPerSec": 933010,
+          "nsPerOp": 993,
+          "opsPerSec": 1006745,
           "bytesPerOp": 720,
           "allocsPerOp": 3,
           "wireBytes": 560
         },
         {
           "name": "JSON (encoding/json)",
-          "nsPerOp": 2063,
-          "opsPerSec": 484684,
+          "nsPerOp": 1656,
+          "opsPerSec": 603865,
           "bytesPerOp": 896,
           "allocsPerOp": 1,
           "wireBytes": 803
         },
         {
           "name": "MessagePack",
-          "nsPerOp": 1617,
-          "opsPerSec": 618506,
+          "nsPerOp": 1545,
+          "opsPerSec": 647249,
           "bytesPerOp": 2056,
           "allocsPerOp": 7,
           "wireBytes": 656
         },
         {
           "name": "JSON (encoding/json/v2)",
-          "nsPerOp": 2098,
-          "opsPerSec": 476735,
+          "nsPerOp": 1704,
+          "opsPerSec": 586854,
           "bytesPerOp": 896,
           "allocsPerOp": 1,
           "wireBytes": 803
@@ -92,79 +92,79 @@
       "unit": "ns",
       "results": [
         {
-          "name": "Protobuf (vtprotobuf)",
-          "nsPerOp": 160,
-          "opsPerSec": 6247657
-        },
-        {
           "name": "OmniBuf (Generated)",
-          "nsPerOp": 187,
-          "opsPerSec": 5355613,
+          "nsPerOp": 99,
+          "opsPerSec": 10053282,
           "highlight": true,
           "baseline": true
         },
         {
+          "name": "Protobuf (vtprotobuf)",
+          "nsPerOp": 159,
+          "opsPerSec": 6301197
+        },
+        {
           "name": "FlatBuffers",
-          "nsPerOp": 195,
-          "opsPerSec": 5129784
+          "nsPerOp": 197,
+          "opsPerSec": 5089059
+        },
+        {
+          "name": "OmniBuf (Safe Alloc)",
+          "nsPerOp": 363,
+          "opsPerSec": 2756340,
+          "bytesPerOp": 792,
+          "allocsPerOp": 12,
+          "highlight": true
         },
         {
           "name": "OmniBuf (Go Struct Tags)",
-          "nsPerOp": 363,
-          "opsPerSec": 2751940,
+          "nsPerOp": 372,
+          "opsPerSec": 2691066,
           "highlight": true
         },
         {
           "name": "Avro (Raw Binary)",
-          "nsPerOp": 501,
-          "opsPerSec": 1997363,
+          "nsPerOp": 408,
+          "opsPerSec": 2450380,
           "bytesPerOp": 211
         },
         {
-          "name": "OmniBuf (Safe Alloc)",
-          "nsPerOp": 587,
-          "opsPerSec": 1702186,
-          "bytesPerOp": 776,
-          "allocsPerOp": 17,
-          "highlight": true
-        },
-        {
           "name": "Protobuf (vtprotobuf Safe)",
-          "nsPerOp": 736,
-          "opsPerSec": 1358437,
+          "nsPerOp": 564,
+          "opsPerSec": 1773364,
           "bytesPerOp": 880,
           "allocsPerOp": 24
         },
         {
           "name": "Cap'n Proto",
-          "nsPerOp": 816,
-          "opsPerSec": 1225520,
+          "nsPerOp": 752,
+          "opsPerSec": 1330672,
           "bytesPerOp": 240,
           "allocsPerOp": 4
         },
         {
           "name": "Protobuf",
-          "nsPerOp": 1041,
-          "opsPerSec": 960615,
+          "nsPerOp": 892,
+          "opsPerSec": 1120574,
           "bytesPerOp": 880,
           "allocsPerOp": 24
         },
         {
           "name": "MessagePack",
-          "nsPerOp": 2397,
-          "opsPerSec": 417119,
+          "nsPerOp": 2186,
+          "opsPerSec": 457457,
           "bytesPerOp": 352,
           "allocsPerOp": 15
         },
         {
           "name": "JSON (encoding/json/v2)",
-          "nsPerOp": 2715,
-          "opsPerSec": 368351
+          "nsPerOp": 2712,
+          "opsPerSec": 368732
         },
         {
           "name": "JSON (encoding/json)",
-          "nsPerOp": 3448,
-          "opsPerSec": 290023
+          "nsPerOp": 3453,
+          "opsPerSec": 289603
         }
       ]
     },
@@ -176,43 +176,43 @@
         {
           "name": "Cap'n Proto",
           "nsPerOp": 5,
-          "opsPerSec": 212170076
+          "opsPerSec": 211999152
         },
         {
           "name": "FlatBuffers",
           "nsPerOp": 26,
-          "opsPerSec": 37861578
+          "opsPerSec": 37921881
         },
         {
           "name": "OmniBuf",
           "nsPerOp": 84,
-          "opsPerSec": 11889475,
+          "opsPerSec": 11896265,
           "highlight": true,
           "baseline": true
         },
         {
           "name": "Protobuf (vtprotobuf)",
-          "nsPerOp": 203,
-          "opsPerSec": 4929508
+          "nsPerOp": 202,
+          "opsPerSec": 4940711
         },
         {
           "name": "Avro (Raw Binary)",
-          "nsPerOp": 449,
-          "opsPerSec": 2225783,
+          "nsPerOp": 476,
+          "opsPerSec": 2100840,
           "bytesPerOp": 1504,
           "allocsPerOp": 4
         },
         {
           "name": "MessagePack",
-          "nsPerOp": 702,
-          "opsPerSec": 1425395,
+          "nsPerOp": 587,
+          "opsPerSec": 1702417,
           "bytesPerOp": 160,
           "allocsPerOp": 14
         },
         {
           "name": "Protobuf",
-          "nsPerOp": 1096,
-          "opsPerSec": 912409,
+          "nsPerOp": 952,
+          "opsPerSec": 1050972,
           "bytesPerOp": 1072,
           "allocsPerOp": 25
         }
@@ -225,61 +225,61 @@
       "results": [
         {
           "name": "OmniBuf (Opaque Splice)",
-          "nsPerOp": 214,
-          "opsPerSec": 4672024,
+          "nsPerOp": 211,
+          "opsPerSec": 4737091,
           "highlight": true,
           "baseline": true
         },
         {
           "name": "Protobuf (vtprotobuf)",
-          "nsPerOp": 334,
-          "opsPerSec": 2996524
+          "nsPerOp": 329,
+          "opsPerSec": 3037667
         },
         {
           "name": "FlatBuffers",
-          "nsPerOp": 781,
-          "opsPerSec": 1280016
+          "nsPerOp": 763,
+          "opsPerSec": 1310273
         },
         {
           "name": "Avro (Raw Binary)",
-          "nsPerOp": 1026,
-          "opsPerSec": 974906,
-          "bytesPerOp": 531,
+          "nsPerOp": 846,
+          "opsPerSec": 1182173,
+          "bytesPerOp": 532,
           "allocsPerOp": 1
         },
         {
           "name": "Protobuf",
-          "nsPerOp": 1819,
-          "opsPerSec": 549753,
+          "nsPerOp": 1539,
+          "opsPerSec": 649773,
           "bytesPerOp": 1072,
           "allocsPerOp": 25
         },
         {
           "name": "Cap'n Proto",
-          "nsPerOp": 2121,
-          "opsPerSec": 471565,
+          "nsPerOp": 1857,
+          "opsPerSec": 538503,
           "bytesPerOp": 960,
           "allocsPerOp": 7
         },
         {
           "name": "MessagePack",
-          "nsPerOp": 4729,
-          "opsPerSec": 211470,
-          "bytesPerOp": 2408,
+          "nsPerOp": 3894,
+          "opsPerSec": 256805,
+          "bytesPerOp": 2410,
           "allocsPerOp": 22
         },
         {
           "name": "JSON (encoding/json/v2)",
-          "nsPerOp": 5056,
-          "opsPerSec": 197769,
-          "bytesPerOp": 896,
+          "nsPerOp": 4503,
+          "opsPerSec": 222074,
+          "bytesPerOp": 898,
           "allocsPerOp": 1
         },
         {
           "name": "JSON (encoding/json)",
-          "nsPerOp": 5789,
-          "opsPerSec": 172747,
-          "bytesPerOp": 896,
+          "nsPerOp": 5206,
+          "opsPerSec": 192086,
+          "bytesPerOp": 898,
           "allocsPerOp": 1
         }
       ]
@@ -291,74 +291,74 @@
       "results": [
         {
           "name": "OmniBuf (Generated)",
-          "nsPerOp": 612,
-          "opsPerSec": 1635109,
+          "nsPerOp": 614,
+          "opsPerSec": 1629195,
           "wireBytes": 39256,
           "highlight": true,
           "baseline": true
         },
         {
           "name": "Protobuf (vtprotobuf)",
-          "nsPerOp": 652,
-          "opsPerSec": 1534778,
+          "nsPerOp": 646,
+          "opsPerSec": 1547988,
           "wireBytes": 39227
         },
         {
           "name": "OmniBuf (Go Struct Tags)",
-          "nsPerOp": 1785,
-          "opsPerSec": 560099,
+          "nsPerOp": 1762,
+          "opsPerSec": 567537,
           "wireBytes": 39256,
           "highlight": true
         },
         {
           "name": "Avro (Raw Binary)",
-          "nsPerOp": 5500,
-          "opsPerSec": 181812,
-          "bytesPerOp": 40961,
+          "nsPerOp": 6730,
+          "opsPerSec": 148588,
+          "bytesPerOp": 40987,
           "allocsPerOp": 1,
           "wireBytes": 39196
         },
         {
           "name": "FlatBuffers",
-          "nsPerOp": 1099,
-          "opsPerSec": 910249,
+          "nsPerOp": 1129,
+          "opsPerSec": 885740,
           "wireBytes": 39488
         },
         {
           "name": "Protobuf",
-          "nsPerOp": 1704,
-          "opsPerSec": 586786,
+          "nsPerOp": 1690,
+          "opsPerSec": 591716,
           "wireBytes": 39227
         },
         {
           "name": "Cap'n Proto",
-          "nsPerOp": 7518,
-          "opsPerSec": 133007,
+          "nsPerOp": 7938,
+          "opsPerSec": 125976,
           "bytesPerOp": 41104,
           "allocsPerOp": 3,
           "wireBytes": 39448
         },
         {
           "name": "JSON (encoding/json)",
-          "nsPerOp": 32807,
-          "opsPerSec": 30482,
-          "bytesPerOp": 40962,
+          "nsPerOp": 32743,
+          "opsPerSec": 30541,
+          "bytesPerOp": 40976,
           "allocsPerOp": 1,
           "wireBytes": 39681
         },
         {
           "name": "MessagePack",
-          "nsPerOp": 9451,
-          "opsPerSec": 105807,
-          "bytesPerOp": 71434,
+          "nsPerOp": 12123,
+          "opsPerSec": 82488,
+          "bytesPerOp": 71463,
           "allocsPerOp": 7,
           "wireBytes": 39538
         },
         {
           "name": "JSON (encoding/json/v2)",
-          "nsPerOp": 32641,
-          "opsPerSec": 30637,
-          "bytesPerOp": 40962,
+          "nsPerOp": 30417,
+          "opsPerSec": 32876,
+          "bytesPerOp": 40976,
           "allocsPerOp": 1,
           "wireBytes": 39681
         }
@@ -371,8 +371,8 @@
       "results": [
         {
           "name": "OmniBuf (Opaque Splice)",
-          "nsPerOp": 908,
-          "opsPerSec": 1101273,
+          "nsPerOp": 866,
+          "opsPerSec": 1154335,
           "bytesPerOp": 112,
           "allocsPerOp": 1,
           "highlight": true,
@@ -380,54 +380,54 @@
         },
         {
           "name": "Protobuf (vtprotobuf)",
-          "nsPerOp": 1574,
-          "opsPerSec": 635486
+          "nsPerOp": 1650,
+          "opsPerSec": 606061
         },
         {
           "name": "FlatBuffers",
-          "nsPerOp": 3504,
-          "opsPerSec": 285372
+          "nsPerOp": 3048,
+          "opsPerSec": 328084
         },
         {
           "name": "Avro (Raw Binary)",
-          "nsPerOp": 6382,
-          "opsPerSec": 156686,
-          "bytesPerOp": 22786,
+          "nsPerOp": 5864,
+          "opsPerSec": 170532,
+          "bytesPerOp": 22931,
           "allocsPerOp": 2
         },
         {
           "name": "Protobuf",
-          "nsPerOp": 7630,
-          "opsPerSec": 131058,
+          "nsPerOp": 6687,
+          "opsPerSec": 149544,
           "bytesPerOp": 4576,
           "allocsPerOp": 83
         },
         {
           "name": "Cap'n Proto",
-          "nsPerOp": 11414,
-          "opsPerSec": 87613,
-          "bytesPerOp": 24961,
+          "nsPerOp": 8853,
+          "opsPerSec": 112956,
+          "bytesPerOp": 24970,
           "allocsPerOp": 7
         },
         {
           "name": "MessagePack",
-          "nsPerOp": 27657,
-          "opsPerSec": 36157,
-          "bytesPerOp": 72800,
+          "nsPerOp": 23899,
+          "opsPerSec": 41843,
+          "bytesPerOp": 72865,
           "allocsPerOp": 50
         },
         {
           "name": "JSON (encoding/json/v2)",
-          "nsPerOp": 35274,
-          "opsPerSec": 28349,
-          "bytesPerOp": 24578,
+          "nsPerOp": 32640,
+          "opsPerSec": 30637,
+          "bytesPerOp": 24790,
           "allocsPerOp": 1
         },
         {
           "name": "JSON (encoding/json)",
-          "nsPerOp": 42664,
-          "opsPerSec": 23439,
-          "bytesPerOp": 24578,
+          "nsPerOp": 35939,
+          "opsPerSec": 27825,
+          "bytesPerOp": 24832,
           "allocsPerOp": 1
         }
       ]

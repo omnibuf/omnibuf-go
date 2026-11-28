@@ -1,13 +1,30 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/omnibuf/omnibuf-go/wire"
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
+
+func sortedMessageFields(msg *protogen.Message) []*protogen.Field {
+	ordered := slices.Clone(msg.Fields)
+	slices.SortFunc(ordered, func(a, b *protogen.Field) int {
+		return cmp.Compare(a.Desc.Number(), b.Desc.Number())
+	})
+	return ordered
+}
+
+func isSamePkgFlatScalar(parent, child *protogen.Message) bool {
+	if parent == nil || child == nil || parent.GoIdent.GoImportPath != child.GoIdent.GoImportPath {
+		return false
+	}
+	return isFlatScalarMessage(sortedMessageFields(child))
+}
 
 func isFlatScalarMessage(orderedFields []*protogen.Field) bool {
 	if len(orderedFields) == 0 || len(orderedFields) > 32 {
@@ -292,16 +309,24 @@ func emitFlatScalarMarshal(g *protogen.GeneratedFile, typeName string, orderedFi
 	g.P()
 }
 
-// emitFlatScalarUnmarshal emits UnmarshalOmniBuf with a general canonical-order fast path
-// that decodes all fields sequentially without loop or switch dispatch, supporting any
-// varint width and any string/bytes length. Non-canonical, partial, non-ASCII, or corrupt
-// packets fall back to decodeOmniBuf.
+// emitFlatScalarUnmarshal emits unmarshalFlatFast (a canonical-order fast path callable
+// directly by parent messages and UnmarshalOmniBuf) plus the UnmarshalOmniBuf wrapper.
+// Non-canonical, partial, non-ASCII, or corrupt packets return false without mutating x
+// and fall back to decodeOmniBuf.
 func emitFlatScalarUnmarshal(g *protogen.GeneratedFile, typeName string, orderedFields []*protogen.Field) {
-	g.P("// UnmarshalOmniBuf decodes data into ", typeName, " using generated switch dispatch.")
+	g.P("// UnmarshalOmniBuf decodes data into ", typeName, " using generated fast path with switch fallback.")
 	g.P("func (x *", typeName, ") UnmarshalOmniBuf(data []byte, zeroCopy bool) error {")
 	g.P("	if x == nil {")
 	g.P(`		return fmt.Errorf("omnibuf: Unmarshal requires non-nil pointer")`)
 	g.P("	}")
+	g.P("	if x.unmarshalFlatFast(data, zeroCopy) {")
+	g.P("		return nil")
+	g.P("	}")
+	g.P("	return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+	g.P("}")
+	g.P()
+
+	g.P("func (x *", typeName, ") unmarshalFlatFast(data []byte, zeroCopy bool) bool {")
 
 	// Precompute the minimum remaining wire bytes after each field so the compiler
 	// proves slice bounds across consecutive fields and eliminates redundant length checks.
@@ -315,7 +340,7 @@ func emitFlatScalarUnmarshal(g *protogen.GeneratedFile, typeName string, ordered
 
 	g.P("	b := data")
 	g.P("	if len(b) < ", totalMin, " {")
-	g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+	g.P("		return false")
 	g.P("	}")
 
 	// Find any trailing suffix of fixed-size fields so we can validate their combined
@@ -343,7 +368,7 @@ func emitFlatScalarUnmarshal(g *protogen.GeneratedFile, typeName string, ordered
 		inTail := i >= tailStart
 		if i == tailStart && tailBytes > 0 {
 			g.P("	if len(b) != ", tailBytes, " {")
-			g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+			g.P("		return false")
 			g.P("	}")
 		}
 
@@ -358,12 +383,12 @@ func emitFlatScalarUnmarshal(g *protogen.GeneratedFile, typeName string, ordered
 				tb := flatTagBytes(fnum, wire.WireBoolFalse)
 				if len(tb) == 1 {
 					g.P(fmt.Sprintf("	if (b[%d]&^2) != 0x%02x {", off, tb[0]))
-					g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+					g.P("		return false")
 					g.P("	}")
 					g.P(fmt.Sprintf("	f_%d := (b[%d] & 2) != 0", i, off))
 				} else {
 					g.P(fmt.Sprintf("	if (b[%d]&^4) != 0x%02x || b[%d] != 0x%02x {", off, tb[0], off+1, tb[1]))
-					g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+					g.P("		return false")
 					g.P("	}")
 					g.P(fmt.Sprintf("	f_%d := (b[%d] & 4) != 0", i, off))
 				}
@@ -377,7 +402,7 @@ func emitFlatScalarUnmarshal(g *protogen.GeneratedFile, typeName string, ordered
 				tagConds = append(tagConds, fmt.Sprintf("b[%d] != 0x%02x", off+ti, bByte))
 			}
 			g.P("	if ", strings.Join(tagConds, " || "), " {")
-			g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+			g.P("		return false")
 			g.P("	}")
 			payOff := off + len(tb)
 			switch f.Desc.Kind() {
@@ -403,13 +428,13 @@ func emitFlatScalarUnmarshal(g *protogen.GeneratedFile, typeName string, ordered
 			tb := flatTagBytes(fnum, wire.WireBoolFalse)
 			if len(tb) == 1 {
 				g.P(fmt.Sprintf("	if (b[0]&^2) != 0x%02x {", tb[0]))
-				g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+				g.P("		return false")
 				g.P("	}")
 				g.P("	f_", i, " := (b[0] & 2) != 0")
 				g.P("	b = b[1:]")
 			} else {
 				g.P(fmt.Sprintf("	if (b[0]&^4) != 0x%02x || b[1] != 0x%02x {", tb[0], tb[1]))
-				g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+				g.P("		return false")
 				g.P("	}")
 				g.P("	f_", i, " := (b[0] & 4) != 0")
 				g.P("	b = b[2:]")
@@ -424,7 +449,7 @@ func emitFlatScalarUnmarshal(g *protogen.GeneratedFile, typeName string, ordered
 			tagConds = append(tagConds, fmt.Sprintf("b[%d] != 0x%02x", ti, bByte))
 		}
 		g.P("	if ", strings.Join(tagConds, " || "), " {")
-		g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+		g.P("		return false")
 		g.P("	}")
 		g.P("	b = b[", len(tb), ":]")
 
@@ -439,7 +464,7 @@ func emitFlatScalarUnmarshal(g *protogen.GeneratedFile, typeName string, ordered
 			} else {
 				g.P("	if vn_", i, " == 0 {")
 			}
-			g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+			g.P("		return false")
 			g.P("	}")
 			g.P("	b = b[vn_", i, ":]")
 			switch f.Desc.Kind() {
@@ -483,7 +508,7 @@ func emitFlatScalarUnmarshal(g *protogen.GeneratedFile, typeName string, ordered
 			} else {
 				g.P("	if sn_", i, " == 0 || sLen_", i, " > uint64(len(b)-sn_", i, ") {")
 			}
-			g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+			g.P("		return false")
 			g.P("	}")
 			g.P("	end_", i, " := sn_", i, " + int(sLen_", i, ")")
 			g.P("	s_", i, " := b[sn_", i, ":end_", i, "]")
@@ -496,7 +521,7 @@ func emitFlatScalarUnmarshal(g *protogen.GeneratedFile, typeName string, ordered
 			} else {
 				g.P("	if bn_", i, " == 0 || bLen_", i, " > uint64(len(b)-bn_", i, ") {")
 			}
-			g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+			g.P("		return false")
 			g.P("	}")
 			g.P("	end_", i, " := bn_", i, " + int(bLen_", i, ")")
 			g.P("	b_", i, " := b[bn_", i, ":end_", i, ":end_", i, "]")
@@ -507,7 +532,7 @@ func emitFlatScalarUnmarshal(g *protogen.GeneratedFile, typeName string, ordered
 
 	if tailBytes == 0 {
 		g.P("	if len(b) != 0 {")
-		g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+		g.P("		return false")
 		g.P("	}")
 	}
 
@@ -517,7 +542,7 @@ func emitFlatScalarUnmarshal(g *protogen.GeneratedFile, typeName string, ordered
 			asciiChecks = append(asciiChecks, fmt.Sprintf("!wire.IsASCII(s_%d)", sf.idx))
 		}
 		g.P("	if ", strings.Join(asciiChecks, " || "), " {")
-		g.P("		return x.decodeOmniBuf(data, zeroCopy, 0, false)")
+		g.P("		return false")
 		g.P("	}")
 	}
 
@@ -573,7 +598,7 @@ func emitFlatScalarUnmarshal(g *protogen.GeneratedFile, typeName string, ordered
 		g.P("	}")
 	}
 
-	g.P("	return nil")
+	g.P("	return true")
 	g.P("}")
 	g.P()
 }

@@ -116,61 +116,68 @@ func (x *AllTypesSubMsg) clearUnseenOmniBuf(seenMask uint64) {
 
 var _omnibufProtoState_AllTypesSubMsg = omnibuf.InspectProtoState[AllTypesSubMsg]()
 
-// UnmarshalOmniBuf decodes data into AllTypesSubMsg using generated switch dispatch.
+// UnmarshalOmniBuf decodes data into AllTypesSubMsg using generated fast path with switch fallback.
 func (x *AllTypesSubMsg) UnmarshalOmniBuf(data []byte, zeroCopy bool) error {
 	if x == nil {
 		return fmt.Errorf("omnibuf: Unmarshal requires non-nil pointer")
 	}
+	if x.unmarshalFlatFast(data, zeroCopy) {
+		return nil
+	}
+	return x.decodeOmniBuf(data, zeroCopy, 0, false)
+}
+
+func (x *AllTypesSubMsg) unmarshalFlatFast(data []byte, zeroCopy bool) bool {
 	b := data
 	if len(b) < 7 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	if b[0] != 0x21 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	b = b[1:]
 	v_0, vn_0 := wire.DecodeVarint(b)
 	if vn_0 == 0 || len(b)-vn_0 < 5 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	b = b[vn_0:]
 	if b[0] != 0x55 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	b = b[1:]
 	sLen_1, sn_1 := wire.DecodeVarint(b)
 	if sn_1 == 0 || len(b)-sn_1 < 3 || sLen_1 > uint64(len(b)-sn_1-3) {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	end_1 := sn_1 + int(sLen_1)
 	s_1 := b[sn_1:end_1]
 	b = b[end_1:]
 	if (b[0] &^ 2) != 0x65 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	f_2 := (b[0] & 2) != 0
 	b = b[1:]
 	if b[0] != 0x83 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	b = b[1:]
 	v_3, vn_3 := wire.DecodeVarint(b)
 	if vn_3 == 0 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	b = b[vn_3:]
 	if len(b) != 0 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	if !wire.IsASCII(s_1) {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	_omnibufProtoState_AllTypesSubMsg.Reset(unsafe.Pointer(x), false)
 	x.Id = uint32(v_0)
 	x.Flag = f_2
 	x.Score = wire.DecodeZigZag(v_3)
 	x.Label = wire.DecodeStr(s_1, zeroCopy)
-	return nil
+	return true
 }
 
 //go:noinline
@@ -777,7 +784,8 @@ func (x *TestAllTypes) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merg
 			}
 			subMerge := merge || (seenMask&(1<<7)) != 0
 			seenMask |= 1 << 7
-			if err := x.F8SubMsg.decodeOmniBuf(data[pos:pos+int(subLen)], zeroCopy, depth+1, subMerge); err != nil {
+			if !subMerge && depth+1 <= omnibuf.MaxNestingDepth && x.F8SubMsg.unmarshalFlatFast(data[pos:pos+int(subLen)], zeroCopy) {
+			} else if err := x.F8SubMsg.decodeOmniBuf(data[pos:pos+int(subLen)], zeroCopy, depth+1, subMerge); err != nil {
 				return err
 			}
 			pos += int(subLen)
@@ -951,7 +959,8 @@ func (x *TestAllTypes) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merg
 				if x.F11SubMsgArr[start+i] == nil {
 					x.F11SubMsgArr[start+i] = new(AllTypesSubMsg)
 				}
-				if err := x.F11SubMsgArr[start+i].decodeOmniBuf(body[p:p+int(el)], zeroCopy, depth+2, false); err != nil {
+				if depth+2 <= omnibuf.MaxNestingDepth && x.F11SubMsgArr[start+i].unmarshalFlatFast(body[p:p+int(el)], zeroCopy) {
+				} else if err := x.F11SubMsgArr[start+i].decodeOmniBuf(body[p:p+int(el)], zeroCopy, depth+2, false); err != nil {
 					if reused && firstOcc {
 						clear(oldSlice[:max(oldLen, total)])
 						x.F11SubMsgArr = oldSlice[:0]

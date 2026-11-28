@@ -134,70 +134,77 @@ func (x *Location) clearUnseenOmniBuf(seenMask uint64) {
 
 var _omnibufProtoState_Location = omnibuf.InspectProtoState[Location]()
 
-// UnmarshalOmniBuf decodes data into Location using generated switch dispatch.
+// UnmarshalOmniBuf decodes data into Location using generated fast path with switch fallback.
 func (x *Location) UnmarshalOmniBuf(data []byte, zeroCopy bool) error {
 	if x == nil {
 		return fmt.Errorf("omnibuf: Unmarshal requires non-nil pointer")
 	}
+	if x.unmarshalFlatFast(data, zeroCopy) {
+		return nil
+	}
+	return x.decodeOmniBuf(data, zeroCopy, 0, false)
+}
+
+func (x *Location) unmarshalFlatFast(data []byte, zeroCopy bool) bool {
 	b := data
 	if len(b) < 18 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	if b[0] != 0x35 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	b = b[1:]
 	sLen_0, sn_0 := wire.DecodeVarint(b)
 	if sn_0 == 0 || len(b)-sn_0 < 16 || sLen_0 > uint64(len(b)-sn_0-16) {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	end_0 := sn_0 + int(sLen_0)
 	s_0 := b[sn_0:end_0]
 	b = b[end_0:]
 	if b[0] != 0x55 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	b = b[1:]
 	sLen_1, sn_1 := wire.DecodeVarint(b)
 	if sn_1 == 0 || len(b)-sn_1 < 14 || sLen_1 > uint64(len(b)-sn_1-14) {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	end_1 := sn_1 + int(sLen_1)
 	s_1 := b[sn_1:end_1]
 	b = b[end_1:]
 	if b[0] != 0x75 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	b = b[1:]
 	sLen_2, sn_2 := wire.DecodeVarint(b)
 	if sn_2 == 0 || len(b)-sn_2 < 12 || sLen_2 > uint64(len(b)-sn_2-12) {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	end_2 := sn_2 + int(sLen_2)
 	s_2 := b[sn_2:end_2]
 	b = b[end_2:]
 	if b[0] != 0x81 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	b = b[1:]
 	v_3, vn_3 := wire.DecodeVarint(b)
 	if vn_3 == 0 || len(b)-vn_3 < 10 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	b = b[vn_3:]
 	if len(b) != 10 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	if b[0] != 0xb1 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	f_4 := math.Float32frombits(binary.LittleEndian.Uint32(b[1:]))
 	if b[5] != 0xd1 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	f_5 := math.Float32frombits(binary.LittleEndian.Uint32(b[6:]))
 	if !wire.IsASCII(s_0) || !wire.IsASCII(s_1) || !wire.IsASCII(s_2) {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	_omnibufProtoState_Location.Reset(unsafe.Pointer(x), false)
 	x.Rack = uint32(v_3)
@@ -238,7 +245,7 @@ func (x *Location) UnmarshalOmniBuf(data []byte, zeroCopy bool) error {
 		x.Datacenter = string(s_1)
 		x.City = string(s_2)
 	}
-	return nil
+	return true
 }
 
 //go:noinline
@@ -600,60 +607,67 @@ func (x *Neighbor) clearUnseenOmniBuf(seenMask uint64) {
 
 var _omnibufProtoState_Neighbor = omnibuf.InspectProtoState[Neighbor]()
 
-// UnmarshalOmniBuf decodes data into Neighbor using generated switch dispatch.
+// UnmarshalOmniBuf decodes data into Neighbor using generated fast path with switch fallback.
 func (x *Neighbor) UnmarshalOmniBuf(data []byte, zeroCopy bool) error {
 	if x == nil {
 		return fmt.Errorf("omnibuf: Unmarshal requires non-nil pointer")
 	}
+	if x.unmarshalFlatFast(data, zeroCopy) {
+		return nil
+	}
+	return x.decodeOmniBuf(data, zeroCopy, 0, false)
+}
+
+func (x *Neighbor) unmarshalFlatFast(data []byte, zeroCopy bool) bool {
 	b := data
 	if len(b) < 7 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	if b[0] != 0x21 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	b = b[1:]
 	v_0, vn_0 := wire.DecodeVarint(b)
 	if vn_0 == 0 || len(b)-vn_0 < 5 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	b = b[vn_0:]
 	if b[0] != 0x55 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	b = b[1:]
 	sLen_1, sn_1 := wire.DecodeVarint(b)
 	if sn_1 == 0 || len(b)-sn_1 < 3 || sLen_1 > uint64(len(b)-sn_1-3) {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	end_1 := sn_1 + int(sLen_1)
 	s_1 := b[sn_1:end_1]
 	b = b[end_1:]
 	if b[0] != 0x61 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	b = b[1:]
 	v_2, vn_2 := wire.DecodeVarint(b)
 	if vn_2 == 0 || len(b)-vn_2 < 1 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	b = b[vn_2:]
 	if len(b) != 1 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	if (b[0] &^ 2) != 0x85 {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	f_3 := (b[0] & 2) != 0
 	if !wire.IsASCII(s_1) {
-		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+		return false
 	}
 	_omnibufProtoState_Neighbor.Reset(unsafe.Pointer(x), false)
 	x.PeerAsn = uint32(v_0)
 	x.LatencyUs = uint32(v_2)
 	x.Established = f_3
 	x.Router = wire.DecodeStr(s_1, zeroCopy)
-	return nil
+	return true
 }
 
 //go:noinline
@@ -1098,14 +1112,425 @@ func (x *PeerUpdate) clearUnseenOmniBuf(seenMask uint64) {
 
 var _omnibufProtoState_PeerUpdate = omnibuf.InspectProtoState[PeerUpdate]()
 
-// UnmarshalOmniBuf decodes data into PeerUpdate using generated switch dispatch.
+// UnmarshalOmniBuf decodes data into PeerUpdate using generated canonical fast path with switch fallback.
 func (x *PeerUpdate) UnmarshalOmniBuf(data []byte, zeroCopy bool) error {
 	if x == nil {
 		return fmt.Errorf("omnibuf: Unmarshal requires non-nil pointer")
 	}
-	return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	b := data
+	if len(b) < 38 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	if b[0] != 0x21 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[1:]
+	v_0, vn_0 := wire.DecodeVarint(b)
+	if vn_0 == 0 || len(b)-vn_0 < 36 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[vn_0:]
+	if b[0] != 0x55 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[1:]
+	sLen_1, sn_1 := wire.DecodeVarint(b)
+	if sn_1 == 0 || len(b)-sn_1 < 34 || sLen_1 > uint64(len(b)-sn_1-34) {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	end_1 := sn_1 + int(sLen_1)
+	s_1 := b[sn_1:end_1]
+	b = b[end_1:]
+	if (b[0] &^ 2) != 0x65 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	f_2 := (b[0] & 2) != 0
+	b = b[1:]
+	if b[0] != 0x81 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[1:]
+	v_3, vn_3 := wire.DecodeVarint(b)
+	if vn_3 == 0 || len(b)-vn_3 < 31 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[vn_3:]
+	if b[0] != 0xa3 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[1:]
+	v_4, vn_4 := wire.DecodeVarint(b)
+	if vn_4 == 0 || len(b)-vn_4 < 29 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[vn_4:]
+	if b[0] != 0xd3 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[1:]
+	f_5 := math.Float64frombits(binary.LittleEndian.Uint64(b))
+	b = b[8:]
+	if b[0] != 0xfb {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[1:]
+	aLen_6, an_6 := wire.DecodeVarint(b)
+	if an_6 == 0 || len(b)-an_6 < 16 || aLen_6 > uint64(len(b)-an_6-16) {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	end_6 := an_6 + int(aLen_6)
+	body_6 := b[an_6:end_6]
+	b = b[end_6:]
+	if len(body_6) < 2 || body_6[0] != wire.WireString {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	cu_6, cn_6 := wire.DecodeVarint(body_6[1:])
+	if cn_6 == 0 || cu_6 > uint64(len(body_6)-(1+cn_6)) {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	if b[0] != 0x36 || b[1] != 0x02 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[2:]
+	aLen_7, an_7 := wire.DecodeVarint(b)
+	if an_7 == 0 || len(b)-an_7 < 11 || aLen_7 > uint64(len(b)-an_7-11) {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	end_7 := an_7 + int(aLen_7)
+	body_7 := b[an_7:end_7]
+	b = b[end_7:]
+	if len(body_7) < 2 || body_7[0] != wire.WireUint {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	cu_7, cn_7 := wire.DecodeVarint(body_7[1:])
+	if cn_7 == 0 || cu_7 > uint64(len(body_7)-(1+cn_7)) {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	if b[0] != 0x72 || b[1] != 0x02 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[2:]
+	subLen_8, sn_8 := wire.DecodeVarint(b)
+	if sn_8 == 0 || len(b)-sn_8 < 8 || subLen_8 > uint64(len(b)-sn_8-8) {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	end_8 := sn_8 + int(subLen_8)
+	sub_8 := b[sn_8:end_8]
+	b = b[end_8:]
+	if b[0] != 0xb6 || b[1] != 0x02 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[2:]
+	aLen_9, an_9 := wire.DecodeVarint(b)
+	if an_9 == 0 || len(b)-an_9 < 3 || aLen_9 > uint64(len(b)-an_9-3) {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	end_9 := an_9 + int(aLen_9)
+	body_9 := b[an_9:end_9]
+	b = b[end_9:]
+	if len(body_9) < 2 || body_9[0] != wire.WireSubMsg {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	cu_9, cn_9 := wire.DecodeVarint(body_9[1:])
+	if cn_9 == 0 || cu_9 > uint64(len(body_9)-(1+cn_9)) {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	if b[0] != 0xc2 || b[1] != 0x02 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[2:]
+	v_10, vn_10 := wire.DecodeVarint(b)
+	if vn_10 == 0 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	b = b[vn_10:]
+	if len(b) != 0 {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	if !wire.IsASCII(s_1) || !wire.IsASCII(body_6) {
+		return x.decodeOmniBuf(data, zeroCopy, 0, false)
+	}
+	_omnibufProtoState_PeerUpdate.Reset(unsafe.Pointer(x), false)
+	x.Asn = uint32(v_0)
+	x.Active = f_2
+	x.UptimeSec = v_3
+	x.RssiDbm = int32(wire.DecodeZigZag(v_4))
+	x.CpuLoad = f_5
+	x.Sequence = v_10
+	x.RouterId = wire.DecodeStr(s_1, zeroCopy)
+	{
+		body := body_6
+		count := int(cu_6)
+		p := 1 + cn_6
+		bLen := len(body)
+		oldSlice := x.Tags
+		oldLen := len(oldSlice)
+		reused := false
+		if cap(oldSlice) < count {
+			x.Tags = make([]string, count)
+		} else {
+			x.Tags = oldSlice[:count]
+			reused = true
+		}
+		dst := x.Tags
+		if zeroCopy {
+			for i := 0; i < count; i++ {
+				if p >= bLen {
+					if reused {
+						clear(oldSlice[:max(oldLen, count)])
+						x.Tags = oldSlice[:0]
+					}
+					return fmt.Errorf("omnibuf: invalid string element")
+				}
+				var l int
+				if lb := body[p]; (lb & 1) != 0 {
+					l = int(lb >> 1)
+					p++
+				} else {
+					lu, ln := wire.DecodeVarint(body[p:])
+					if ln == 0 || lu > uint64(bLen-(p+ln)) {
+						if reused {
+							clear(oldSlice[:max(oldLen, count)])
+							x.Tags = oldSlice[:0]
+						}
+						return fmt.Errorf("omnibuf: invalid string element")
+					}
+					l = int(lu)
+					p += ln
+				}
+				if l > bLen-p {
+					if reused {
+						clear(oldSlice[:max(oldLen, count)])
+						x.Tags = oldSlice[:0]
+					}
+					return fmt.Errorf("omnibuf: invalid string element")
+				}
+				if l > 0 {
+					dst[i] = unsafe.String(&body[p], l)
+					p += l
+				} else {
+					dst[i] = ""
+				}
+			}
+		} else if remBytes := bLen - p; count >= 2 && remBytes > 0 && remBytes <= 256 {
+			sb := make([]byte, remBytes)
+			strOff := 0
+			all := unsafe.String(&sb[0], remBytes)
+			for i := 0; i < count; i++ {
+				if p >= bLen {
+					if reused {
+						clear(oldSlice[:max(oldLen, count)])
+						x.Tags = oldSlice[:0]
+					}
+					return fmt.Errorf("omnibuf: invalid string element")
+				}
+				var l int
+				if lb := body[p]; (lb & 1) != 0 {
+					l = int(lb >> 1)
+					p++
+				} else {
+					lu, ln := wire.DecodeVarint(body[p:])
+					if ln == 0 || lu > uint64(bLen-(p+ln)) {
+						if reused {
+							clear(oldSlice[:max(oldLen, count)])
+							x.Tags = oldSlice[:0]
+						}
+						return fmt.Errorf("omnibuf: invalid string element")
+					}
+					l = int(lu)
+					p += ln
+				}
+				if l > bLen-p {
+					if reused {
+						clear(oldSlice[:max(oldLen, count)])
+						x.Tags = oldSlice[:0]
+					}
+					return fmt.Errorf("omnibuf: invalid string element")
+				}
+				if l > 0 {
+					nextOff := wire.CopyBytesAt(sb, strOff, body[p:p+l])
+					dst[i] = all[strOff:nextOff]
+					strOff = nextOff
+					p += l
+				} else {
+					dst[i] = ""
+				}
+			}
+		} else {
+			for i := 0; i < count; i++ {
+				if p >= bLen {
+					if reused {
+						clear(oldSlice[:max(oldLen, count)])
+						x.Tags = oldSlice[:0]
+					}
+					return fmt.Errorf("omnibuf: invalid string element")
+				}
+				var l int
+				if lb := body[p]; (lb & 1) != 0 {
+					l = int(lb >> 1)
+					p++
+				} else {
+					lu, ln := wire.DecodeVarint(body[p:])
+					if ln == 0 || lu > uint64(bLen-(p+ln)) {
+						if reused {
+							clear(oldSlice[:max(oldLen, count)])
+							x.Tags = oldSlice[:0]
+						}
+						return fmt.Errorf("omnibuf: invalid string element")
+					}
+					l = int(lu)
+					p += ln
+				}
+				if l > bLen-p {
+					if reused {
+						clear(oldSlice[:max(oldLen, count)])
+						x.Tags = oldSlice[:0]
+					}
+					return fmt.Errorf("omnibuf: invalid string element")
+				}
+				dst[i] = string(body[p : p+l])
+				p += l
+			}
+		}
+		if p != bLen {
+			if reused {
+				clear(oldSlice[:max(oldLen, count)])
+				x.Tags = oldSlice[:0]
+			}
+			return fmt.Errorf("omnibuf: string array trailing bytes")
+		}
+		if reused && count < oldLen {
+			clear(oldSlice[count:oldLen])
+		}
+	}
+	{
+		body := body_7
+		count := int(cu_7)
+		p := 1 + cn_7
+		bLen := len(body)
+		if cap(x.Prefixes) < count {
+			x.Prefixes = make([]uint32, count)
+		} else {
+			x.Prefixes = x.Prefixes[:count]
+		}
+		dst := x.Prefixes
+		for i := 0; i < count; i++ {
+			if p >= bLen {
+				return fmt.Errorf("omnibuf: invalid uint32 element")
+			}
+			b0 := body[p]
+			if (b0 & 1) != 0 {
+				dst[i] = uint32(b0 >> 1)
+				p++
+			} else if (b0 & 2) != 0 {
+				if p+2 > bLen {
+					return fmt.Errorf("omnibuf: invalid uint32 element")
+				}
+				dst[i] = uint32(binary.LittleEndian.Uint16(body[p:]) >> 2)
+				p += 2
+			} else if (b0 & 4) != 0 {
+				if p+4 > bLen {
+					return fmt.Errorf("omnibuf: invalid uint32 element")
+				}
+				dst[i] = uint32(binary.LittleEndian.Uint32(body[p:]) >> 3)
+				p += 4
+			} else if b0 == 0 && p+9 <= bLen {
+				dst[i] = uint32(binary.LittleEndian.Uint64(body[p+1:]))
+				p += 9
+			} else {
+				return fmt.Errorf("omnibuf: invalid uint32 element")
+			}
+		}
+		if p != bLen {
+			return fmt.Errorf("omnibuf: uint32 array trailing bytes")
+		}
+	}
+	if x.Location == nil {
+		x.Location = new(Location)
+	}
+	if !x.Location.unmarshalFlatFast(sub_8, zeroCopy) {
+		if err := x.Location.decodeOmniBuf(sub_8, zeroCopy, 1, false); err != nil {
+			return err
+		}
+	}
+	{
+		body := body_9
+		count := int(cu_9)
+		p := 1 + cn_9
+		bLen := len(body)
+		oldSlice := x.Neighbors
+		oldLen := len(oldSlice)
+		reused := false
+		if cap(oldSlice) < count {
+			if _, ok := wire.CountSubMsgArrElems(body); !ok {
+				return fmt.Errorf("omnibuf: invalid submsg array")
+			}
+			slab := make([]Neighbor, count)
+			next := make([]*Neighbor, count)
+			for i := 0; i < count; i++ {
+				next[i] = &slab[i]
+			}
+			x.Neighbors = next
+		} else {
+			x.Neighbors = oldSlice[:count]
+			reused = true
+		}
+		dst := x.Neighbors
+		for i := 0; i < count; i++ {
+			var el int
+			if p < bLen && (body[p]&1) != 0 {
+				el = int(body[p] >> 1)
+				p++
+			} else {
+				elu, en := wire.DecodeVarint(body[p:])
+				if en == 0 || elu > uint64(bLen-(p+en)) {
+					if reused {
+						clear(oldSlice[:max(oldLen, count)])
+						x.Neighbors = oldSlice[:0]
+					}
+					return fmt.Errorf("omnibuf: invalid submsg elem length")
+				}
+				el = int(elu)
+				p += en
+			}
+			if el > bLen-p {
+				if reused {
+					clear(oldSlice[:max(oldLen, count)])
+					x.Neighbors = oldSlice[:0]
+				}
+				return fmt.Errorf("omnibuf: invalid submsg elem length")
+			}
+			elem := dst[i]
+			if elem == nil {
+				elem = new(Neighbor)
+				dst[i] = elem
+			}
+			if !elem.unmarshalFlatFast(body[p:p+el], zeroCopy) {
+				if err := elem.decodeOmniBuf(body[p:p+el], zeroCopy, 2, false); err != nil {
+					if reused {
+						clear(oldSlice[:max(oldLen, count)])
+						x.Neighbors = oldSlice[:0]
+					}
+					return err
+				}
+			}
+			p += el
+		}
+		if p != bLen {
+			if reused {
+				clear(oldSlice[:max(oldLen, count)])
+				x.Neighbors = oldSlice[:0]
+			}
+			return fmt.Errorf("omnibuf: submsg array trailing bytes")
+		}
+		if reused && count < oldLen {
+			clear(oldSlice[count:oldLen])
+		}
+	}
+	return nil
 }
 
+//go:noinline
 func (x *PeerUpdate) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merge bool) error {
 	if depth > omnibuf.MaxNestingDepth {
 		return fmt.Errorf("omnibuf: max nesting depth exceeded")
@@ -1312,7 +1737,8 @@ func (x *PeerUpdate) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merge 
 			}
 			subMerge := merge || (seenMask&(1<<8)) != 0
 			seenMask |= 1 << 8
-			if err := x.Location.decodeOmniBuf(data[pos:pos+int(subLen)], zeroCopy, depth+1, subMerge); err != nil {
+			if !subMerge && depth+1 <= omnibuf.MaxNestingDepth && x.Location.unmarshalFlatFast(data[pos:pos+int(subLen)], zeroCopy) {
+			} else if err := x.Location.decodeOmniBuf(data[pos:pos+int(subLen)], zeroCopy, depth+1, subMerge); err != nil {
 				return err
 			}
 			pos += int(subLen)
@@ -1374,7 +1800,8 @@ func (x *PeerUpdate) decodeOmniBuf(data []byte, zeroCopy bool, depth int, merge 
 				if x.Neighbors[start+i] == nil {
 					x.Neighbors[start+i] = new(Neighbor)
 				}
-				if err := x.Neighbors[start+i].decodeOmniBuf(body[p:p+int(el)], zeroCopy, depth+2, false); err != nil {
+				if depth+2 <= omnibuf.MaxNestingDepth && x.Neighbors[start+i].unmarshalFlatFast(body[p:p+int(el)], zeroCopy) {
+				} else if err := x.Neighbors[start+i].decodeOmniBuf(body[p:p+int(el)], zeroCopy, depth+2, false); err != nil {
 					if reused && firstOcc {
 						clear(oldSlice[:max(oldLen, total)])
 						x.Neighbors = oldSlice[:0]

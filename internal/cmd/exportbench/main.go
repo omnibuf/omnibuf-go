@@ -191,12 +191,12 @@ func buildReport(goos, goarch, cpu string, metrics map[string]parsedMetric) Benc
 	}
 
 	decodeSpecs := []rowSpec{
-		{benchKey: "BenchmarkVTProto_UnmarshalVTUnsafe_StructReuse", label: "Protobuf (vtprotobuf)", highlight: false},
 		{benchKey: "BenchmarkPlugin_Unmarshal_PBStruct_ZeroCopyReuse", label: "OmniBuf (Generated)", highlight: true, baseline: true},
+		{benchKey: "BenchmarkVTProto_UnmarshalVTUnsafe_StructReuse", label: "Protobuf (vtprotobuf)", highlight: false},
 		{benchKey: "BenchmarkUnmarshal_FlatBuffers_ZeroCopy", label: "FlatBuffers"},
+		{benchKey: "BenchmarkPlugin_Unmarshal_PBStruct_FreshAlloc", label: "OmniBuf (Safe Alloc)", highlight: true},
 		{benchKey: "BenchmarkTable_Unmarshal_ValueStruct_ZeroCopyReuse", label: "OmniBuf (Go Struct Tags)", highlight: true},
 		{benchKey: "BenchmarkUnmarshal_Avro_Reuse", label: "Avro (Raw Binary)"},
-		{benchKey: "BenchmarkPlugin_Unmarshal_PBStruct_FreshAlloc", label: "OmniBuf (Safe Alloc)", highlight: true},
 		{benchKey: "BenchmarkVTProto_UnmarshalVT_FreshAlloc", label: "Protobuf (vtprotobuf Safe)"},
 		{benchKey: "BenchmarkUnmarshal_CapnProto_ZeroCopy", label: "Cap'n Proto"},
 		{benchKey: "BenchmarkUnmarshal_Protobuf_Official", label: "Protobuf"},

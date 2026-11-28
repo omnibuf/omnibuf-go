@@ -662,3 +662,255 @@ func TestFlatScalarRoundTripAndEdgeCases(t *testing.T) {
 		t.Fatalf("flat scalar fast path test failed:\n%s", out)
 	}
 }
+
+func TestCanonicalFastPath(t *testing.T) {
+	opt := descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL
+	rep := descriptorpb.FieldDescriptorProto_LABEL_REPEATED
+	f := func(name string, num int32, label descriptorpb.FieldDescriptorProto_Label, typ descriptorpb.FieldDescriptorProto_Type, typeName string) *descriptorpb.FieldDescriptorProto {
+		fd := &descriptorpb.FieldDescriptorProto{
+			Name:   proto.String(name),
+			Number: proto.Int32(num),
+			Label:  label.Enum(),
+			Type:   typ.Enum(),
+		}
+		if typeName != "" {
+			fd.TypeName = proto.String(typeName)
+		}
+		return fd
+	}
+	fdp := &descriptorpb.FileDescriptorProto{
+		Syntax:  proto.String("proto3"),
+		Name:    proto.String("omnibuf/audit/canon.proto"),
+		Package: proto.String("omnibuf.audit"),
+		Options: &descriptorpb.FileOptions{
+			GoPackage: proto.String("github.com/omnibuf/omnibuf-go/omnibufproto/internal/pb;pb"),
+		},
+		MessageType: []*descriptorpb.DescriptorProto{
+			{
+				Name: proto.String("CanonChild"),
+				Field: []*descriptorpb.FieldDescriptorProto{
+					f("code", 1, opt, descriptorpb.FieldDescriptorProto_TYPE_UINT32, ""),
+					f("label", 2, opt, descriptorpb.FieldDescriptorProto_TYPE_STRING, ""),
+					f("ok", 3, opt, descriptorpb.FieldDescriptorProto_TYPE_BOOL, ""),
+				},
+			},
+			{
+				Name: proto.String("CanonParent"),
+				Field: []*descriptorpb.FieldDescriptorProto{
+					f("id", 1, opt, descriptorpb.FieldDescriptorProto_TYPE_UINT32, ""),
+					f("name", 2, opt, descriptorpb.FieldDescriptorProto_TYPE_STRING, ""),
+					f("active", 3, opt, descriptorpb.FieldDescriptorProto_TYPE_BOOL, ""),
+					f("tags", 4, rep, descriptorpb.FieldDescriptorProto_TYPE_STRING, ""),
+					f("nums", 5, rep, descriptorpb.FieldDescriptorProto_TYPE_UINT32, ""),
+					f("bigs", 6, rep, descriptorpb.FieldDescriptorProto_TYPE_UINT64, ""),
+					f("primary", 7, opt, descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, ".omnibuf.audit.CanonChild"),
+					f("children", 8, rep, descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, ".omnibuf.audit.CanonChild"),
+					f("seq", 9, opt, descriptorpb.FieldDescriptorProto_TYPE_UINT64, ""),
+				},
+			},
+		},
+	}
+	req := &pluginpb.CodeGeneratorRequest{
+		FileToGenerate: []string{"omnibuf/audit/canon.proto"},
+		ProtoFile:      []*descriptorpb.FileDescriptorProto{fdp},
+	}
+
+	gen, err := protogen.Options{}.New(req)
+	if err != nil {
+		t.Fatalf("protogen.New: %v", err)
+	}
+	generateFile(gen, gen.Files[0])
+	resp := gen.Response()
+	if resp.GetError() != "" {
+		t.Fatalf("generateFile error: %s", resp.GetError())
+	}
+
+	dir := t.TempDir()
+	generated := filepath.Join(dir, "canon_wire.pb.go")
+	testFile := filepath.Join(dir, "canon_test.go")
+	if err := os.WriteFile(generated, []byte(resp.File[0].GetContent()), 0o600); err != nil {
+		t.Fatalf("write generated file: %v", err)
+	}
+
+	testSource := `package pb
+
+import (
+	"bytes"
+	"math"
+	"slices"
+	"strings"
+	"testing"
+)
+
+type CanonChild struct {
+	Code  uint32
+	Label string
+	Ok    bool
+}
+
+type CanonParent struct {
+	Id       uint32
+	Name     string
+	Active   bool
+	Tags     []string
+	Nums     []uint32
+	Bigs     []uint64
+	Primary  *CanonChild
+	Children []*CanonChild
+	Seq      uint64
+}
+
+func equalChild(a, b *CanonChild) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func equalParent(a, b CanonParent) bool {
+	if a.Id != b.Id || a.Name != b.Name || a.Active != b.Active || a.Seq != b.Seq {
+		return false
+	}
+	if !slices.Equal(a.Tags, b.Tags) || !slices.Equal(a.Nums, b.Nums) || !slices.Equal(a.Bigs, b.Bigs) {
+		return false
+	}
+	if !equalChild(a.Primary, b.Primary) {
+		return false
+	}
+	return slices.EqualFunc(a.Children, b.Children, equalChild)
+}
+
+func TestCanonicalParentRoundTripAndFallbacks(t *testing.T) {
+	cases := []CanonParent{
+		// Canonical ASCII + 1/2/4/9-byte varints + slabbed safe Tags.
+		{
+			Id:       64512,
+			Name:     "edge-rtr-01",
+			Active:   true,
+			Tags:     []string{"tier1", "ebgp", "", "eu-central", "ixp-de-cix"},
+			Nums:     []uint32{0, 63, 16383, 167772160, 3232235520, math.MaxUint32},
+			Bigs:     []uint64{1, 1000, 1 << 20, math.MaxUint64},
+			Primary:  &CanonChild{Code: 42, Label: "fra", Ok: true},
+			Children: []*CanonChild{{Code: 1, Label: "c1", Ok: true}, {Code: 2, Label: "c2", Ok: false}},
+			Seq:      9876543210,
+		},
+		// Empty repeated slices + nil Primary (forces fallback clearing stale submessage).
+		{
+			Id:       7,
+			Name:     "",
+			Active:   false,
+			Tags:     []string{},
+			Nums:     []uint32{},
+			Bigs:     []uint64{},
+			Primary:  nil,
+			Children: []*CanonChild{},
+			Seq:      0,
+		},
+		// >63B and >256B total Tags (2B length varint + bypasses safe slab).
+		{
+			Id:       9,
+			Name:     "long-tags",
+			Active:   true,
+			Tags:     []string{strings.Repeat("a", 70), strings.Repeat("b", 210)},
+			Nums:     []uint32{42},
+			Bigs:     []uint64{99},
+			Primary:  &CanonChild{Code: 7, Label: strings.Repeat("c", 80), Ok: false},
+			Children: []*CanonChild{{Code: 3, Label: strings.Repeat("d", 70), Ok: true}},
+			Seq:      123,
+		},
+		// Non-ASCII valid UTF-8 in top-level string, Tags, Primary, and Children.
+		{
+			Id:       11,
+			Name:     "héllo-🚀",
+			Active:   true,
+			Tags:     []string{"日本語", "café"},
+			Nums:     []uint32{1, 2},
+			Bigs:     []uint64{3},
+			Primary:  &CanonChild{Code: 5, Label: "münchen", Ok: true},
+			Children: []*CanonChild{{Code: 8, Label: "zürich", Ok: false}},
+			Seq:      456,
+		},
+	}
+
+	for idx, tc := range cases {
+		raw := tc.MarshalOmniBufAppend(nil)
+		selfDesc := tc.MarshalOmniBufSelfDescribingAppend(nil)
+		for _, pkt := range [][]byte{raw, selfDesc} {
+			for _, zc := range []bool{false, true} {
+				// Fresh struct decode
+				wCopy := append([]byte(nil), pkt...)
+				var fresh CanonParent
+				if err := fresh.UnmarshalOmniBuf(wCopy, zc); err != nil {
+					t.Fatalf("case %d (zc=%v) fresh unmarshal: %v", idx, zc, err)
+				}
+				if !zc {
+					for i := range wCopy {
+						wCopy[i] ^= 0xff
+					}
+				}
+				if !equalParent(fresh, tc) {
+					t.Fatalf("case %d (zc=%v) fresh mismatch:\ngot  %+v\nwant %+v", idx, zc, fresh, tc)
+				}
+
+				// Reused struct with larger stale slices and stale Primary
+				reused := CanonParent{
+					Id:       999,
+					Name:     "stale",
+					Active:   !tc.Active,
+					Tags:     []string{"s1", "s2", "s3", "s4", "s5", "s6"},
+					Nums:     []uint32{9, 8, 7, 6, 5, 4, 3},
+					Bigs:     []uint64{9, 8, 7, 6, 5},
+					Primary:  &CanonChild{Code: 88, Label: "stale-child", Ok: true},
+					Children: []*CanonChild{{Code: 99, Label: "x"}, {Code: 98, Label: "y"}, {Code: 97, Label: "z"}},
+					Seq:      777,
+				}
+				wCopy2 := append([]byte(nil), pkt...)
+				if err := reused.UnmarshalOmniBuf(wCopy2, zc); err != nil {
+					t.Fatalf("case %d (zc=%v) reused unmarshal: %v", idx, zc, err)
+				}
+				if !zc {
+					for i := range wCopy2 {
+						wCopy2[i] ^= 0xff
+					}
+				}
+				if !equalParent(reused, tc) {
+					t.Fatalf("case %d (zc=%v) reused mismatch:\ngot  %+v\nwant %+v", idx, zc, reused, tc)
+				}
+			}
+		}
+	}
+
+	// Invalid UTF-8 must always fail regardless of position or zeroCopy flag.
+	badUTF8 := string([]byte{0xff, 0xfe, 'a', 'b'})
+	badCases := []CanonParent{
+		{Id: 1, Name: badUTF8, Primary: &CanonChild{Code: 1, Label: "ok"}},
+		{Id: 1, Name: "ok", Tags: []string{"ok", badUTF8}, Primary: &CanonChild{Code: 1, Label: "ok"}},
+		{Id: 1, Name: "ok", Primary: &CanonChild{Code: 1, Label: badUTF8}},
+		{Id: 1, Name: "ok", Primary: &CanonChild{Code: 1, Label: "ok"}, Children: []*CanonChild{{Code: 1, Label: badUTF8}}},
+	}
+	for idx, bc := range badCases {
+		w := bc.MarshalOmniBufAppend(nil)
+		for _, zc := range []bool{false, true} {
+			var out CanonParent
+			if err := out.UnmarshalOmniBuf(w, zc); err == nil {
+				t.Fatalf("badCase %d (zc=%v): expected invalid UTF-8 error", idx, zc)
+			}
+		}
+	}
+
+	// Truncation at every byte offset must fail cleanly without panicking.
+	full := cases[0].MarshalOmniBufAppend(nil)
+	for cut := 1; cut < len(full); cut++ {
+		var out CanonParent
+		_ = out.UnmarshalOmniBuf(bytes.Clone(full[:cut]), true)
+		_ = out.UnmarshalOmniBuf(bytes.Clone(full[:cut]), false)
+	}
+}
+`
+	if err := os.WriteFile(testFile, []byte(testSource), 0o600); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	if out, err := runGoInRoot(t, "test", "-race", "-v", generated, testFile); err != nil {
+		t.Fatalf("canonical fast path test failed:\n%s", out)
+	}
+}

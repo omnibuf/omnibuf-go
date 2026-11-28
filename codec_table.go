@@ -213,10 +213,16 @@ func (p ProtoStateOffsets) Reset(ptr unsafe.Pointer, merge bool) {
 		return
 	}
 	if p.sizeCacheOff != noFieldOffset {
-		*(*int32)(unsafe.Add(ptr, p.sizeCacheOff)) = 0
+		sp := (*int32)(unsafe.Add(ptr, p.sizeCacheOff))
+		if *sp != 0 {
+			*sp = 0
+		}
 	}
 	if !merge && p.unknownFieldsOff != noFieldOffset {
-		*(*[]byte)(unsafe.Add(ptr, p.unknownFieldsOff)) = nil
+		up := (*[]byte)(unsafe.Add(ptr, p.unknownFieldsOff))
+		if *up != nil {
+			*up = nil
+		}
 	}
 }
 
