@@ -179,6 +179,7 @@ func buildRows(metrics map[string]parsedMetric, specs []rowSpec) []BenchRow {
 func buildReport(goos, goarch, cpu string, metrics map[string]parsedMetric) BenchReport {
 	encodeSpecs := []rowSpec{
 		{benchKey: "BenchmarkPlugin_Marshal_PBStruct_ReuseBuf", label: "OmniBuf (Generated)", wireBytes: 366, highlight: true, baseline: true},
+		{benchKey: "BenchmarkVTProto_MarshalToVT_ReuseBuf", label: "Protobuf (vtprotobuf)", wireBytes: 341},
 		{benchKey: "BenchmarkTable_Marshal_ValueStruct_ReuseBuf", label: "OmniBuf (Go Struct Tags)", wireBytes: 366, highlight: true},
 		{benchKey: "BenchmarkMarshal_Avro", label: "Avro (Raw Binary)", wireBytes: 313},
 		{benchKey: "BenchmarkMarshal_FlatBuffers_ReuseBuilder", label: "FlatBuffers", wireBytes: 600},
@@ -190,10 +191,13 @@ func buildReport(goos, goarch, cpu string, metrics map[string]parsedMetric) Benc
 	}
 
 	decodeSpecs := []rowSpec{
+		{benchKey: "BenchmarkVTProto_UnmarshalVTUnsafe_StructReuse", label: "Protobuf (vtprotobuf)", highlight: false},
 		{benchKey: "BenchmarkPlugin_Unmarshal_PBStruct_ZeroCopyReuse", label: "OmniBuf (Generated)", highlight: true, baseline: true},
 		{benchKey: "BenchmarkUnmarshal_FlatBuffers_ZeroCopy", label: "FlatBuffers"},
 		{benchKey: "BenchmarkTable_Unmarshal_ValueStruct_ZeroCopyReuse", label: "OmniBuf (Go Struct Tags)", highlight: true},
 		{benchKey: "BenchmarkUnmarshal_Avro_Reuse", label: "Avro (Raw Binary)"},
+		{benchKey: "BenchmarkPlugin_Unmarshal_PBStruct_FreshAlloc", label: "OmniBuf (Safe Alloc)", highlight: true},
+		{benchKey: "BenchmarkVTProto_UnmarshalVT_FreshAlloc", label: "Protobuf (vtprotobuf Safe)"},
 		{benchKey: "BenchmarkUnmarshal_CapnProto_ZeroCopy", label: "Cap'n Proto"},
 		{benchKey: "BenchmarkUnmarshal_Protobuf_Official", label: "Protobuf"},
 		{benchKey: "BenchmarkUnmarshal_Msgpack_Reuse", label: "MessagePack"},
@@ -205,6 +209,7 @@ func buildReport(goos, goarch, cpu string, metrics map[string]parsedMetric) Benc
 		{benchKey: "BenchmarkLookup_LocationCity_CapnProto_InPlace_ZeroCopy", label: "Cap'n Proto"},
 		{benchKey: "BenchmarkLookup_LocationCity_FlatBuffers_ZeroCopy", label: "FlatBuffers"},
 		{benchKey: "BenchmarkLookup_LocationCity_OmniBuf_ZeroCopy", label: "OmniBuf", highlight: true, baseline: true},
+		{benchKey: "BenchmarkVTProto_UnmarshalAndRead2Fields_PoolReuse", label: "Protobuf (vtprotobuf)"},
 		{benchKey: "BenchmarkLookup_LocationCity_Avro_SkipScan", label: "Avro (Raw Binary)"},
 		{benchKey: "BenchmarkLookup_LocationCity_Msgpack_SkipScan", label: "MessagePack"},
 		{benchKey: "BenchmarkLookup_LocationCity_Protobuf_Official_Unmarshal", label: "Protobuf"},
@@ -212,6 +217,7 @@ func buildReport(goos, goarch, cpu string, metrics map[string]parsedMetric) Benc
 
 	mutateSpecs := []rowSpec{
 		{benchKey: "BenchmarkPlugin_Opaque_ReadModifyWrite_Splice", label: "OmniBuf (Opaque Splice)", highlight: true, baseline: true},
+		{benchKey: "BenchmarkVTProto_ReadModifyWrite_PoolReuse", label: "Protobuf (vtprotobuf)"},
 		{benchKey: "BenchmarkFlatBuffers_ReadModifyWrite", label: "FlatBuffers"},
 		{benchKey: "BenchmarkAvro_ReadModifyWrite", label: "Avro (Raw Binary)"},
 		{benchKey: "BenchmarkProtobufOfficial_ReadModifyWrite", label: "Protobuf"},
@@ -223,6 +229,7 @@ func buildReport(goos, goarch, cpu string, metrics map[string]parsedMetric) Benc
 
 	encodeNestedShiftSpecs := []rowSpec{
 		{benchKey: "BenchmarkLargeNested_OmniBuf_Generated", label: "OmniBuf (Generated)", wireBytes: 39256, highlight: true, baseline: true},
+		{benchKey: "BenchmarkLargeNested_VTProto", label: "Protobuf (vtprotobuf)", wireBytes: 39227},
 		{benchKey: "BenchmarkLargeNested_OmniBuf_StructTags", label: "OmniBuf (Go Struct Tags)", wireBytes: 39256, highlight: true},
 		{benchKey: "BenchmarkLargeNested_Avro", label: "Avro (Raw Binary)", wireBytes: 39196},
 		{benchKey: "BenchmarkLargeNested_FlatBuffers", label: "FlatBuffers", wireBytes: 39488},
@@ -235,6 +242,7 @@ func buildReport(goos, goarch, cpu string, metrics map[string]parsedMetric) Benc
 
 	mutateEmbeddedGrowSpecs := []rowSpec{
 		{benchKey: "BenchmarkEmbeddedSubMsgGrow_OmniBuf_OpaqueSplice", label: "OmniBuf (Opaque Splice)", highlight: true, baseline: true},
+		{benchKey: "BenchmarkEmbeddedSubMsgGrow_VTProto", label: "Protobuf (vtprotobuf)"},
 		{benchKey: "BenchmarkEmbeddedSubMsgGrow_FlatBuffers", label: "FlatBuffers"},
 		{benchKey: "BenchmarkEmbeddedSubMsgGrow_Avro", label: "Avro (Raw Binary)"},
 		{benchKey: "BenchmarkEmbeddedSubMsgGrow_Protobuf_Official", label: "Protobuf"},
