@@ -9,7 +9,7 @@ replace (
 
 require (
 	connectrpc.com/connect/v2 v2.0.2
-	github.com/omnibuf/omnibuf-go v0.2.13
+	github.com/omnibuf/omnibuf-go v0.2.14
 	github.com/omnibuf/omnibuf-go/omnibufproto v0.2.13
 )
 
